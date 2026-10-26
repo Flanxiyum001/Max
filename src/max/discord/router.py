@@ -62,7 +62,7 @@ class RouteResult:
 
 
 # Commands available to everyone (in permitted contexts)
-PUBLIC_COMMANDS = {"help", "health", "status", "perms", "memory"}
+PUBLIC_COMMANDS = {"help", "health", "status", "perms", "memory", "task", "tasks"}
 # Commands that require an administrator (checked at execution time)
 ADMIN_COMMANDS = {"channels", "allow", "deny"}
 
@@ -71,6 +71,9 @@ USAGE = (
     "  !max help — this list\n"
     "  !max health | status | perms — service and permission diagnostics\n"
     "  !max memory show|set <key> <value>|forget <key>|clear — your own memory\n"
+    "  !max tasks — delegated task list (yours)\n"
+    "  !max task run <description> — plan and run a delegated task\n"
+    "  !max task <id> | diff <id> | cancel <id> — status, diff, cancellation\n"
     "Admin only:\n"
     "  !max channels — effective channel allowlist\n"
     "  !max allow <#channel|id> / !max deny <#channel|id> — edit allowlist"
@@ -87,6 +90,8 @@ class DiscordRouter:
         *,
         memory: UserMemoryStore | None = None,
         health_fn: Callable[[], dict] | None = None,
+        delegate_fn: Callable[["MessageView", str], str | None] | None = None,
+        orch_fn: Callable[[str, str, "MessageView"], list[str]] | None = None,
         clock=time.monotonic,
         limiter: RateLimiter | None = None,
         backoff: FailureBackoff | None = None,
@@ -98,6 +103,8 @@ class DiscordRouter:
         self.ask_fn = ask_fn
         self.memory = memory
         self.health_fn = health_fn
+        self.delegate_fn = delegate_fn
+        self.orch_fn = orch_fn
         self._clock = clock
         self.limiter = limiter or RateLimiter(
             cooldown_s=config.cooldown_s, clock=clock
@@ -275,6 +282,38 @@ class DiscordRouter:
             return RouteResult("command", replies=lines)
         if name == "memory":
             return self._memory_command(args, view)
+        if name in {"task", "tasks"}:
+            if self.orch_fn is None:
+                return RouteResult(
+                    "command",
+                    replies=["multi-agent orchestration is disabled (MAX_ORCH_ENABLE=0)"],
+                    error=True,
+                )
+            try:
+                replies = self.orch_fn(name, args, view)
+            except Exception as exc:  # noqa: BLE001 - orchestration must not kill the bot
+                self.audit.record("discord_task_error", actor=view.author_id, error=type(exc).__name__)
+                return RouteResult(
+                    "command",
+                    replies=[f"task operation failed ({type(exc).__name__})"],
+                    error=True,
+                )
+            self.audit.record(
+                "discord_task_command",
+                sub=(args.split()[0] if args.split() else "list")[0],
+                actor=view.author_id,
+                channel=view.channel_id,
+            )
+            return RouteResult(
+                "command",
+                replies=[
+                    part
+                    for reply in replies
+                    for part in chunk_message(reply, self.config.max_message_len)
+                ]
+                or ["no result"],
+                error=False,
+            )
         return RouteResult("command", replies=["unsupported command"], error=True)
 
     def _memory_command(self, args: str, view: MessageView) -> RouteResult:
@@ -390,6 +429,30 @@ class DiscordRouter:
             return RouteResult("suppressed", reason="provider_backoff")
 
         session = self.session_id(view)
+
+        # optional supervised multi-agent path — returns None for simple requests
+        if self.delegate_fn is not None:
+            try:
+                delegated = self.delegate_fn(view, content)
+            except Exception as exc:  # noqa: BLE001 - never break normal chat
+                self.audit.record("discord_delegate_error", error=type(exc).__name__)
+                delegated = None
+            if isinstance(delegated, str) and delegated.strip():
+                event = "discord_delegated_reply"
+                self.audit.record(
+                    event,
+                    channel=view.channel_id,
+                    guild=view.guild_id,
+                    session=session,
+                    actor=view.author_id,
+                )
+                return RouteResult(
+                    "reply",
+                    replies=chunk_message(delegated, self.config.max_message_len),
+                    session_id=session,
+                    audit_event=event,
+                )
+
         author_line = f"[{view.author_name} in #{view.channel_id}] " if not view.is_dm else f"[{view.author_name}] "
         try:
             reply = self.ask_fn(author_line + content, session)

@@ -324,6 +324,37 @@ def build_router(config: "DiscordConfig"):
     agent = build_agent(core)
     store = ChannelStore(config, audit)
     memory = UserMemoryStore(core.data_dir, scope="user")
+    # optional multi-agent layer: a failure here must never stop text chat
+    orch_kwargs: dict = {}
+    try:
+        from .orchestration import build_supervisor
+
+        supervisor = build_supervisor(core, agent=agent, audit=audit)
+    except Exception:  # noqa: BLE001 - degrade to single-agent MAX
+        supervisor = None
+    if supervisor is not None and supervisor.enabled():
+        def _delegate(view, text, _sup=supervisor):  # noqa: ANN001 - router passes a MessageView
+            return _sup.handle(
+                text,
+                owner_id=view.author_id,
+                session_id=f"g{view.guild_id}_c{view.channel_id}" if view.guild_id else f"dm_u{view.author_id}",
+                guild_id=view.guild_id,
+                channel_id=view.channel_id,
+            )
+
+        def _orch(name, args, view, _sup=supervisor):  # noqa: ANN001
+            return _sup.run_command(
+                name,
+                args,
+                view.author_id,
+                is_admin=config.is_admin(view.author_id, view.author_roles),
+                session_id=f"g{view.guild_id}_c{view.channel_id}" if view.guild_id else f"dm_u{view.author_id}",
+                guild_id=view.guild_id,
+                channel_id=view.channel_id,
+            )
+
+        orch_kwargs = {"delegate_fn": _delegate, "orch_fn": _orch}
+
     router = DiscordRouter(
         config,
         store,
@@ -331,6 +362,7 @@ def build_router(config: "DiscordConfig"):
         ask_fn=lambda text, session: agent.ask(text, session_id=session),
         memory=memory,
         health_fn=lambda: build_health_payload(core),
+        **orch_kwargs,
     )
     return router, store, audit, core
 

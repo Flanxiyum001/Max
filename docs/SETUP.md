@@ -168,6 +168,7 @@ any of it.
 uv pip install --python .venv/bin/python -e '.[codesearch]'   # tree-sitter
 uv pip install --python .venv/bin/python -e '.[stt]'          # faster-whisper
 uv pip install --python .venv/bin/python -e '.[mcp]'          # official MCP SDK (not required)
+uv pip install --python .venv/bin/python -e '.[openhands]'    # optional OpenHands coding backend
 
 # verify each capability without touching production
 .venv/bin/python -m pytest -q                       # full suite
@@ -182,6 +183,12 @@ grep -c . .env                                     # copy .env.example first
 | `MAX_MCP_SERVERS` | empty | JSON array of MCP servers; each disabled unless `"enabled":true`, no tool auto-enabled |
 | `MAX_BROWSER_ENABLE` / `MAX_BROWSER_ALLOW_HOSTS` | `0` / — | guarded Playwright MCP research (read-only) |
 | `MAX_STT_BACKEND` (+ `MAX_STT_*`) | `mock` | speech-to-text adapter; nothing downloaded at startup |
+| `MAX_ORCH_ENABLE` / `MAX_ORCH_AUTO` | `1` / `1` | supervised multi-agent layer + dynamic delegation decision |
+| `MAX_ORCH_MAX_WORKERS` / `MAX_ORCH_DEPTH` / `MAX_ORCH_TASK_TIMEOUT_S` | `2` / `1` / `180` | concurrency (hard cap 3), delegation depth, per-task wall clock |
+| `MAX_ORCH_TOOL_BUDGET` | `120` | tool calls shared by all workers in one plan (each worker also capped at 40) |
+| `MAX_ORCH_EXEC` | `0` | guarded runner for coder/tester (allowlisted argv, filtered env) |
+| `MAX_ORCH_KEEP_WORKSPACES` | `0` | keep isolated task worktrees for inspection |
+| `MAX_ORCH_CODER_BACKEND` (+ `MAX_ORCH_OH_*`) | `max` | `openhands` selects the optional OpenHands SDK backend |
 
 Troubleshooting an optional capability:
 
@@ -191,3 +198,11 @@ Troubleshooting an optional capability:
   switch above; the message names the variable.
 * `speech_status` reports `available: false` with the install command.
 * worker refuses a repository → `MAX_WORKER_REPOS` must contain it.
+* `!max tasks` says orchestration is disabled → set `MAX_ORCH_ENABLE=1`.
+* coder reports "test execution is disabled" → that is the safe default;
+  set `MAX_ORCH_EXEC=1` to allow the guarded runner (tests then really run),
+  or accept that the report says **blocked** rather than pretending they passed.
+* `MAX_ORCH_CODER_BACKEND=openhands` has no effect → run
+  `.venv/bin/python -m max health --json` and look at `orchestration.openhands`;
+  the payload names the blocker (package missing / model unset / key env var
+  unset) without printing any secret, and MAX falls back to the built-in backend.

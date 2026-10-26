@@ -17,6 +17,11 @@ codesearch = [
 stt = [
     "faster-whisper>=1.2",
 ]
+openhands = [
+    # optional coding-worker backend (src/max/orchestration/coding.py);
+    # not installed by default — MAX falls back to its own guarded runner.
+    "openhands-sdk>=1.58,<2",
+]
 mcp = [
     "mcp>=1.2",
 ]

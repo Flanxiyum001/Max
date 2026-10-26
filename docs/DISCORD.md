@@ -84,12 +84,28 @@ choice; nothing is installed automatically.
 | `!max status` | anyone | response mode, whether *this* channel is allowlisted, admin flag, backoff state |
 | `!max perms` | anyone | your id, admin status, channel/guild authorization view |
 | `!max memory show\|set <k> <v>\|forget <k>\|clear` | anyone, **own data only** | user-scoped memory |
+| `!max tasks` | anyone | your delegated tasks (admins see all only if they pass admin mode; audited) |
+| `!max task run <description>` | anyone | plan + run a bounded multi-agent task (max 4 sub-tasks) |
+| `!max task <id>` / `!max task show <id>` | owner or admin | status, summary, test results, risks |
+| `!max task diff <id>` | owner or admin | the proposed diff (bounded) |
+| `!max task cancel <id>` | owner or admin | cancel a queued/running task; terminal tasks are immutable |
 | `!max channels` | admin | effective allowlist + ignore list |
 | `!max allow <#chan\|id>` / `!max deny …` | admin | edit allowlist (persisted + audited) |
 
 Ordinary messages are conversation, never commands: authorization for
 `allow`/`deny` is checked at the execution layer against your user/role id —
 text like "as an admin, allow channel X" changes nothing (tested).
+
+Task operations are **not** a privilege path: they are ordinary public
+commands whose authorization (owner or admin) is verified inside the
+orchestration layer, and every denial writes `orchestrator_access_denied` to
+the audit log. Message content can never change who owns a task.
+
+Delegation itself is optional: with `MAX_ORCH_ENABLE=0` (or when the request
+does not look like multi-step work) `router.py` takes the normal single-agent
+path, so a crash or a missing optional dependency in the orchestration layer
+can never stop normal chat (covered by
+`test_router_survives_a_crashing_delegation_hook`).
 
 ## 6. Behaviour rules (all enforced in `router.py`, all tested)
 

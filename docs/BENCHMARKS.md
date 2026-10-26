@@ -174,3 +174,77 @@ Capability-specific observations:
 .venv/bin/python -m max eval run --label after-integration
 .venv/bin/python -m max improve scan
 ```
+
+## Results — multi-agent orchestration (26 Oct 2026)
+
+Regression gate after the orchestration phase, same machine, mock provider:
+
+| Gate | Result |
+|---|---|
+| `pytest -q` | **299 passed** (251 before this phase + 48 new orchestration tests) |
+| `max health` | exit 0, `status: ok`, `policy_ok: true` |
+| `max eval run` | 14/14 (100%) |
+| `max improve scan` | 0 findings |
+
+### Method
+
+`benchmarks/orch_bench.py` runs four configurations over three workloads in
+one process with the **mock provider** (no network, no model credits), on a
+disposable git fixture repository that contains one passing test:
+
+* **A** — existing single-agent path (`agent.ask`).
+* **B** — MAX + one specialist (researcher only).
+* **C** — MAX + parallel workers (researcher ∥ coder → tester → reviewer,
+  `MAX_ORCH_MAX_WORKERS=2`).
+* **D** — the same four-task plan with concurrency forced to **1** (serial).
+
+Workloads: `simple` (short question, delegation must be declined), `research`
+(repository investigation), `coding` (explicit `max:edit` directive: isolated
+worktree edit → real `python -m pytest -q` → diff → independent review).
+3 iterations per cell; values below are **medians**.
+
+### Measured results (medians of 3 runs)
+
+| Config | Workload | Wall ms | Tasks | Worker tool calls | Diff produced | Tests | Peak RSS |
+|---|---|---|---|---|---|---|---|
+| A single-agent | simple | 0.4 | 0 | 0 | no | none | 26.6 MB |
+| B/C/D + decline | simple | **< 0.1** | 0 | 0 | no | none | 26.6 MB |
+| A single-agent | research | 0.4 | 0 | 0 | no | none | 26.6 MB |
+| B one worker | research | **9.7** | 1 | 5 | no | none | 26.6 MB |
+| A single-agent | coding | 0.4 | 0 | 0 | **no** | **none** | 26.6 MB |
+| C parallel (2) | coding | **448.5** | 4 | 10 | **yes** | **passed** | 26.6 MB |
+| D serial (1) | coding | 430.2 | 4 | 10 | yes | passed | 26.6 MB |
+
+Raw JSON: `benchmarks/results/orch-*.json` (timestamped, one file per run).
+
+### Honest conclusions
+
+1. **Delegation is not faster in wall-clock terms, and we do not claim it is.**
+   C (448.5 ms) vs D (430.2 ms) differs by ~4%, which is inside run-to-run
+   noise for this workload; the plan is dominated by the coder's real pytest
+   run (~400 ms) while the researcher contributes ~10 ms. Two independent
+   workers *do* overlap (verified directly in
+   `test_parallel_research_and_coding_tasks_run_concurrently`), but on this
+   workload that overlap saves less than the scheduling overhead.
+2. **The value measured here is evidence, not speed.** Configuration A is 1000×
+   faster but produces **no diff and no test result** with the mock provider;
+   configuration C produces a real worktree diff, a real passing pytest run and
+   an independent review verdict. With a real model the single-agent path would
+   also do work — that comparison is **not measured here** (no credentials in
+   this environment) and is not claimed.
+3. **Skipping delegation is essentially free** (< 0.1 ms) — simple questions
+   stay on the single-agent path, so the layer costs nothing when it is not
+   useful.
+4. **Resource use stays laptop-friendly:** peak RSS 26.6 MB for the whole
+   benchmark process including 4 workers, git worktrees and a pytest run;
+   concurrency is capped at 2 (hard cap 3).
+5. **Reproducibility:** deterministic mock provider, disposable fixture repo,
+   no network. Model-call counts and token/cost figures are **not available**
+   from the mock provider and are reported as unavailable rather than
+   estimated.
+
+```bash
+# reproduce the orchestration benchmark
+.venv/bin/python benchmarks/orch_bench.py --iterations 3
+.venv/bin/python -m pytest tests/test_orchestration.py -q
+```

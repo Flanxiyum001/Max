@@ -144,3 +144,68 @@ Bounds: file size, WAV duration, concurrency, timeout. The temporary file is
 unconditionally deleted in `finally`. Audit events record backend, size,
 duration and latency only — never transcript text and never audio. Model files
 are never downloaded during startup (`local_files_only=True`).
+
+## 7. Threat model — supervised multi-agent orchestration
+
+Adversary: a user who may talk to MAX, repository content, and a model that
+can be influenced by any of it. Goal: get a worker to do something MAX's policy
+would not allow the single agent to do.
+
+**Control 1 — one grant, derived, never declared.** `OrchestrationPolicy`
+computes each worker's capability as *profile intent ∩ tool registry ∩
+`PermissionPolicy`*. A profile can only narrow its own tool list. Unknown
+profiles fail closed. The model never sees, sets or widens a grant.
+
+**Control 2 — one execution boundary.** Every worker tool call goes through
+`ToolExecutor.dispatch`, so identity, argument validation, output truncation
+and injection flagging are identical to the single-agent path. Events:
+`worker_grant_issued`, `worker_tool_allowed`, `worker_tool_denied` (all carry
+the task id and actor), plus the existing `tool_*` events.
+
+**Control 3 — workspace containment.** Path-taking tools of a coding task are
+resolved inside *that task's worktree* by a scoped `ToolExecutor`, so a coder
+cannot write into MAX's own workspace or another task's worktree; `../`,
+absolute paths and symlink escapes are rejected (`test_path_traversal_is_denied`).
+Worktrees are discarded when the plan ends (`MAX_ORCH_KEEP_WORKSPACES=1`
+keeps them, deliberately).
+
+**Control 4 — execution is off by default.** `MAX_ORCH_EXEC=0` means coder and
+tester cannot run anything; they report `blocked`, and MAX says so instead of
+claiming tests passed. When enabled, the only executable tool is the guarded
+runner (`worker_run`: exact argv allowlist, no shell strings, no `-c`, no
+network binaries, no git write subcommands, cwd confinement, filtered
+environment with no secret-shaped variables, timeout and output caps). An
+explicit `MAX_TOOLS_DENY` entry or restrictive mode still wins over this
+capability.
+
+**Control 5 — worker output is untrusted data.** Results are schema-validated
+and size-bounded before MAX reports them; summaries and evidence are scanned
+by the same prompt-injection detector as tool output; conflicting file changes
+declared by two workers are reported rather than merged; a reported test must
+have actually executed in this plan or the report carries a "no test
+evidence" flag. The reviewer has no write and no execute capability and
+cannot approve anything — approval remains a human CLI action.
+
+**Control 6 — identity and ownership.** Every task stores owner, guild,
+channel and session; `show`/`diff`/`cancel` are denied for non-owners unless
+admin mode is used, and every denial is audited (`orchestrator_access_denied`).
+Message content can never reassign ownership or grant admin visibility.
+
+**Control 7 — bounded resource use.** Concurrency ≤ 2 (hard cap 3), plan ≤ 4
+tasks, delegation depth from configuration, per-task wall-clock timeout, a
+per-task tool-call cap (40) **and** a plan-wide budget shared by every worker
+in the plan (`MAX_ORCH_TOOL_BUDGET`, default 120), bounded results/diffs/logs,
+and a cleanup pass for worktrees and worker state so abandoned work does not
+accumulate. Exhausting a budget fails the affected calls with a clear reason
+(`plan_budget_exhausted`) instead of hanging.
+
+**Known gaps (not claimed as solved):**
+
+* Workers run in threads inside the MAX process — a timed-out worker is
+  abandoned by the scheduler but its thread finishes before pool shutdown; this
+  bounds *bookkeeping*, not CPU. There is **no kernel-level sandbox**;
+  container isolation remains the next hardening step.
+* Model-call counts, token usage and cost are unavailable from the mock
+  provider and are reported as unavailable, never estimated.
+* Live Discord task commands are unverified until a bot token exists (same
+  status as every other Discord feature in this repository).

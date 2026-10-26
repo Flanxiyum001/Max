@@ -10,39 +10,54 @@ subprocess/service** · **pattern borrowed** (no dependency) · **deferred**
 
 | # | Project | Verified upstream | Decision | Where |
 |---|---|---|---|---|
-| 1 | OpenHands Software Agent SDK | `main`, v1.58.2, MIT, Python ≥3.12, heavy; agent runtimes use Docker/remote hosts | **Pattern borrowed → own worker**; SDK deferred | `src/max/worker/` |
+| 1 | OpenHands Software Agent SDK | `openhands-sdk` 1.58.2, MIT, Python ≥3.12, LiteLLM-based; Docker/Agent Server only for remote sandboxes | **Adapter built, not installed by default** (optional extra `[openhands]`); guarded MAX runner is the default backend | `src/max/orchestration/coding.py` + `src/max/worker/` |
 | 2 | tree-sitter | `master` core 0.27.1, Python binding 0.26.0, MIT, wheels, no runtime deps | **Adopted as optional extra** (`[codesearch]`), regex fallback when absent | `src/max/codesearch/` |
 | 3 | MCP Python SDK | `main`, 2.3.0, MIT, Python ≥3.11 | **Deferred** behind a stable adapter boundary; current stdio client stays the backend | `src/max/mcp/backend.py` |
 | 4 | Promptfoo | `main`, 0.125.1, MIT, **Node ≥22.22**, large JS graph | **Deferred** as external runner; dataset delivered in this repo | `eval/promptfoo/` |
 | 5 | faster-whisper | `master`, 1.2.1, MIT, Python ≥3.9, CTranslate2 + model downloads | **Adopted as optional extra** (`[stt]`), lazy, mock default | `src/max/speech/` |
 | 6 | Playwright MCP | `main`, 0.0.83, Apache-2.0, Node ≥18, browser binaries | **Integrated as subprocess** behind MAX's guard; disabled by default | `src/max/browser/` |
 
-## 1. OpenHands Software Agent SDK — pattern borrowed, SDK deferred
+## 1. OpenHands Software Agent SDK — adapter built, backend optional
 
-Why: the SDK brings an agent runtime, its own tool loop and (for real
-execution) Docker or a remote host. That competes with MAX's authoritative
-agent loop, policy gate and tool registry instead of extending them, and it
-adds a privileged host dependency to an 8 GB always-on laptop.
+Verified (26 Oct 2026): package `openhands-sdk` 1.58.2, MIT, Python ≥3.12,
+API surface `LLM` / `Agent` / `Tool` / `Conversation`, LiteLLM-style
+`provider/model` strings with a configurable `base_url`, local workspace runs
+in-process (Docker/Agent Server only for remote sandboxes),
+`max_iteration_per_run` for bounded runs. Sources:
+https://docs.openhands.dev/sdk/getting-started ·
+https://pypi.org/project/openhands-sdk/ ·
+https://docs.openhands.dev/sdk/arch/workspace ·
+https://docs.openhands.dev/sdk/guides/security
 
-What MAX took instead: the *workflow shape* — task record, isolated
-workspace, bounded plan, approved command list, diff review, approval
-request, discard. Implemented directly in `src/max/worker/`:
+**Decision:** install it only when explicitly requested
+(`pip install -e '.[openhands]'` + `MAX_ORCH_CODER_BACKEND=openhands`).
+Rationale: it brings LiteLLM, FastMCP and a second tool loop — real weight and
+a second execution philosophy — for a configuration where MAX already has a
+bounded, audited runner. It is an *optional backend*, never a second agent
+loop: MAX's supervisor still owns the task record, the plan, the grant, the
+limits and the result schema.
 
-* `CommandPolicy` — deny-by-default argv allowlist (exact prefixes), no
-  shell strings, no `-c`, no network tools, no git write subcommands,
-  working-directory containment, filtered environment (no host secrets),
-  timeout and output caps.
-* `TaskManager` — one git worktree + branch per task, secret scan over the
-  diff **and** untracked files, cancel/discard lifecycle, approval requests
-  that the model can create but never grant.
+What the adapter does (`src/max/orchestration/coding.py`):
 
-Resource cost: zero new dependencies. Security: no Docker requirement, no
-unrestricted shell, model cannot widen the policy.
+* lazy import; probes for `LLM`, `Agent`, `Conversation` and fails with an
+  actionable message if the installed version does not expose them,
+* `available()` reports the exact blocker (not installed / model unset / key
+  env var missing) and the supervisor falls back to the built-in backend,
+* provider model, base URL and the **name** of the key env var come from
+  configuration; the key itself is never read into a task, log or prompt,
+* explicit tool allowlist — terminal/execution tools are only offered when
+  `MAX_ORCH_EXEC=1`, so the SDK cannot silently exceed MAX's command policy,
+* SDK/provider exceptions become a failed task state, never an agent crash.
 
-Revisit if: MAX needs multi-step autonomous coding beyond what a bounded
-command list can express — then run OpenHands in an isolated container with
-its own network policy, as a *worker behind this same TaskManager*, not as a
-second agent loop.
+The built-in MAX runner (`src/max/worker/`, borrowed workflow shape — task
+record, isolated worktree, argv allowlist, filtered env, diff secret scan,
+approval requests the model can create but never grant) remains the default
+and is what CI and the benchmark exercise.
+
+Revisit if: coding tasks consistently need multi-step autonomous exploration
+beyond the bounded command list — then install the extra and run it **inside
+the same task worktree**, behind the same grant and audit, not as a second
+agent loop. Never give it Docker socket access on the always-on laptop.
 
 ## 2. tree-sitter — adopted (optional extra)
 
