@@ -1,0 +1,13 @@
+id: 04-restart-recovery
+name: Recovery after application restart
+runner: agent
+steps:
+  - user: "Note: the router password reset is due Friday"
+  - reply: {text: "Noted."}
+  - restart: true
+  - user: "Ready for the next task."
+  - reply: {text: "Ready."}
+expect:
+  - {type: session_contains, value: "router password reset"}
+  - {type: provider_context_contains, value: "router password reset"}
+  - {type: reply_ok}

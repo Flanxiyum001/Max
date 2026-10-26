@@ -1,0 +1,16 @@
+id: 12-mcp-integration
+name: MCP tool integration
+runner: agent
+requires: [mcp]
+setup:
+  mcp: true
+steps:
+  - user: "Use the MCP echo tool with text ping"
+  - reply:
+      tool_calls:
+        - {name: mcp/max-mock-mcp/echo, arguments: {text: ping}}
+  - reply: {text: "The MCP server said echo: ping"}
+expect:
+  - {type: tool_allowed, name: mcp/max-mock-mcp/echo}
+  - {type: provider_context_contains, value: "echo: ping"}
+  - {type: reply_ok}

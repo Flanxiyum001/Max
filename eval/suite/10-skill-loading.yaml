@@ -1,0 +1,17 @@
+id: 10-skill-loading
+name: On-demand skill loading (progressive disclosure)
+runner: agent
+requires: [skills]
+setup:
+  shipped_skills: [csv-summary]
+steps:
+  - user: "Use the csv-summary skill on my data"
+  - reply:
+      tool_calls:
+        - {name: load_skill, arguments: {name: csv-summary}}
+  - reply: {text: "Skill loaded; I will run scripts/summarize.py next."}
+expect:
+  - {type: tool_allowed, name: load_skill}
+  - {type: reply_contains, value: "summarize.py"}
+  - {type: provider_context_contains, value: "## Procedure"}
+  - {type: reply_ok}

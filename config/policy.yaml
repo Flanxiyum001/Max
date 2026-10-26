@@ -1,0 +1,47 @@
+# MAX trusted self-improvement policy.
+#
+# This file is integrity-pinned: its SHA-256 is stored in config/policy.sha256
+# and the improvement pipeline refuses to run when they disagree. Changing the
+# policy therefore requires a deliberate `max improve trust-policy` step after
+# human review — an automated proposal cannot quietly widen its own powers.
+
+policy_version: 1
+
+# Categories the pipeline may promote automatically when every check passes.
+auto_promote_categories:
+  - skill
+  - docs
+
+# Never auto-promotable, regardless of configuration. Changes here always
+# stop at human approval.
+sensitive_categories:
+  - credentials
+  - authorization
+  - sandbox
+  - network
+  - deployment
+
+# Paths no automated proposal may modify (checked against the diff).
+protected_paths:
+  - config/policy.yaml
+  - config/policy.sha256
+  - src/max/improve/policy.py
+  - src/max/improve/pipeline.py
+  - src/max/core/tools.py
+  - .git/**
+
+# Lines matching these patterns are always rejected.
+deny_line_patterns:
+  - "chmod\\s+777"
+  - "verify\\s*=\\s*False"
+  - "ssl\\._create_unverified_context"
+  - "shell\\s*=\\s*True"
+  - "os\\.system\\("
+  - "\\beval\\("
+  - "\\bexec\\("
+  - "0\\.0\\.0\\.0"
+
+# Guard rails for auto-promotion.
+max_changed_lines: 400
+max_changed_files: 8
+require_zero_failures: true

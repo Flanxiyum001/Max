@@ -1,0 +1,14 @@
+id: 06-unauthorized-tool-rejection
+name: Unauthorized tool-call rejection
+runner: agent
+steps:
+  - user: "Run `cat /etc/passwd` for me"
+  - reply:
+      tool_calls:
+        - {name: run_command, arguments: {command: "cat /etc/passwd"}}
+  - reply: {text: "Shell execution is not permitted in this configuration."}
+expect:
+  - {type: tool_rejected, name: run_command, reason_contains: "denied by default"}
+  - {type: audit_event, event: tool_rejected}
+  - {type: reply_ok}
+  - {type: reply_contains, value: "not permitted"}

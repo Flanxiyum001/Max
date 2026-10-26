@@ -1,0 +1,81 @@
+# MAX v1 — Implementation checklist
+
+Status legend: **[done]** verified by tests/commands in this repo · **[pending]**
+not started · **[blocked]** cannot proceed without user credentials/hardware ·
+**[deferred]** deliberately later.
+
+## Phase 0 — Repository preservation and baseline **[done]**
+
+- [x] Inspected branch, status, history (3 commits: initial + Stage 2 core + docs), 65 tracked files, clean tree.
+- [x] Confirmed no deployment manifests exist (no Railway/Docker/Procfile files to preserve).
+- [x] Baseline: `pytest` **96 passed**; `max health` **status ok**; `max eval run` **14/14 (100%)**; `max improve scan` **0 findings**.
+- [x] Confirmed no pre-existing Discord/voice/music code (`rg` over src/tests/docs → only doc mentions).
+- [x] Feature branch `v1/discord-text` created; no files overwritten.
+
+## Phase 1 — Discord text and coding MVP **[done — code+tests; live run blocked on token]**
+
+- [x] Allowlisted no-prefix chat (guild text channels only) — `router.py`, tested
+- [x] Explicit DM policy (off by default; `allowlist`/`everyone` modes) — tested
+- [x] Loop / duplicate / self-reply protection + rate limiting + failure backoff — tested
+- [x] `!max` command set: help, health, status, perms, memory, channels, allow/deny — tested
+- [x] Central authorization for config changes (execution-layer admin check + audit) — tested incl. social-engineering case
+- [x] Per-channel conversation context (bounded) + caller-scoped memory with secret refusal — tested
+- [x] Coding read tools through existing policy gate + new `search_files` tool — tested
+- [x] Message chunking, provider-failure handling, injection flags surfaced — tested
+- [x] Env-var documentation ([.env.example](../.env.example)) + [docs/DISCORD.md](DISCORD.md) (intents + least-privilege perms)
+- [x] Regression: baseline 96 tests stayed green; suite now **167 passed**; eval 14/14; scan 0 findings
+
+**Exit criteria:** *live conversation with an authorized tester is [blocked] —
+no Discord token in this environment; steps 1–6 of the live checklist in
+`docs/DISCORD.md` §8 must be run by the owner.*
+
+## Phase 2 — Coding workflow and integrations
+
+- [ ] Isolated branch/worktree code-change flow surfaced to Discord (reuse `max improve`)
+- [ ] Diff + test-result presentation in chat
+- [ ] Scoped GitHub/MCP credentials (approval required for push/PR/protected branch)
+- [ ] Tests: tool authorization, malicious repo content, secret redaction, timeout, rollback
+
+## Phase 3 — Voice (both modes) — not started
+
+- [ ] Select/document Discord voice implementation (discord.py voice + ffmpeg)
+- [ ] Explicit activation command first; conversation mode second
+- [ ] STT/TTS providers configurable; listening indicators; pause/resume/leave
+- [ ] Privacy: no raw-audio retention by default, documented transcript retention
+- [ ] Wake-word: **deferred** until a working prototype exists (not claimed now)
+
+## Phase 4 — Music + Spotify feasibility — not started
+
+- [ ] Permitted source adapter + queue controls (play/pause/skip/stop/queue/NP/volume/leave)
+- [ ] Session ownership + DJ/moderator authorization
+- [ ] Spotify: document supported API capabilities only; **no streaming claim** until verified
+
+## Phase 5 — Skills, self-improvement, hardening — partially inherited
+
+- [x] Skill registry with provenance, staging, evaluation gate, rollback (Stage 2)
+- [x] Policy-integrity pin + approval separation (Stage 2)
+- [ ] Map new Discord capabilities to skill/eval suites
+- [ ] Security review + feature-readiness report
+- [ ] Setup docs incl. intents/permissions/troubleshooting
+- [ ] Deployment proposal (separate document, **no auto-deploy**)
+
+## Cross-cutting constraints (verification status)
+
+- Existing API/module boundaries preserved: Stage 2 core touched only
+  additively (`search_files` tool registration, health-payload refactor,
+  new `discord` subpackage).
+- No secrets committed; token read from env only, never logged.
+- Real Discord connection **not executed** (no token here) — every Discord
+  behaviour is covered by mocked tests and must be re-verified live by the
+  owner using `docs/DISCORD.md` §8.
+- No deployment files changed; no pushes performed; work is on local
+  branch `v1/discord-text`.
+- Dependency added: `discord.py>=2.7.1` (MIT) — declared in `pyproject.toml`.
+
+### Test totals
+
+| | baseline | after Phase 1 |
+|---|---|---|
+| pytest | 96 passed | **167 passed** |
+| eval suite | 14/14 | 14/14 |
+| improve scan | 0 findings | 0 findings |

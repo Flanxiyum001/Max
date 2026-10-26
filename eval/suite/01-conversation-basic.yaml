@@ -1,0 +1,10 @@
+id: 01-conversation-basic
+name: Basic conversation
+runner: agent
+steps:
+  - user: "Hello MAX, are you online?"
+  - reply: {text: "Yes — MAX online and ready."}
+expect:
+  - {type: reply_ok}
+  - {type: reply_contains, value: "MAX online"}
+  - {type: reply_count, value: 1}
