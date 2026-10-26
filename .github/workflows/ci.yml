@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Unit and integration tests
+        run: python -m pytest
+
+      - name: Static scan (self-improvement rules)
+        run: python -m max improve scan
+
+      - name: Health check
+        run: python -m max health --json
+
+      - name: Evaluation suite
+        run: python -m max eval run --label ci
+
+      - name: Skill validation
+        run: python -m max skills list --json
