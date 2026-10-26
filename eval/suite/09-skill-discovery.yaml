@@ -1,0 +1,13 @@
+id: 09-skill-discovery
+name: Skill discovery and metadata validation
+runner: agent
+requires: [skills]
+setup:
+  shipped_skills: [csv-summary]
+steps:
+  - user: "What skills do you have?"
+  - reply: {text: "I have the csv-summary skill."}
+expect:
+  - {type: skill_listed, name: csv-summary}
+  - {type: skill_index_contains, value: "csv-summary"}
+  - {type: provider_context_contains, value: "<available_skills>"}

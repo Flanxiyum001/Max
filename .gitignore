@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# Secrets — never commit real credentials
+.env
+.env.local
+.env.*.local
+
+# Runtime data (sessions, memory, audit logs, registry state)
+var/
+
+# Evaluation + improvement artifacts
+eval/runs/
+eval/reports/
+.max/
+
+# Benchmark outputs (keep docs/BENCHMARKS.md, ignore raw runs)
+benchmarks/results/
+
+# Temporary / local experiment output
+tmp/
+.worktrees/

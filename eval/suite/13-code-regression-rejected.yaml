@@ -1,0 +1,27 @@
+id: 13-code-regression-rejected
+name: Code editing with regression testing (broken change rejected)
+runner: improve
+requires: [improve]
+repo:
+  app.py: |
+    def add(a, b):
+        return a + b
+  test_app.py: |
+    from app import add
+
+
+    def test_add():
+        assert add(2, 3) == 5
+edits:
+  app.py: |
+    def add(a, b):
+        return a - b
+proposal:
+  id: eval-regression
+  category: code
+  title: "flip addition to subtraction"
+expect:
+  - {type: pipeline_status, value: rejected}
+  - {type: check_state, name: no-test-regression, passed: false}
+  - {type: file_after, path: app.py, contains: "return a + b"}
+  - {type: file_after, path: app.py, not_contains: "return a - b"}

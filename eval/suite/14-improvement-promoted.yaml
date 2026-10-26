@@ -1,0 +1,20 @@
+id: 14-improvement-promoted
+name: Eligible low-risk change auto-promoted
+runner: improve
+requires: [improve]
+repo:
+  README.md: |
+    # eval app
+edits:
+  README.md: |
+    # eval app
+
+    Documented automatically by MAX.
+proposal:
+  id: eval-promote
+  category: docs
+  title: "document the app"
+expect:
+  - {type: pipeline_status, value: promoted}
+  - {type: check_state, name: post-promote-tests, passed: true}
+  - {type: file_after, path: README.md, contains: "Documented automatically by MAX."}

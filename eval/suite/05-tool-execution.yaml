@@ -1,0 +1,17 @@
+id: 05-tool-execution
+name: Allowed tool execution
+runner: agent
+setup:
+  files:
+    data.csv: "a,b\n1,2\n"
+steps:
+  - user: "Show me data.csv"
+  - reply:
+      tool_calls:
+        - {name: read_file, arguments: {path: data.csv}}
+  - reply: {text: "The file has header a,b and row 1,2."}
+expect:
+  - {type: tool_allowed, name: read_file}
+  - {type: audit_event, event: tool_allowed}
+  - {type: reply_ok}
+  - {type: provider_context_contains, value: "a,b"}

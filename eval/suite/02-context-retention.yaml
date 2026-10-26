@@ -1,0 +1,12 @@
+id: 02-context-retention
+name: Context retention across turns
+runner: agent
+steps:
+  - user: "Remember that my codeword is ZEBRA-42."
+  - reply: {text: "Stored."}
+  - user: "What is my codeword?"
+  - reply: {text: "Your codeword is ZEBRA-42."}
+expect:
+  - {type: reply_contains, value: "ZEBRA-42"}
+  - {type: provider_context_contains, value: "ZEBRA-42"}
+  - {type: provider_context_contains, value: "Remember that my codeword"}

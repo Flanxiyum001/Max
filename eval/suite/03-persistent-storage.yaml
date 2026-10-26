@@ -1,0 +1,28 @@
+id: 03-persistent-storage
+name: Persistent storage through tools and restart
+runner: agent
+setup:
+  files:
+    report.txt: "quarterly numbers 12345"
+steps:
+  - user: "Read report.txt"
+  - reply:
+      tool_calls:
+        - {name: read_file, arguments: {path: report.txt}}
+  - reply: {text: "The report contains quarterly numbers 12345."}
+  - user: "Save a summary to out/summary.txt"
+  - reply:
+      tool_calls:
+        - {name: write_file, arguments: {path: out/summary.txt, content: "summary: 12345"}}
+  - reply: {text: "Written."}
+  - restart: true
+  - user: "Read out/summary.txt"
+  - reply:
+      tool_calls:
+        - {name: read_file, arguments: {path: out/summary.txt}}
+  - reply: {text: "summary: 12345"}
+expect:
+  - {type: file_exists, path: out/summary.txt}
+  - {type: file_contains, path: out/summary.txt, value: "summary: 12345"}
+  - {type: reply_contains, value: "summary: 12345"}
+  - {type: reply_ok}

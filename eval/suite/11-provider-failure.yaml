@@ -1,0 +1,15 @@
+id: 11-provider-failure
+name: Failed model-provider request and recovery
+runner: agent
+steps:
+  - user: "hello"
+  - reply: {error: rate_limited}
+  - user: "hello again"
+  - reply: {text: "recovered"}
+expect:
+  - {type: reply_error, value: "rate_limited", index: 0}
+  - {type: reply_contains, value: "unavailable", index: 0}
+  - {type: reply_ok}
+  - {type: reply_contains, value: "recovered"}
+  - {type: audit_event, event: provider_error}
+  - {type: reply_count, value: 2}
