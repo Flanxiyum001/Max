@@ -9,8 +9,23 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Core stays lean: every capability below is opt-in and degrades cleanly.
+codesearch = [
+    "tree-sitter>=0.24",
+    "tree-sitter-python>=0.23",
+]
+stt = [
+    "faster-whisper>=1.2",
+]
+mcp = [
+    "mcp>=1.2",
+]
 dev = [
     "pytest>=8.0",
+    # test-only: exercises the tree-sitter backend in CI; the regex
+    # fallback is covered separately by the same tests when it is absent
+    "tree-sitter>=0.24",
+    "tree-sitter-python>=0.23",
 ]
 
 [project.scripts]

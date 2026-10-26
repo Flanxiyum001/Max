@@ -93,3 +93,54 @@ MAX itself has **no LICENSE file yet** — that is an owner decision (see
 
 No channel (Telegram/WhatsApp/Discord), no tunnel, no systemd service, no
 public exposure was configured — as required by the brief.
+
+## 6. Threat model added with the advanced capabilities
+
+### Coding worker (`src/max/worker/`)
+
+| Threat | Control | Verified by |
+|---|---|---|
+| Model gets a shell | `CommandPolicy` argv allowlist; shell strings, `-c`, metacharacters rejected before `Popen` | `tests/test_worker.py` |
+| Command escapes the workspace | `validate_cwd` → `resolve_within`; `..` rejected in every argument | same |
+| Host credentials leak into a worker | `build_env` builds a fixed env (PATH/HOME/TMPDIR only) and drops anything matching `_SECRET_NAME` | `test_policy_environment_excludes_host_secrets` |
+| Network egress from untrusted code | network programs denied by default (`curl`, `pip`, `npx`, `git push/pull/fetch/clone`); `MAX_WORKER_NETWORK=0` default | `test_policy_rejects_network_and_git_write_operations` |
+| Poisoned caller checkout | each task is a separate `git worktree` + branch; discard removes it | `test_task_lifecycle_run_diff_discard` |
+| Secret committed in a change | diff **and** untracked contents scanned for key/token/keyblock patterns; result warns "do not push" | `test_diff_flags_secret_content` |
+| Self-approved escalation | model can only `request_approval`; granting exists only on the human entry point | `test_model_cannot_grant_its_own_approval` |
+| Runaway resource use | per-command timeout, output truncation, task cap | `test_task_limit_and_audit` |
+
+Residual risk: the worker runs as the same OS user as MAX — there is **no
+kernel-level sandbox**. It is safe against a misbehaving model, not against
+malicious native code. Container isolation is the documented next step if
+untrusted repositories are ever accepted.
+
+### MCP (`src/max/mcp/backend.py`)
+
+Servers are child processes with a filtered environment; disabled by default;
+no tool is enabled without `tool_allow`; `approval_required` adds a second
+gate; argument size capped; output injection-flagged and truncated; failures
+become typed `ToolError`s that cannot crash the agent loop. Malformed or
+terminating servers are covered by `tests/test_mcp_backend.py`. No MCP server
+is exposed over the network by MAX.
+
+### Browser (`src/max/browser/`)
+
+The URL guard runs *before* any process starts: scheme/port allowlist, no
+credentials-in-URL, localhost/loopback/link-local/private/metadata blocking,
+optional host allowlist, and DNS resolution checked against the same ranges
+(SSRF and redirect-to-internal defence). Browser tools are category `net`
+(denied by default) and only read-only tools are registered. Page content is
+untrusted: flagged by the standard injection detector, never a source of
+policy. `test_provider_blocks_before_touching_the_browser` proves a blocked
+URL causes zero browser calls.
+
+Known gap: each redirect must be re-checked by the Playwright server's own
+host allowlist — not verified here (browser binaries absent).
+
+### Audio (`src/max/speech/`)
+
+MAX never records: audio only exists as bytes passed to `transcribe_bytes`.
+Bounds: file size, WAV duration, concurrency, timeout. The temporary file is
+unconditionally deleted in `finally`. Audit events record backend, size,
+duration and latency only — never transcript text and never audio. Model files
+are never downloaded during startup (`local_files_only=True`).

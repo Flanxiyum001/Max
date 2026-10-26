@@ -142,3 +142,35 @@ uv venv --python 3.12 .venv && .venv/bin/pip install -e '.[dev]'  # or uv pip
 MAX_OPENCLAW_URL=http://127.0.0.1:18899 .venv/bin/python -m max bench --configs B
 PATH="$HOME/.local/bin:$PATH" .venv/bin/python -m max bench --configs C
 ```
+
+## Results — advanced capability integration (26 Oct 2026)
+
+Measured in this workspace (Linux, Python 3.12.3, single run, mock provider).
+Reproduce with the commands below; numbers are observed, not estimated.
+
+| Gate | Before (Phase 0 baseline) | After integration |
+|---|---|---|
+| `pytest -q` | **167 passed** (12.02 s) | **250 passed** (12.41 s) |
+| `max health` | exit 0, `status: ok` | exit 0, `status: ok` |
+| `max eval run` | 14/14 (100%), 1.41 s | 14/14 (100%) |
+| `max improve scan` | 0 findings | 0 findings |
+| New test modules | — | worker, codesearch, browser guard, MCP backend, speech, adversarial dataset |
+
+Capability-specific observations:
+
+| Capability | Measured | Blocked / not measured |
+|---|---|---|
+| tree-sitter indexing | `tree-sitter 0.26.0` + `tree-sitter-python 0.25.0` installed; symbol index over the fixture repo returns functions/classes with line ranges; regex fallback used when absent | grammars for JS/TS/Go/Java not installed → regex rules used (declared, not a claim of full parsing) |
+| Coding worker | worktree create → run → diff → discard completes in-process; per-command timeout and output caps enforced | no kernel sandbox → **not** a container benchmark |
+| MCP backend | fake-server tests cover start/list/call/error/timeout paths in milliseconds | real SDK server not exercised (`mcp` extra not installed here) |
+| Browser guard | URL validation is pure in-memory work (<1 ms per check) | **blocked**: Playwright browser binaries absent → no navigation benchmark |
+| Speech (mock) | `benchmark()` reports real per-sample latency for the mock backend | **blocked**: faster-whisper `[stt]` and model weights absent → no real transcription number is claimed |
+| Promptfoo | dataset of 13 versioned cases consumed by 10 offline tests | **deferred**: Node ≥22 runtime not part of this Python project |
+
+```bash
+# reproduce
+.venv/bin/python -m pytest -q
+.venv/bin/python -m pytest tests/test_adversarial_dataset.py -q
+.venv/bin/python -m max eval run --label after-integration
+.venv/bin/python -m max improve scan
+```

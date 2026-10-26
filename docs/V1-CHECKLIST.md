@@ -103,8 +103,25 @@ freebuff/codebuff anywhere in tracked files.
 
 ### Test totals
 
-| | baseline | after Phase 1 |
+| | baseline | after Phase 1 | after advanced integration |
+|---|---|---|---|
+| pytest | 96 passed | 167 passed | **250 passed** |
+| eval suite | 14/14 | 14/14 | 14/14 |
+| improve scan | 0 findings | 0 findings | 0 findings |
+
+## Advanced capability integration — status
+
+| Capability | Status | Evidence / blocker |
 |---|---|---|
-| pytest | 96 passed | **167 passed** |
-| eval suite | 14/14 | 14/14 |
-| improve scan | 0 findings | 0 findings |
+| **A. Isolated coding worker** | **implemented + tested** | `src/max/worker/`, `tests/test_worker.py`: worktree isolation, argv allowlist, env filtering, diff + secret scan (incl. untracked), cancel/discard, approval separation, task caps |
+| **B. Tree-sitter repository intelligence** | **implemented + tested** | `src/max/codesearch/`, `tests/test_codesearch.py`: symbols with line ranges, malformed-source reporting, skip rules, path/symlink escape rejection, symbol-vs-text-search comparison; regex fallback when the binding is absent |
+| **C. MCP interoperability** | **implemented + tested (local stdio backend)** | `src/max/mcp/backend.py` adapter boundary, per-server allow/deny/approval, env filtering, typed failures; official MCP SDK **deferred** (see `docs/INTEGRATIONS.md` §3) |
+| **D. Playwright MCP browser research** | **guard + gating tested; live browsing blocked** | `src/max/browser/`, `tests/test_browser_guard.py`; browser binaries are not installed here, so no navigation was executed |
+| **E. Promptfoo evaluation layer** | **dataset + offline gate implemented; runner deferred** | `eval/promptfoo/` (13 cases), `tests/test_adversarial_dataset.py` (10 tests); Promptfoo needs Node ≥22 — `docs/INTEGRATIONS.md` §4 |
+| **F. faster-whisper speech-to-text** | **adapter + mock tested; real benchmark blocked** | `src/max/speech/`, `tests/test_speech.py`: limits, temp-file deletion, no transcript logging, lazy availability; `[stt]` extra and model weights absent |
+| OpenHands SDK as worker runtime | deferred (pattern borrowed instead) | `docs/INTEGRATIONS.md` §1 |
+| Voice / shared music (Phase 6) | not started — not claimed | — |
+
+All new tools are registered through the single `ToolRegistry`/`ToolExecutor`
+boundary (permission check + audit), are category-gated (`exec`/`net` denied by
+default), and the core starts with every optional dependency missing.

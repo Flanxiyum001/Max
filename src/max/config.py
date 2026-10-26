@@ -76,6 +76,34 @@ class Config:
     openclaw_url: str = ""
     openclaw_token: str = ""  # secret-ish: never included in redacted output
 
+    # ------------------------------------------- optional integrations
+    # Coding worker (isolated git worktree + bounded command execution).
+    worker_enabled: bool = False
+    worker_repos: list[Path] = field(default_factory=list)
+    worker_timeout_s: float = 120.0
+    worker_allow_network: bool = False
+
+    # Syntax-aware repository intelligence (tree-sitter when installed).
+    codesearch_enabled: bool = True
+
+    # MCP servers: JSON array, parsed by max.mcp.backend.parse_server_configs.
+    mcp_servers: str = ""
+
+    # Browser research (optional Playwright MCP provider), off by default.
+    browser_enabled: bool = False
+    browser_allow_hosts: list[str] = field(default_factory=list)
+
+    # Speech-to-text (mock by default; faster-whisper is an optional extra).
+    stt_backend: str = "mock"
+    stt_model_size: str = "tiny"
+    stt_compute_type: str = "int8"
+    stt_device: str = "cpu"
+    stt_language: str = ""
+    stt_timeout_s: float = 30.0
+    stt_max_duration_s: float = 300.0
+    stt_model_dir: str = ""
+    stt_local_files_only: bool = True
+
     repo_root: Path = REPO_ROOT
 
     # ------------------------------------------------------------------ api
@@ -120,6 +148,22 @@ class Config:
             "auto_promote": self.auto_promote,
             "openclaw_url": self.openclaw_url,
             "openclaw_token_set": bool(self.openclaw_token),
+            "worker": {
+                "enabled": self.worker_enabled,
+                "repos": [str(p) for p in self.worker_repos],
+                "timeout_s": self.worker_timeout_s,
+                "allow_network": self.worker_allow_network,
+            },
+            "codesearch_enabled": self.codesearch_enabled,
+            "mcp_servers_configured": bool(self.mcp_servers.strip()),
+            "browser": {"enabled": self.browser_enabled, "allow_hosts": self.browser_allow_hosts},
+            "stt": {
+                "backend": self.stt_backend,
+                "model_size": self.stt_model_size,
+                "device": self.stt_device,
+                "timeout_s": self.stt_timeout_s,
+                "local_files_only": self.stt_local_files_only,
+            },
         }
 
     # ------------------------------------------------------------ factory
@@ -165,6 +209,26 @@ class Config:
             auto_promote=_split(env("MAX_AUTOPROMOTE", "skill,docs")) or ["skill", "docs"],
             openclaw_url=env("MAX_OPENCLAW_URL"),
             openclaw_token=env("MAX_OPENCLAW_TOKEN"),
+            worker_enabled=_bool(env("MAX_WORKER_ENABLE"), False),
+            worker_repos=[
+                (Path(item) if Path(item).is_absolute() else root / item)
+                for item in _split(env("MAX_WORKER_REPOS"))
+            ],
+            worker_timeout_s=float(env("MAX_WORKER_TIMEOUT_S", "120") or 120),
+            worker_allow_network=_bool(env("MAX_WORKER_NETWORK"), False),
+            codesearch_enabled=_bool(env("MAX_CODESEARCH_ENABLE"), True),
+            mcp_servers=env("MAX_MCP_SERVERS"),
+            browser_enabled=_bool(env("MAX_BROWSER_ENABLE"), False),
+            browser_allow_hosts=_split(env("MAX_BROWSER_ALLOW_HOSTS")),
+            stt_backend=env("MAX_STT_BACKEND", "mock").lower() or "mock",
+            stt_model_size=env("MAX_STT_MODEL_SIZE", "tiny") or "tiny",
+            stt_compute_type=env("MAX_STT_COMPUTE_TYPE", "int8") or "int8",
+            stt_device=env("MAX_STT_DEVICE", "cpu") or "cpu",
+            stt_language=env("MAX_STT_LANGUAGE"),
+            stt_timeout_s=float(env("MAX_STT_TIMEOUT_S", "30") or 30),
+            stt_max_duration_s=float(env("MAX_STT_MAX_DURATION_S", "300") or 300),
+            stt_model_dir=env("MAX_STT_MODEL_DIR"),
+            stt_local_files_only=_bool(env("MAX_STT_LOCAL_FILES_ONLY"), True),
             repo_root=root,
         )
 
