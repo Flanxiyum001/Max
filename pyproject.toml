@@ -1,10 +1,11 @@
 [project]
 name = "max-assistant"
-version = "0.2.0"
-description = "MAX — personal AI assistant core (Stage 2: open-source integration, autonomous improvement, testing)"
+version = "1.0.0a1"
+description = "MAX — personal AI assistant core (v1: Discord text MVP on the Stage 2 foundation)"
 requires-python = ">=3.11"
 dependencies = [
     "pyyaml>=6.0",
+    "discord.py>=2.3",
 ]
 
 [project.optional-dependencies]

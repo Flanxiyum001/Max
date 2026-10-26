@@ -13,11 +13,16 @@ open-source candidates on top of it — measured, tested, and documented.
 
 ```bash
 uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -e '.[dev]'
-.venv/bin/python -m pytest              # 96 tests
+.venv/bin/python -m pytest              # 167 tests
 .venv/bin/python -m max health          # status: ok
 .venv/bin/python -m max eval run        # 14/14 scenarios, ~1.5 s
 .venv/bin/python -m max ask "hello"     # offline mock provider by default
+.venv/bin/python -m max discord check   # Discord readiness (Phase 1 text bot)
 ```
+
+> **v1 status:** Discord text MVP implemented and unit-tested (branch
+> `v1/discord-text`); live connection pending a bot token. Voice and music
+> are **not implemented** — see [docs/V1-CHECKLIST.md](docs/V1-CHECKLIST.md).
 
 Real model? Copy `.env.example` → `.env`, set `MAX_PROVIDER=openai`,
 `MAX_BASE_URL`, `MAX_MODEL`, export your key as `$FREELLM_API_KEY`. The
@@ -45,6 +50,8 @@ failures observed in any configuration.
 | Test results & resource measurements | [docs/BENCHMARKS.md](docs/BENCHMARKS.md), `eval/runs/`, `benchmarks/results/` |
 | Candidate repository comparison | [docs/CANDIDATES.md](docs/CANDIDATES.md) |
 | Setup / operation / recovery commands | [docs/SETUP.md](docs/SETUP.md), [.env.example](.env.example) |
+| Discord setup (intents, least-privilege perms, privacy) | [docs/DISCORD.md](docs/DISCORD.md) |
+| v1 implementation checklist | [docs/V1-CHECKLIST.md](docs/V1-CHECKLIST.md) |
 | Dependencies, licenses, security concerns | [docs/SECURITY.md](docs/SECURITY.md) |
 | Prioritized next stage | [docs/ROADMAP.md](docs/ROADMAP.md) |
 | Evaluation suite (14 scenarios) | `eval/suite/*.yaml` |

@@ -32,11 +32,13 @@ def _print(data, as_json: bool) -> None:
 
 
 # ------------------------------------------------------------------ health
-def cmd_health(args) -> int:
+def build_health_payload(config: Config) -> dict:
+    """Health payload shared by `max health` and the Discord `!max health`.
+
+    Never includes secret values — only presence flags.
+    """
     from .improve import Policy, PolicyError
 
-    config = Config.from_env()
-    config.ensure_dirs()
     status = {
         "status": "ok",
         "version": __version__,
@@ -44,20 +46,17 @@ def cmd_health(args) -> int:
         "provider": config.redacted(),
     }
 
-    # provider build check (never raises out of here)
     from .providers import ProviderError, build_provider
 
     try:
         provider = build_provider(config)
         status["provider_check"] = provider.health()
         status["provider_check"]["key_configured"] = bool(config.api_key)
-        if "key" in status["provider_check"]:
-            status["provider_check"].pop("key")
+        status["provider_check"].pop("key", None)
     except ProviderError as exc:
         status["status"] = "degraded"
         status["provider_check"] = {"ok": False, "error": str(exc)}
 
-    # skills
     try:
         from .skills import SkillRegistry
 
@@ -79,7 +78,6 @@ def cmd_health(args) -> int:
         status["status"] = "degraded"
         status["skills"] = {"error": str(exc)}
 
-    # policy integrity
     try:
         policy = Policy.load()
         status["policy"] = {"version": policy.policy_version, "digest": policy.digest[:16], "ok": True}
@@ -87,7 +85,6 @@ def cmd_health(args) -> int:
         status["status"] = "degraded"
         status["policy"] = {"ok": False, "error": str(exc)}
 
-    # writable data dir
     try:
         probe = config.data_dir / ".healthcheck"
         probe.write_text("ok", encoding="utf-8")
@@ -98,7 +95,6 @@ def cmd_health(args) -> int:
         status["data_dir_writable"] = False
         status["data_dir_error"] = str(exc)
 
-    # last eval run
     runs = sorted((config.repo_root / "eval" / "runs").glob("*.json"))
     if runs:
         try:
@@ -111,7 +107,13 @@ def cmd_health(args) -> int:
             }
         except ValueError:
             status["last_eval"] = {"run": runs[-1].name, "error": "unreadable"}
+    return status
 
+
+def cmd_health(args) -> int:
+    config = Config.from_env()
+    config.ensure_dirs()
+    status = build_health_payload(config)
     _print(status, args.json)
     return 0 if status["status"] == "ok" else 1
 
@@ -308,6 +310,110 @@ def cmd_improve(args) -> int:
         return 1
 
 
+# ---------------------------------------------------------------- discord
+def build_router(config: "DiscordConfig"):
+    """Wire the Discord router to the real MAX core (agent, audit, memory)."""
+    from .core.factory import build_agent
+    from .core.tools import AuditLog
+    from .core.usermemory import UserMemoryStore
+    from .discord import ChannelStore, DiscordRouter
+
+    core = Config.from_env()
+    core.ensure_dirs()
+    audit = AuditLog(core.data_dir / "audit" / "audit.jsonl")
+    agent = build_agent(core)
+    store = ChannelStore(config, audit)
+    memory = UserMemoryStore(core.data_dir, scope="user")
+    router = DiscordRouter(
+        config,
+        store,
+        audit,
+        ask_fn=lambda text, session: agent.ask(text, session_id=session),
+        memory=memory,
+        health_fn=lambda: build_health_payload(core),
+    )
+    return router, store, audit, core
+
+
+def cmd_discord(args) -> int:
+    from .discord import DiscordConfig
+
+    config = DiscordConfig.from_env()
+
+    if args.discord_cmd == "check":
+        from .discord import ChannelStore
+        from .core.tools import AuditLog
+
+        core = Config.from_env()
+        audit = AuditLog(core.data_dir / "audit" / "audit.jsonl")
+        store = ChannelStore(config, audit)
+        warnings: list[str] = []
+        if config.enable and not config.token:
+            warnings.append("MAX_DISCORD_ENABLE=1 but MAX_DISCORD_TOKEN is empty")
+        if not config.token:
+            warnings.append("no bot token configured (MAX_DISCORD_TOKEN)")
+        if not store.effective_allowlist() and config.dm_mode == "off":
+            warnings.append("channel allowlist is empty and DMs are off — the bot will never reply")
+        if config.dm_mode == "everyone":
+            warnings.append("dm_mode=everyone allows DMs from any user — tighten for privacy")
+        if not config.allowed_guilds:
+            warnings.append("no guild allowlist configured (channel allowlist still applies)")
+        report = {
+            "enabled": config.enable,
+            "token_configured": bool(config.token),
+            "token_env_var": "MAX_DISCORD_TOKEN",
+            "command_prefix": config.command_prefix,
+            "response_mode": config.response_mode,
+            "dm_mode": config.dm_mode,
+            "effective_allowlist": sorted(store.effective_allowlist()),
+            "ignored_channels": sorted(config.ignored_channels),
+            "admin_users": len(config.admin_users),
+            "admin_roles": len(config.admin_roles),
+            "required_intents": ["message_content (privileged — enable in the Developer Portal)", "guilds"],
+            "least_privilege_permissions": [
+                "View Channels",
+                "Send Messages",
+                "Send Messages in Threads",
+                "Read Message History",
+            ],
+            "voice": "not enabled in Phase 1",
+            "music": "not enabled in Phase 1",
+            "warnings": warnings,
+        }
+        _print(report, args.json)
+        return 1 if (config.enable and not config.token) else 0
+
+    # ------------------------------------------------------------- run
+    if not config.token:
+        print("error: MAX_DISCORD_TOKEN is not set — see docs/DISCORD.md", file=sys.stderr)
+        return 1
+    try:
+        router, store, audit, core = build_router(config)
+    except Exception as exc:  # noqa: BLE001
+        print(f"error: failed to initialize MAX core: {exc}", file=sys.stderr)
+        return 1
+    try:
+        from .discord.bot import MaxDiscordBot
+    except Exception as exc:  # noqa: BLE001
+        print(f"error: discord.py unavailable: {exc}", file=sys.stderr)
+        return 1
+    bot = MaxDiscordBot(config, router, audit)
+    print(
+        f"starting MAX discord bot | prefix={config.command_prefix} "
+        f"| allowlist={len(store.effective_allowlist())} channel(s) "
+        f"| dm_mode={config.dm_mode} | response_mode={config.response_mode}"
+    )
+    try:
+        bot.run(config.token, log_handler=None)  # token never printed
+    except KeyboardInterrupt:
+        print("\nstopped")
+    except Exception as exc:  # noqa: BLE001 - login/network failures
+        print(f"error: discord login/session failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        audit.record("discord_start_failed", error=type(exc).__name__)
+        return 1
+    return 0
+
+
 # ------------------------------------------------------------------- bench
 def cmd_bench(args) -> int:
     from .bench import run_benchmarks
@@ -393,6 +499,15 @@ def main(argv: list[str] | None = None) -> int:
     i_rollback.set_defaults(func=cmd_improve)
     i_trust = improve_sub.add_parser("trust-policy")
     i_trust.set_defaults(func=cmd_improve)
+
+    p_discord = sub.add_parser("discord", help="Discord bot (Phase 1: text only)")
+    p_discord.set_defaults(func=cmd_discord)
+    discord_sub = p_discord.add_subparsers(dest="discord_cmd", required=True)
+    d_check = discord_sub.add_parser("check", help="validate configuration, intents and permissions")
+    d_check.add_argument("--json", action="store_true")
+    d_check.set_defaults(func=cmd_discord)
+    d_run = discord_sub.add_parser("run", help="start the bot (requires MAX_DISCORD_TOKEN)")
+    d_run.set_defaults(func=cmd_discord)
 
     p_bench = sub.add_parser("bench", help="resource and latency benchmarks")
     p_bench.add_argument("--configs", default="A,D")

@@ -79,6 +79,58 @@ def _load_skill(args: dict, ctx: ToolContext) -> str:
     return header + body[:12000]
 
 
+def _search_files(args: dict, ctx: ToolContext) -> str:
+    """Regex search inside the workspace — no shell, bounded output."""
+    import re as _re
+
+    pattern = str(args.get("pattern") or args.get("query") or "").strip()
+    if not pattern:
+        raise ToolError("pattern is required")
+    try:
+        rx = _re.compile(pattern)
+    except _re.error as exc:
+        raise ToolError(f"invalid regex: {exc}") from None
+
+    scope = resolve_within(ctx.workspace_dir, str(args.get("path") or "."))
+    if not scope.exists():
+        raise ToolError(f"no such path: {args.get('path')}")
+    limit = max(1, min(int(args.get("limit") or 50), 100))
+
+    skip_dirs = {".git", "__pycache__", "node_modules", ".venv", "venv"}
+    skip_ext = {
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf", ".zip",
+        ".gz", ".tar", ".exe", ".so", ".dylib", ".dll", ".bin", ".woff",
+        ".woff2", ".ttf", ".mp3", ".mp4", ".pyc",
+    }
+    files = [scope] if scope.is_file() else sorted(
+        p for p in scope.rglob("*")
+        if p.is_file() and not (skip_dirs & set(p.parts)) and p.suffix.lower() not in skip_ext
+    )
+
+    hits: list[str] = []
+    scanned = 0
+    for path in files:
+        if path.stat().st_size > 1_000_000:
+            continue
+        scanned += 1
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            if rx.search(line):
+                try:
+                    rel = path.relative_to(ctx.workspace_dir)
+                except ValueError:
+                    rel = path
+                hits.append(f"{rel}:{lineno}: {line.strip()[:200]}")
+                if len(hits) >= limit:
+                    return "\n".join(hits) + "\n...[truncated]"
+    if not hits:
+        return f"no matches for /{pattern}/ in {scanned} file(s)"
+    return "\n".join(hits)
+
+
 def _run_command(args: dict, ctx: ToolContext) -> str:
     """Shell execution. Registered but denied by default policy (category=exec)."""
     raise ToolError("shell execution is unavailable in this configuration")
@@ -150,6 +202,26 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
             },
             category="skill",
             handler=_load_skill,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="search_files",
+            description=(
+                "Search files under the workspace with a regular expression; "
+                "returns file:line:content matches (bounded)."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string", "description": "python regex"},
+                    "path": {"type": "string", "description": "relative dir/file (default .)"},
+                    "limit": {"type": "integer", "description": "max matches (<=100)"},
+                },
+                "required": ["pattern"],
+            },
+            category="read",
+            handler=_search_files,
         )
     )
     registry.register(

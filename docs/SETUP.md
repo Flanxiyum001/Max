@@ -8,7 +8,7 @@ ready from the repository root.
 ```bash
 # Python 3.11+ (this session used 3.12.3 via uv)
 uv venv --python 3.12 .venv
-uv pip install --python .venv/bin/python -e '.[dev]'   # pyyaml + pytest
+uv pip install --python .venv/bin/python -e '.[dev]'   # pyyaml + discord.py + pytest
 # (equivalent: .venv/bin/pip install -e '.[dev]')
 
 # configuration
@@ -19,9 +19,10 @@ cp .env.example .env          # optional; defaults are offline (mock provider)
 .venv/bin/python -m max improve trust-policy   # already pinned in this repo
 
 # verify
-.venv/bin/python -m pytest                 # 96 unit/integration tests
+.venv/bin/python -m pytest                 # 167 unit/integration tests
 .venv/bin/python -m max health             # status: ok
 .venv/bin/python -m max eval run           # 14/14 scenarios
+.venv/bin/python -m max discord check      # Discord readiness report
 ```
 
 ## 2. Everyday commands
@@ -29,6 +30,8 @@ cp .env.example .env          # optional; defaults are offline (mock provider)
 ```bash
 .venv/bin/python -m max ask "hello"                 # one-shot chat (mock by default)
 .venv/bin/python -m max ask "…" --session work --json
+.venv/bin/python -m max discord check [--json]      # Discord config/intent/permission audit
+.venv/bin/python -m max discord run                 # start the text bot (needs MAX_DISCORD_TOKEN)
 .venv/bin/python -m max skills list                 # registry + status
 .venv/bin/python -m max skills show csv-summary
 .venv/bin/python -m max eval run [--filter 07] [--json]
