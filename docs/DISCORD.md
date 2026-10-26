@@ -150,3 +150,25 @@ in this environment. Live verification checklist for the owner:
 * Discord rate limits are handled by discord.py; MAX adds its own per-
   channel cooldown on top (this can make MAX feel deliberately quiet in
   fast-moving channels — tune `MAX_DISCORD_COOLDOWN_S`).
+
+## 10. Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Bot replies but message text is empty | **MESSAGE CONTENT INTENT** not enabled | Developer Portal → Bot → Privileged Gateway Intents → enable it (§1.3) |
+| Bot silent everywhere | channel not allowlisted, or `MAX_DISCORD_ENABLE=0` | `!max status` (shows this channel's state), `max discord check`, then `!max allow <#chan>` as an admin |
+| `discord_login_failed` / 401 | token missing or rotated | set `MAX_DISCORD_TOKEN` in the environment; never in a file |
+| `Missing Access` / 403 on send | bot lacks View Channel or Send Messages, or its role outranks it | re-invite with permission integer **101376** (§1); do not add Administrator |
+| Commands ignored in one channel | that channel is in `ignored_channels` (it wins over everything) | `MAX_DISCORD_IGNORED_CHANNELS` or `!max channels` to inspect |
+| No reply after a provider error | failure backoff (`MAX_DISCORD_ERROR_COOLDOWN_S`, default 30 s) | wait it out; check `var/audit/audit.jsonl` for the failure record |
+| Two messages, one reply | per-channel cooldown working as designed | tune `MAX_DISCORD_COOLDOWN_S` |
+| `Authorization denied` on `!max allow` | you are not in `MAX_DISCORD_ADMINS`/`MAX_DISCORD_ADMIN_ROLES` | set the admin env vars; the denial is intentional and audited |
+| Replies in threads only after allowlisting | a thread has its own channel id | allowlist the thread id explicitly |
+| Startup fails with `policy` digest error | `config/policy.yaml` edited without re-pinning | `.venv/bin/python -m max skills list` / re-run the pin step in `docs/SETUP.md` §1 |
+
+Check the audit trail before assuming a bug:
+
+```bash
+tail -5 var/audit/audit.jsonl      # actor, action, channel, outcome — no message contents
+.venv/bin/python -m max discord check --json
+```

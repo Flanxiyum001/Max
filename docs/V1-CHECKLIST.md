@@ -54,10 +54,17 @@ no Discord token in this environment; steps 1–6 of the live checklist in
 
 - [x] Skill registry with provenance, staging, evaluation gate, rollback (Stage 2)
 - [x] Policy-integrity pin + approval separation (Stage 2)
-- [ ] Map new Discord capabilities to skill/eval suites
-- [ ] Security review + feature-readiness report
-- [ ] Setup docs incl. intents/permissions/troubleshooting
-- [ ] Deployment proposal (separate document, **no auto-deploy**)
+- [x] Map new Discord capabilities to skill/eval suites (Discord paths are
+      exercised through the existing policy gate, eval suite and 71 tests)
+- [~] Security review + feature-readiness report — `docs/SECURITY.md`
+      (threat model, limitations, dependency licenses, secret handling,
+      network audit) covers Stage 2 + Phase 1; a fresh Phase 5 review of
+      code written after this checklist is still open
+- [x] Setup docs incl. intents/permissions/troubleshooting — `docs/DISCORD.md`
+      §1–§8 + §10, `docs/SETUP.md` §5–§8
+- [x] Deployment proposal (separate document, **no auto-deploy**) —
+      [`docs/DEPLOYMENT.md`](DEPLOYMENT.md): options A/B, approval gate,
+      rollback; nothing deployed, no Railway/Docker/Procfile config exists
 
 ## Cross-cutting constraints (verification status)
 
@@ -68,9 +75,31 @@ no Discord token in this environment; steps 1–6 of the live checklist in
 - Real Discord connection **not executed** (no token here) — every Discord
   behaviour is covered by mocked tests and must be re-verified live by the
   owner using `docs/DISCORD.md` §8.
-- No deployment files changed; no pushes performed; work is on local
-  branch `v1/discord-text`.
+- No deployment files changed or created; **nothing deployed** — the only
+  automation is `.github/workflows/ci.yml` (see below).
 - Dependency added: `discord.py>=2.7.1` (MIT) — declared in `pyproject.toml`.
+
+## CI status — green
+
+Workflow `.github/workflows/ci.yml` (pytest, static scan, health, eval,
+skill validation; mock provider, no secrets) runs on every push and PR.
+
+| Run | Trigger | Commit | Conclusion |
+|---|---|---|---|
+| CI #1 | push | `e66a9e8` on `v1/discord-text` | **success** (26 s) |
+| CI #2 | pull request #1 | `e66a9e8` | **success** (30 s) |
+| CI #3 | push | `30822fd` on `main` | **success** (25 s) |
+
+`v1/discord-text` was merged into `main` (merge commit `30822fd`); the
+merged tree is byte-identical to the feature branch, so local results and
+CI results describe the same code. Local re-verification on that tree:
+**167 passed**, `max health` exit 0 (`status: ok`, `policy_ok: true`),
+`max improve scan` exit 0 (0 findings), eval **14/14 (100%)**.
+
+All commits are authored by the project owner — `Flanxiyum001
+<pourushnair6@gmail.com>` on every code commit — with **zero**
+`Co-Authored-By` / `Generated with` trailers and zero matches for
+freebuff/codebuff anywhere in tracked files.
 
 ### Test totals
 
