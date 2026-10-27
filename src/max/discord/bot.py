@@ -91,6 +91,9 @@ class MaxDiscordBot(discord.Client if discord is not None else object):  # type:
             allowed_channels=len(self.config.allowed_channels),
         )
         log.info("MAX discord ready as %s in %s guild(s)", user_id, guilds)
+        # A running container does not prove the Discord gateway connected.
+        # Emit a non-secret readiness event to stdout for worker-only hosts.
+        print(f"MAX_DISCORD_READY user_id={user_id} guilds={guilds}", flush=True)
 
     async def on_message(self, message: Any) -> None:
         if not _is_sendable(message.channel):

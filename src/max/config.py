@@ -227,11 +227,19 @@ class Config:
         if not skills_dirs:
             skills_dirs = [root / "skills"]
 
+        # The pre-v1 Railway service uses AI_* variables. Respect explicit
+        # MAX_* settings first, while keeping a fresh install offline.
+        legacy_base_url = env("AI_BASE_URL")
+        legacy_model = env("AI_MODEL")
+        legacy_ready = bool(legacy_base_url and legacy_model)
+        provider_name = env("MAX_PROVIDER") or ("openai" if legacy_ready else "mock")
+        key_env = env("MAX_API_KEY_ENV") or ("AI_API_KEY" if legacy_ready else "FREELLM_API_KEY")
+
         return cls(
-            provider=env("MAX_PROVIDER", "mock").lower() or "mock",
-            base_url=env("MAX_BASE_URL"),
-            model=env("MAX_MODEL"),
-            api_key_env=env("MAX_API_KEY_ENV", "FREELLM_API_KEY"),
+            provider=provider_name.lower(),
+            base_url=env("MAX_BASE_URL") or legacy_base_url,
+            model=env("MAX_MODEL") or legacy_model,
+            api_key_env=key_env,
             timeout_s=float(env("MAX_TIMEOUT_S", "60") or 60),
             retries=int(env("MAX_RETRIES", "1") or 1),
             max_iters=int(env("MAX_MAX_ITERS", "8") or 8),
