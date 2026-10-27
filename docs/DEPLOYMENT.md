@@ -33,11 +33,11 @@ Phase 6 forbids deploying without explicit approval.
 | Evaluation | `python -m max eval run --label ci` | **14/14 (100%)** |
 | Skills | `python -m max skills list --json` | 1 skill, 0 flagged |
 
-Observed runs: **12 total, all `success`, zero failures in the
-repository's run history** — most recently #10 (`main` @ `e88267f`),
-#11 and #12 (`v2/capabilities` @ `1215745` and `9827173`), 25–40 s
-each. CI uses the mock provider, so it needs no secrets and cannot
-spend provider credits.
+Observed runs: **every run in the repository's history concluded
+`success`** — `?status=failure` returns `total_count: 0` (checked 27 Oct
+2026, including every push to `v2/capabilities`). Live status:
+`https://github.com/Flanxiyum001/Max/actions`. CI uses the mock
+provider, so it needs no secrets and cannot spend provider credits.
 
 CI proves the code is sound. It does **not** prove a deployment works:
 there is no deploy job, and none should be added without approval.

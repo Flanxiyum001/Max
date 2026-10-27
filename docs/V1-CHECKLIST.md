@@ -99,9 +99,11 @@ skill validation; mock provider, no secrets) runs on every push and PR.
 | CI #10 | push | `e88267f` on `main` | **success** (39 s) |
 | CI #11 | push | `1215745` on `v2/capabilities` | **success** (32 s) |
 | CI #12 | push | `9827173` on `v2/capabilities` | **success** (35 s) |
+| CI #13 | push | `34c439a` on `v2/capabilities` | **success** (29 s) |
 
-**12 runs total, all `success`, zero failures in the repository's run
-history** (`?status=failure` → `total_count: 0`).
+**Every run in the repository's history concluded `success`** —
+`?status=failure` returns `total_count: 0` (checked 27 Oct 2026).
+Snapshot below through run #13; later runs are on the Actions tab.
 
 `v1/discord-text` was merged into `main` (merge commit `30822fd`); the
 merged tree is byte-identical to the feature branch, so local results and
