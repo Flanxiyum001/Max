@@ -123,7 +123,10 @@ class DiscordConfig:
             allowed_channels=_ids(env("MAX_DISCORD_ALLOWED_CHANNELS")),
             ignored_channels=_ids(env("MAX_DISCORD_IGNORED_CHANNELS")),
             allowed_guilds=_ids(env("MAX_DISCORD_GUILD_IDS")),
-            admin_users=_ids(env("MAX_DISCORD_ADMINS")),
+            # Existing Railway installations stored the owner IDs under
+            # MAX_OWNER_DISCORD_IDS. Use them only when the new admin
+            # allowlist is absent; never make all guild members admins.
+            admin_users=_ids(env("MAX_DISCORD_ADMINS") or env("MAX_OWNER_DISCORD_IDS")),
             admin_roles=_ids(env("MAX_DISCORD_ADMIN_ROLES")),
             dm_mode=dm_mode,
             dm_users=_ids(env("MAX_DISCORD_DM_USERS")),
