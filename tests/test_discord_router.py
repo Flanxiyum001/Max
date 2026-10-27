@@ -403,3 +403,38 @@ def test_rejected_tool_in_reply_is_audited(tmp_path):
     router.handle(view())
     event = audit.events("discord_reply_sent")[-1]
     assert event.get("rejected_tools") == ["run_command"]
+
+def test_owner_gets_setup_hint_and_can_activate_channel(tmp_path):
+    cfg = DiscordConfig(
+        allowed_channels=set(),
+        admin_users={ADMIN},
+        allowlist_file=tmp_path / "allowlist.json",
+        cooldown_s=0.0,
+    )
+    router, audit, _, store = make_router(tmp_path, config=cfg)
+    owner_message = view(message_id=4001, author_id=ADMIN, content="hi")
+    hint = router.handle(owner_message)
+    assert hint.action == "reply" and hint.reason == "setup_required"
+    assert "!max allow" in hint.replies[0]
+    assert audit.events("discord_setup_required")
+
+    stranger = router.handle(view(message_id=4002, author_id=PLAIN_USER, content="hi"))
+    assert stranger.action == "suppressed"
+    assert stranger.reason == "channel_not_allowlisted"
+
+    activation = router.handle(view(message_id=4003, author_id=ADMIN, content="!max allow"))
+    assert activation.action == "command"
+    assert store.is_allowed(CHANNEL, GUILD)
+    assert router.handle(view(message_id=4004, author_id=PLAIN_USER, content="hi")).action == "reply"
+
+
+def test_owner_setup_hint_never_bypasses_ignored_channel(tmp_path):
+    cfg = DiscordConfig(
+        ignored_channels={CHANNEL},
+        admin_users={ADMIN},
+        allowlist_file=tmp_path / "allowlist.json",
+        cooldown_s=0.0,
+    )
+    router, _, _, _ = make_router(tmp_path, config=cfg)
+    result = router.handle(view(message_id=4010, author_id=ADMIN, content="hi"))
+    assert result.action == "suppressed" and not result.replies
