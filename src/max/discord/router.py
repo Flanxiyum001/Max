@@ -15,7 +15,7 @@ Decision order (fail closed):
 from __future__ import annotations
 
 import time
-from collections import OrderedDict, deque
+from collections import Counter, OrderedDict, deque
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -116,6 +116,11 @@ class DiscordRouter:
         self._seen_size = max(16, seen_size)
         self._own_messages: deque[int] = deque(maxlen=256)
         self._suppress_audited: dict[tuple[int, str], float] = {}
+        self._traced: dict[tuple[int, str], float] = {}
+        # messages that arrived with no text at all — the classic symptom of
+        # the privileged Message Content Intent being off in the portal.
+        self._empty_content = Counter()
+        self._empty_content_total = 0
 
     # ------------------------------------------------------------ helpers
     def remember_own_message(self, message_id: int) -> None:
@@ -152,8 +157,62 @@ class DiscordRouter:
             return f"dm_u{view.author_id}"
         return f"g{view.guild_id}_c{view.channel_id}"
 
+    # ------------------------------------------------------------ tracing
+    def diagnostics(self) -> dict:
+        """Silence diagnostics exposed by `!max status` — never message text."""
+        worst = self._empty_content.most_common(3)
+        return {
+            "empty_content_total": self._empty_content_total,
+            "empty_content_channels": [
+                {"channel": cid, "count": n} for cid, n in worst
+            ],
+            "message_content_intent_warning": (
+                "messages arrived without text — enable the Message Content "
+                "Intent in the Discord Developer Portal"
+                if self._empty_content_total
+                else None
+            ),
+        }
+
+    def _trace(self, view: MessageView, result: RouteResult) -> None:
+        """Every routed message leaves an outcome; contents are never recorded.
+
+        Replies, commands and errors are always recorded. Pure ignores and
+        suppressions are rate-limited to one entry per (channel, outcome) per
+        60 s so a busy non-allowlisted channel cannot flood the audit log —
+        except when MAX was explicitly mentioned, which is never throttled.
+        """
+        always = result.action in {"reply", "command"} or result.error
+        if not always:
+            reason = result.reason or "-"
+            key = (view.channel_id, f"{result.action}:{reason}")
+            forced = bool(view.bot_id is not None and view.bot_id in view.mentioned_ids)
+            now = self._clock()
+            last = self._traced.get(key)
+            if not forced and last is not None and now - last < 60.0:
+                return
+            self._traced[key] = now
+            while len(self._traced) > 512:
+                self._traced.pop(next(iter(self._traced)))
+        self.audit.record(
+            "discord_message_outcome",
+            action=result.action,
+            reason=result.reason or None,
+            channel=view.channel_id,
+            guild=view.guild_id,
+            dm=view.is_dm,
+            command=result.command or None,
+            error=result.error,
+        )
+
     # ------------------------------------------------------------- routing
     def handle(self, view: MessageView) -> RouteResult:
+        """Route one message and guarantee an audited outcome."""
+        result = self._route(view)
+        self._trace(view, result)
+        return result
+
+    def _route(self, view: MessageView) -> RouteResult:
         # 1. loop and duplicate protection ----------------------------------
         if view.bot_id is not None and view.author_id == view.bot_id:
             return RouteResult("ignored", reason="own_message")
@@ -165,6 +224,11 @@ class DiscordRouter:
 
         content = (view.content or "").strip()
         if not content:
+            # Attachments, stickers and intent-less payloads land here. Count
+            # them per channel so `!max status` can point at the real cause.
+            self._empty_content_total += 1
+            if not view.is_dm:
+                self._empty_content[view.channel_id] += 1
             return RouteResult("ignored", reason="empty_message")
 
         # 2. explicit commands ---------------------------------------------
@@ -270,6 +334,10 @@ class DiscordRouter:
                 f"caller admin: {self.config.is_admin(view.author_id, view.author_roles)}",
                 f"provider backoff active: {self.backoff.suppressed()}",
             ]
+            diag = self.diagnostics()
+            lines.append(f"empty-content messages: {diag['empty_content_total']}")
+            if diag["message_content_intent_warning"]:
+                lines.append(f"warning: {diag['message_content_intent_warning']}")
             return RouteResult("command", replies=lines)
         if name == "perms":
             lines = [
@@ -403,6 +471,11 @@ class DiscordRouter:
                 return RouteResult("suppressed", reason="dm_user_not_allowlisted")
             # dm_mode == "everyone" is an explicit operator opt-in
         else:
+            if view.channel_id in self.config.ignored_channels:
+                # explicit ignore list wins over any allowlist entry, and gets
+                # its own reason so silence in ignored channels is explainable
+                self._audit_suppressed(view, "ignored_channel")
+                return RouteResult("suppressed", reason="ignored_channel")
             if not self.store.is_allowed(view.channel_id, view.guild_id):
                 self._audit_suppressed(view, "channel_not_allowlisted")
                 return RouteResult("suppressed", reason="channel_not_allowlisted")

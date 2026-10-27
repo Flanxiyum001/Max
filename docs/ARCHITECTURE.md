@@ -138,6 +138,7 @@ export OPENCLAW_STATE_DIR=…/var/openclaw/state
 export OPENCLAW_CONFIG_PATH=…/var/openclaw/config/openclaw.json
 export OPENCLAW_WORKSPACE_DIR=…/var/openclaw/workspace
 export MAX_MOCK_PROVIDER_KEY=…      # random, var/openclaw/provider.key (0600)
+                                     # NOTE: an OpenClaw-tool variable — MAX never reads it
 export OPENCLAW_GATEWAY_TOKEN=…     # random, var/openclaw/gateway.token (0600)
 openclaw config patch --file var/openclaw/provider.patch.json   # custom model provider
 openclaw config set gateway.mode local && openclaw config validate
@@ -306,5 +307,33 @@ audit event with actor, task id and outcome.
 
 **Disable it:** `MAX_ORCH_ENABLE=0` removes the delegate hook and the task
 commands; text chat, coding questions and every other capability are
-unchanged (covered by the existing 251-test suite, which runs green with the
-layer enabled and with it disabled).
+unchanged (covered by the full test suite, which runs green with the layer
+enabled and with it disabled).
+
+## 9. Discord message path and observability (Phase A)
+
+```
+discord.py event
+    │  bot.py  — I/O only: build MessageView, typing indicator, send chunks
+    ▼
+router.handle(view)  ──►  _route() decides,  _trace() records the outcome
+    │                     audit: discord_message_outcome {action, reason,
+    │                             channel, guild, command, error} — never content
+    ▼
+RouteResult {action: reply | command | suppressed | ignored, replies[]}
+```
+
+Decision order is unchanged and fail-closed: self/other-bot/duplicate →
+empty content → commands (authorization at this layer) → channel allowlist →
+DM policy → response mode → cooldown → provider backoff → agent → chunked
+replies. What Phase A added is that **no branch returns silently**: pure
+ignores and suppressions are audited too (throttled to one entry per channel
+and reason per 60 s, never throttled when MAX is mentioned), empty-content
+messages are counted and diagnosed as a Message Content Intent problem in
+`!max status`, and `on_ready` logs and audits the effective configuration
+(`startup_summary`) including an explicit warning when the allowlist is empty.
+
+The startup banner and audit events carry the **provider name only** —
+never a base URL, model key or token (`_provider_label`, `startup_summary`
+and `discord_check_report` are pure functions with unit tests asserting the
+absence of secrets).

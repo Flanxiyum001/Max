@@ -398,10 +398,19 @@ def test_parallel_research_and_coding_tasks_run_concurrently(tmp_config):
     assert report.completed == 4
     assert len(started) == 4
     starts = dict(started)
-    # researcher and coder are independent, so they must be in flight together
+    ends = dict(finished)
+    # researcher and coder are independent, so they must be in flight together:
+    # the coder has to start before the researcher's 0.15 s of work is done.
+    # This proves overlap deterministically, without a wall-clock threshold.
     assert abs(starts["coder"] - starts["researcher"]) < 0.1
-    # serial execution of four 0.15/0.15/0.01/0.01 workers would take >= 0.32 s
-    assert elapsed < 0.30, f"expected parallel execution, took {elapsed:.3f}s"
+    assert ends["researcher"] > starts["coder"], (
+        "researcher finished before the coder started — tasks ran serially"
+    )
+    # Serial execution of 0.15 + 0.15 + 0.01 + 0.01 s is >= 0.32 s plus the
+    # same scheduling overhead this test pays. The bound is deliberately
+    # loose so a loaded CI box cannot make it flaky; the overlap assertion
+    # above is what actually proves concurrency.
+    assert elapsed < 0.32 + 0.10, f"expected parallel execution, took {elapsed:.3f}s"
 
 
 def test_malformed_worker_output_fails_only_that_task(tmp_config):

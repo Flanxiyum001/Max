@@ -311,6 +311,52 @@ def cmd_improve(args) -> int:
 
 
 # ---------------------------------------------------------------- discord
+def discord_check_report(config: "DiscordConfig", store) -> dict:
+    """Secret-free configuration report for `max discord check`.
+
+    Pure function (unit-testable) that separates *misconfiguration* — exit
+    status 1 — from advisory warnings, and never includes the token.
+    """
+    from .discord.bot import required_permissions
+
+    warnings: list[str] = []
+    if config.enable and not config.token:
+        warnings.append("MAX_DISCORD_ENABLE=1 but MAX_DISCORD_TOKEN is empty")
+    if not config.token:
+        warnings.append("no bot token configured (MAX_DISCORD_TOKEN)")
+    if config.token and not config.enable:
+        warnings.append(
+            "MAX_DISCORD_ENABLE is 0 while a token is set — `max discord run` "
+            "still starts (advisory switch); set MAX_DISCORD_ENABLE=1 to silence this"
+        )
+    if not store.effective_allowlist() and config.dm_mode == "off":
+        warnings.append("channel allowlist is empty and DMs are off — the bot will never reply")
+    if config.dm_mode == "everyone":
+        warnings.append("dm_mode=everyone allows DMs from any user — tighten for privacy")
+    if not config.allowed_guilds:
+        warnings.append("no guild allowlist configured (channel allowlist still applies)")
+    if not config.admin_users and not config.admin_roles:
+        warnings.append("no administrators configured — allow/deny/channels commands will be denied")
+    return {
+        "enabled": config.enable,
+        "token_configured": bool(config.token),
+        "token_env_var": "MAX_DISCORD_TOKEN",
+        "command_prefix": config.command_prefix,
+        "response_mode": config.response_mode,
+        "dm_mode": config.dm_mode,
+        "effective_allowlist": sorted(store.effective_allowlist()),
+        "ignored_channels": sorted(config.ignored_channels),
+        "admin_users": len(config.admin_users),
+        "admin_roles": len(config.admin_roles),
+        "required_intents": ["message_content (privileged — enable in the Developer Portal)", "guilds"],
+        "least_privilege_permissions": required_permissions(),
+        "voice": "not enabled in Phase 1",
+        "music": "not enabled in Phase 1",
+        "warnings": warnings,
+        "misconfigured": bool(config.enable and not config.token),
+    }
+
+
 def build_router(config: "DiscordConfig"):
     """Wire the Discord router to the real MAX core (agent, audit, memory)."""
     from .core.factory import build_agent
@@ -367,6 +413,22 @@ def build_router(config: "DiscordConfig"):
     return router, store, audit, core
 
 
+def _provider_label(config: Config) -> str:
+    """Sanitized provider identity for banners and audit: name only.
+
+    Never includes a base URL, model credential or key — the startup line
+    and the Discord audit event are both safe to paste into an issue.
+    """
+    name = str(getattr(config, "provider", "") or "unknown")
+    try:
+        from .providers import build_provider
+
+        name = str(build_provider(config).health().get("provider") or name)
+    except Exception:  # noqa: BLE001 - label must never break startup
+        pass
+    return name[:40] or "unknown"
+
+
 def cmd_discord(args) -> int:
     from .discord import DiscordConfig
 
@@ -379,41 +441,10 @@ def cmd_discord(args) -> int:
         core = Config.from_env()
         audit = AuditLog(core.data_dir / "audit" / "audit.jsonl")
         store = ChannelStore(config, audit)
-        warnings: list[str] = []
-        if config.enable and not config.token:
-            warnings.append("MAX_DISCORD_ENABLE=1 but MAX_DISCORD_TOKEN is empty")
-        if not config.token:
-            warnings.append("no bot token configured (MAX_DISCORD_TOKEN)")
-        if not store.effective_allowlist() and config.dm_mode == "off":
-            warnings.append("channel allowlist is empty and DMs are off — the bot will never reply")
-        if config.dm_mode == "everyone":
-            warnings.append("dm_mode=everyone allows DMs from any user — tighten for privacy")
-        if not config.allowed_guilds:
-            warnings.append("no guild allowlist configured (channel allowlist still applies)")
-        report = {
-            "enabled": config.enable,
-            "token_configured": bool(config.token),
-            "token_env_var": "MAX_DISCORD_TOKEN",
-            "command_prefix": config.command_prefix,
-            "response_mode": config.response_mode,
-            "dm_mode": config.dm_mode,
-            "effective_allowlist": sorted(store.effective_allowlist()),
-            "ignored_channels": sorted(config.ignored_channels),
-            "admin_users": len(config.admin_users),
-            "admin_roles": len(config.admin_roles),
-            "required_intents": ["message_content (privileged — enable in the Developer Portal)", "guilds"],
-            "least_privilege_permissions": [
-                "View Channels",
-                "Send Messages",
-                "Send Messages in Threads",
-                "Read Message History",
-            ],
-            "voice": "not enabled in Phase 1",
-            "music": "not enabled in Phase 1",
-            "warnings": warnings,
-        }
+        report = discord_check_report(config, store)
+        warnings = report["warnings"]
         _print(report, args.json)
-        return 1 if (config.enable and not config.token) else 0
+        return 1 if report["misconfigured"] else 0
 
     # ------------------------------------------------------------- run
     if not config.token:
@@ -429,11 +460,21 @@ def cmd_discord(args) -> int:
     except Exception as exc:  # noqa: BLE001
         print(f"error: discord.py unavailable: {exc}", file=sys.stderr)
         return 1
-    bot = MaxDiscordBot(config, router, audit)
+    bot = MaxDiscordBot(
+        config, router, audit, provider_label=_provider_label(core)
+    )
+    if config.token and not config.enable:
+        print(
+            "warning: MAX_DISCORD_ENABLE is 0 — starting anyway because a token "
+            "is configured (advisory switch; see docs/CONFIGURATION.md)",
+            file=sys.stderr,
+        )
+        audit.record("discord_enable_flag_off", token_configured=True)
     print(
         f"starting MAX discord bot | prefix={config.command_prefix} "
         f"| allowlist={len(store.effective_allowlist())} channel(s) "
-        f"| dm_mode={config.dm_mode} | response_mode={config.response_mode}"
+        f"| dm_mode={config.dm_mode} | response_mode={config.response_mode} "
+        f"| provider={_provider_label(core)}"
     )
     try:
         bot.run(config.token, log_handler=None)  # token never printed
