@@ -52,3 +52,24 @@ def test_redacted_never_contains_secret(tmp_path, monkeypatch):
     assert "gateway-token-value" not in snapshot
     assert config.redacted()["api_key_set"] is True
     assert config.redacted()["openclaw_token_set"] is True
+
+def test_legacy_railway_ai_settings_select_real_provider(tmp_path, monkeypatch):
+    # Existing Railway deployments use AI_* instead of MAX_*.
+    for key in ("MAX_PROVIDER", "MAX_BASE_URL", "MAX_MODEL", "MAX_API_KEY_ENV"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("AI_BASE_URL", "https://example.invalid/v1")
+    monkeypatch.setenv("AI_MODEL", "test-model")
+    monkeypatch.setenv("AI_API_KEY", "testing-not-a-real-key")
+    cfg = Config.from_env(repo_root=tmp_path, apply_dotenv=False)
+    assert cfg.provider == "openai"
+    assert cfg.base_url == "https://example.invalid/v1"
+    assert cfg.model == "test-model"
+    assert cfg.api_key == "testing-not-a-real-key"
+    assert "testing-not-a-real-key" not in repr(cfg.redacted())
+
+    # An explicit MAX configuration always wins.
+    monkeypatch.setenv("MAX_PROVIDER", "mock")
+    monkeypatch.setenv("MAX_MODEL", "custom-model")
+    cfg = Config.from_env(repo_root=tmp_path, apply_dotenv=False)
+    assert cfg.provider == "mock"
+    assert cfg.model == "custom-model"
