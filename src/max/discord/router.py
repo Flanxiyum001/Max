@@ -404,6 +404,28 @@ class DiscordRouter:
             # dm_mode == "everyone" is an explicit operator opt-in
         else:
             if not self.store.is_allowed(view.channel_id, view.guild_id):
+                # A fresh installation has no allowed channels. Give only an
+                # explicitly configured administrator a setup hint;
+                # all other users still receive no reply until allowlisted.
+                if (
+                    not self.store.effective_allowlist()
+                    and view.channel_id not in self.config.ignored_channels
+                    and self.config.guild_allowed(view.guild_id)
+                    and self.config.is_admin(view.author_id, view.author_roles)
+                ):
+                    self.audit.record(
+                        "discord_setup_required",
+                        actor=view.author_id,
+                        channel=view.channel_id,
+                    )
+                    return RouteResult(
+                        "reply",
+                        replies=[
+                            "MAX is online, but no conversation channels are enabled. "
+                            "Send `!max allow` here to enable this channel, then say hi again."
+                        ],
+                        reason="setup_required",
+                    )
                 self._audit_suppressed(view, "channel_not_allowlisted")
                 return RouteResult("suppressed", reason="channel_not_allowlisted")
 
