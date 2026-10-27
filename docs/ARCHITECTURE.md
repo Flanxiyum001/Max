@@ -192,3 +192,119 @@ remains the primary assistant. A clean shutdown script and config live under
 | mock model provider (127.0.0.1:8756) | **off** | experiments only |
 
 No service is exposed beyond loopback, and nothing auto-starts on boot.
+
+## 7. Advanced capability boundaries (added in the integration phase)
+
+```
+Discord / CLI
+     │  (identity: user, guild, channel)
+     ▼
+router.py ──► agent loop ──► PermissionPolicy (config-owned, model-blind)
+                 │                    │
+                 ▼                    ▼
+           ToolExecutor ───► audit.jsonl (actor, action, outcome)
+                 │
+   ┌─────────────┼────────────────┬──────────────────┬──────────────┐
+   ▼             ▼                ▼                  ▼              ▼
+ worker_*     list_symbols/    mcp_list_tools/    browser_*     speech_status
+ (category     find_symbol/    mcp_status          (category net,  (category meta,
+  exec/write/  get_symbol_     (category mcp)       denied by      mock backend
+  read/meta)   source (read)                        default)       by default)
+   │             │                │                  │
+   ▼             ▼                ▼                  ▼
+ CommandPolicy  codesearch     MCPServerManager   BrowserProvider ─► URL guard
+ git worktree   tree-sitter    (filtered env,     (read-only)       (scheme/host/
+ + task caps    or regex       per-tool allow,                      port/private/
+                                 approval gate)                      DNS checks)
+```
+
+Boundaries:
+
+* **One authorization point.** Every new tool is a `ToolSpec` in the single
+  registry and is dispatched only by `ToolExecutor`, so identity, permission
+  check, argument validation, audit and output bounding are identical for old
+  and new capabilities.
+* **Configuration owns privilege.** `Config` gained switches for worker,
+  code search, MCP servers, browser and speech; the model cannot read or
+  change them, and a missing optional dependency only disables its own
+  integration (actionable message, core keeps running).
+* **Worker is not a shell.** `worker_run` takes an argv array, never a string;
+  `CommandPolicy` is deny-by-default and lives outside the agent loop.
+* **Approval is two-sided.** Tools may `request_approval`; only the human CLI
+  entry point grants it.
+* **Optional backends sit behind interfaces** — `CommandPolicy` (executor),
+  `MCPServerManager` (MCP transport), `BrowserProvider` (navigation),
+  `SttService` (speech) — so implementations can change without touching the
+  agent loop.
+
+## 8. Supervised multi-agent orchestration (current phase)
+
+MAX remains the only assistant and the only supervisor. Orchestration is an
+**optional layer in front of the agent loop**, never a second agent runtime:
+
+```
+message ─► router ─► delegate_fn? ─► Supervisor.should_delegate ─┐
+              │               │ no                              │ yes
+              │               └────► agent.ask (single-agent) ◄─┤
+              │                                                 ▼
+              │                            classify → bounded plan (≤4 tasks)
+              │                                                 │
+              │                        TaskScheduler (cap 2, hard cap 3)
+              │                                                 │
+              │              per task: profile ∩ registry ∩ PermissionPolicy
+              │                                                 │
+              │                          ToolExecutor.dispatch (audited)
+              │                                                 ▼
+              └──────────────────► one consolidated reply ◄─ verify/aggregate
+```
+
+Modules (`src/max/orchestration/`):
+
+| File | Responsibility |
+|---|---|
+| `models.py` | `Task`, `TaskState` machine, `WorkerResult` schema + bounds |
+| `workers.py` | four profiles (researcher, coder, tester, reviewer), worker registry |
+| `scheduler.py` | dependency-aware, bounded-concurrency execution, timeouts, cancellation |
+| `policy.py` | grant derivation + per-call authorization (delegates to `PermissionPolicy`) |
+| `supervisor.py` | delegation decision, planning, execution, verification, rendering, task commands |
+| `storage.py` | atomic JSON task records under `var/tasks/` |
+| `coding.py` | coding backends: built-in guarded runner (default) or OpenHands SDK |
+
+**Task lifecycle:** `queued → running → (waiting) → completed | failed |
+cancelled`, transitions validated in `models.Task.transition`; terminal states
+are immutable. Each record carries id, owner, guild/channel, profile, tools,
+dependencies, timestamps, bounded progress, result, failure reason,
+cancellation actor and measured worker duration/call counts.
+
+**Delegation is conservative.** `should_delegate` requires a length floor plus
+an actionable signal (investigate/fix/implement/produce a diff…). Short
+questions, greetings and definitions return `None` and take the normal path —
+measured overhead: < 0.1 ms (`benchmarks/orch_bench.py`, `+decline` rows).
+Override with an explicit `!max task run <description>`.
+
+**One plan, explicit dependencies:** researcher ∥ coder (independent inputs),
+then tester (needs the coder's worktree) then reviewer (needs diff + test
+evidence). Plans are capped at 4 tasks, depth is limited by `MAX_ORCH_DEPTH`,
+and a plan above the scheduler's task ceiling is refused rather than queued.
+
+**Verification is separate from production.** The supervisor validates every
+worker payload against `WorkerResult`, re-checks that reported tests actually
+ran, detects the same file changed by two workers, scans worker output for
+prompt-injection markers, and refuses to report completion on a worker's word
+alone. The reviewer cannot write, cannot execute, and cannot approve its own
+change.
+
+**Workspace lifecycle:** coder creates a git worktree through `worker_create`,
+every subsequent path-taking tool is resolved *inside that worktree* (a scoped
+`ToolExecutor`), and the supervisor discards the worktree after the dependent
+tasks finish unless `MAX_ORCH_KEEP_WORKSPACES=1`.
+
+**Discord surface:** `!max tasks`, `!max task run|show|diff|cancel <id>` —
+ownership is checked on every call (admin visibility is opt-in and audited),
+and every plan, grant, tool call, denial, cancellation and cleanup writes an
+audit event with actor, task id and outcome.
+
+**Disable it:** `MAX_ORCH_ENABLE=0` removes the delegate hook and the task
+commands; text chat, coding questions and every other capability are
+unchanged (covered by the existing 251-test suite, which runs green with the
+layer enabled and with it disabled).

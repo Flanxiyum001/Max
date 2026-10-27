@@ -1,11 +1,21 @@
 # Deployment proposal — review required, nothing deployed automatically
 
-**Current state (verified, not assumed):** this repository contains *no*
-deployment configuration. A repo-wide search finds only
-`.github/workflows/ci.yml` — no `railway.toml`/`railway.json`, no
-`Dockerfile`, no `Procfile`, no `nixpacks.toml`, no `fly.toml`. Nothing has
-been deployed, no Railway service, volume, environment variable or
-production setting was created or modified, and no secrets exist in Git.
+**Current state (verified, not assumed):** the repository contains a
+deployment *definition* but no deployment made by this session. A
+repo-wide search finds `.github/workflows/ci.yml`, `Dockerfile`,
+`.dockerignore` and `railway.toml` (the latter three added by PR #2,
+commit `e88267f`, merged to `main` on 27 Oct 2026) — and no `Procfile`,
+`nixpacks.toml` or `fly.toml`. The image builds the package and runs
+`python -m max discord run` (Discord needs no inbound HTTP port).
+
+**No Railway service, volume, environment variable or production
+setting was created, read or modified by this session** — the connected
+Railway integration cannot enumerate projects (it needs a workspace id
+that is not available here, and its GitHub-repo listing currently fails
+server-side), so no resource was touched. No secrets exist in Git. The
+Docker image itself has **not** been built here (no Docker daemon in
+this environment); `pip install .` from the same `pyproject.toml`
+succeeds, and every path the Dockerfile copies exists in the tree.
 
 That is intentional: MAX v1 deliverable 10 requires a *proposal*, and
 Phase 6 forbids deploying without explicit approval.
@@ -17,15 +27,17 @@ Phase 6 forbids deploying without explicit approval.
 | Step | Command | Result |
 |---|---|---|
 | Install | `pip install -e ".[dev]"` | ok |
-| Tests | `python -m pytest` | **167 passed** |
+| Tests | `python -m pytest` | **299 passed** |
 | Static scan | `python -m max improve scan` | **0 findings** |
 | Health | `python -m max health --json` | `status: ok`, `policy_ok: true` |
 | Evaluation | `python -m max eval run --label ci` | **14/14 (100%)** |
 | Skills | `python -m max skills list --json` | 1 skill, 0 flagged |
 
-Observed runs: **#1 (push) success, #2 (PR #1) success, #3 (push to
-`main`) success** — 25–30 s each. CI uses the mock provider, so it needs
-no secrets and cannot spend provider credits.
+Observed runs: **every run in the repository's history concluded
+`success`** — `?status=failure` returns `total_count: 0` (checked 27 Oct
+2026, including every push to `v2/capabilities`). Live status:
+`https://github.com/Flanxiyum001/Max/actions`. CI uses the mock
+provider, so it needs no secrets and cannot spend provider credits.
 
 CI proves the code is sound. It does **not** prove a deployment works:
 there is no deploy job, and none should be added without approval.
@@ -69,15 +81,19 @@ else. Stop with `systemctl --user stop max-discord.service`.
 
 ## 3. Option B — Railway (optional, requires your action first)
 
-MAX has no service definition, so a Railway project must be created and
-reviewed by you. The connected Railway integration could not enumerate
+`railway.toml` now defines a `DOCKERFILE` build, so the repository is
+ready for a Railway service — but whether such a service exists is
+unknown from here: the connected Railway integration could not enumerate
 your projects (it requires a workspace id that is not available to this
-session), therefore **no Railway resource was read, created or changed.**
+session, and its GitHub-repo listing returns a GraphQL validation error),
+therefore **no Railway resource was read, created or changed.**
 
 If you want this option, the shape would be:
 
-1. Create a Railway service from `Flanxiyum001/Max`.
-2. Start command: `.venv/bin/python -m max discord run`.
+1. Create (or point me at) a Railway service connected to
+   `Flanxiyum001/Max`; Railway picks up `railway.toml` + `Dockerfile`.
+2. Build/deploy definition: Dockerfile `CMD ["python", "-m", "max",
+   "discord run"]` (mirrored by `startCommand` in `railway.toml`).
 3. Set variables in Railway's UI (never in Git): `MAX_DISCORD_TOKEN`,
    `MAX_DISCORD_ENABLE=1`, `MAX_DISCORD_ALLOWED_CHANNELS`,
    `MAX_DISCORD_ADMINS`, plus provider variables (`MAX_PROVIDER`,

@@ -76,6 +76,49 @@ class Config:
     openclaw_url: str = ""
     openclaw_token: str = ""  # secret-ish: never included in redacted output
 
+    # ------------------------------------------- optional integrations
+    # Coding worker (isolated git worktree + bounded command execution).
+    worker_enabled: bool = False
+    worker_repos: list[Path] = field(default_factory=list)
+    worker_timeout_s: float = 120.0
+    worker_allow_network: bool = False
+
+    # Syntax-aware repository intelligence (tree-sitter when installed).
+    codesearch_enabled: bool = True
+
+    # MCP servers: JSON array, parsed by max.mcp.backend.parse_server_configs.
+    mcp_servers: str = ""
+
+    # Browser research (optional Playwright MCP provider), off by default.
+    browser_enabled: bool = False
+    browser_allow_hosts: list[str] = field(default_factory=list)
+
+    # Speech-to-text (mock by default; faster-whisper is an optional extra).
+    stt_backend: str = "mock"
+    stt_model_size: str = "tiny"
+    stt_compute_type: str = "int8"
+    stt_device: str = "cpu"
+    stt_language: str = ""
+    stt_timeout_s: float = 30.0
+    stt_max_duration_s: float = 300.0
+    stt_model_dir: str = ""
+    stt_local_files_only: bool = True
+
+    # Supervised multi-agent orchestration (optional; disabled => single-agent MAX).
+    orch_enabled: bool = True
+    orch_auto: bool = True  # dynamic delegation decision in conversation
+    orch_max_workers: int = 2  # configured ceiling; hard cap is 3
+    orch_depth: int = 1  # child delegation levels
+    orch_task_timeout_s: float = 180.0
+    orch_tool_budget: int = 120  # tool calls shared by all workers in one plan
+    orch_exec: bool = False  # guarded test/command runner for coder+tester
+    orch_keep_workspaces: bool = False  # keep task worktrees for inspection
+    orch_coder_backend: str = "max"  # max | openhands
+    orch_openhands_model: str = ""
+    orch_openhands_base_url: str = ""
+    orch_openhands_key_env: str = ""
+    orch_openhands_iters: int = 8
+
     repo_root: Path = REPO_ROOT
 
     # ------------------------------------------------------------------ api
@@ -120,6 +163,42 @@ class Config:
             "auto_promote": self.auto_promote,
             "openclaw_url": self.openclaw_url,
             "openclaw_token_set": bool(self.openclaw_token),
+            "worker": {
+                "enabled": self.worker_enabled,
+                "repos": [str(p) for p in self.worker_repos],
+                "timeout_s": self.worker_timeout_s,
+                "allow_network": self.worker_allow_network,
+            },
+            "codesearch_enabled": self.codesearch_enabled,
+            "mcp_servers_configured": bool(self.mcp_servers.strip()),
+            "browser": {"enabled": self.browser_enabled, "allow_hosts": self.browser_allow_hosts},
+            "orchestration": {
+                "enabled": self.orch_enabled,
+                "auto_delegate": self.orch_auto,
+                "max_workers": self.orch_max_workers,
+                "depth": self.orch_depth,
+                "task_timeout_s": self.orch_task_timeout_s,
+                "tool_budget": self.orch_tool_budget,
+                "exec_enabled": self.orch_exec,
+                "keep_workspaces": self.orch_keep_workspaces,
+                "coder_backend": self.orch_coder_backend,
+                "openhands": {
+                    "model": self.orch_openhands_model,
+                    "base_url": self.orch_openhands_base_url,
+                    "key_env": self.orch_openhands_key_env,
+                    "key_set": bool(
+                        self.orch_openhands_key_env
+                        and __import__("os").environ.get(self.orch_openhands_key_env)
+                    ),
+                },
+            },
+            "stt": {
+                "backend": self.stt_backend,
+                "model_size": self.stt_model_size,
+                "device": self.stt_device,
+                "timeout_s": self.stt_timeout_s,
+                "local_files_only": self.stt_local_files_only,
+            },
         }
 
     # ------------------------------------------------------------ factory
@@ -165,6 +244,39 @@ class Config:
             auto_promote=_split(env("MAX_AUTOPROMOTE", "skill,docs")) or ["skill", "docs"],
             openclaw_url=env("MAX_OPENCLAW_URL"),
             openclaw_token=env("MAX_OPENCLAW_TOKEN"),
+            worker_enabled=_bool(env("MAX_WORKER_ENABLE"), False),
+            worker_repos=[
+                (Path(item) if Path(item).is_absolute() else root / item)
+                for item in _split(env("MAX_WORKER_REPOS"))
+            ],
+            worker_timeout_s=float(env("MAX_WORKER_TIMEOUT_S", "120") or 120),
+            worker_allow_network=_bool(env("MAX_WORKER_NETWORK"), False),
+            codesearch_enabled=_bool(env("MAX_CODESEARCH_ENABLE"), True),
+            mcp_servers=env("MAX_MCP_SERVERS"),
+            browser_enabled=_bool(env("MAX_BROWSER_ENABLE"), False),
+            browser_allow_hosts=_split(env("MAX_BROWSER_ALLOW_HOSTS")),
+            stt_backend=env("MAX_STT_BACKEND", "mock").lower() or "mock",
+            stt_model_size=env("MAX_STT_MODEL_SIZE", "tiny") or "tiny",
+            stt_compute_type=env("MAX_STT_COMPUTE_TYPE", "int8") or "int8",
+            stt_device=env("MAX_STT_DEVICE", "cpu") or "cpu",
+            stt_language=env("MAX_STT_LANGUAGE"),
+            stt_timeout_s=float(env("MAX_STT_TIMEOUT_S", "30") or 30),
+            stt_max_duration_s=float(env("MAX_STT_MAX_DURATION_S", "300") or 300),
+            stt_model_dir=env("MAX_STT_MODEL_DIR"),
+            stt_local_files_only=_bool(env("MAX_STT_LOCAL_FILES_ONLY"), True),
+            orch_enabled=_bool(env("MAX_ORCH_ENABLE"), True),
+            orch_auto=_bool(env("MAX_ORCH_AUTO"), True),
+            orch_max_workers=min(max(int(env("MAX_ORCH_MAX_WORKERS", "2") or 2), 1), 3),
+            orch_depth=max(int(env("MAX_ORCH_DEPTH", "1") or 1), 0),
+            orch_task_timeout_s=float(env("MAX_ORCH_TASK_TIMEOUT_S", "180") or 180),
+            orch_tool_budget=max(int(env("MAX_ORCH_TOOL_BUDGET", "120") or 120), 1),
+            orch_exec=_bool(env("MAX_ORCH_EXEC"), False),
+            orch_keep_workspaces=_bool(env("MAX_ORCH_KEEP_WORKSPACES"), False),
+            orch_coder_backend=(env("MAX_ORCH_CODER_BACKEND", "max") or "max").lower(),
+            orch_openhands_model=env("MAX_ORCH_OH_MODEL"),
+            orch_openhands_base_url=env("MAX_ORCH_OH_BASE_URL"),
+            orch_openhands_key_env=env("MAX_ORCH_OH_KEY_ENV"),
+            orch_openhands_iters=int(env("MAX_ORCH_OH_ITERS", "8") or 8),
             repo_root=root,
         )
 
