@@ -64,7 +64,10 @@ no Discord token in this environment; steps 1–6 of the live checklist in
       §1–§8 + §10, `docs/SETUP.md` §5–§8
 - [x] Deployment proposal (separate document, **no auto-deploy**) —
       [`docs/DEPLOYMENT.md`](DEPLOYMENT.md): options A/B, approval gate,
-      rollback; nothing deployed, no Railway/Docker/Procfile config exists
+      rollback; **nothing deployed by this session** — `Dockerfile`,
+      `.dockerignore` and `railway.toml` were added later by the owner's
+      PR #2 (`e88267f`, merged to `main`), and no Railway resource has
+      been read, created or changed
 
 ## Cross-cutting constraints (verification status)
 
@@ -75,8 +78,11 @@ no Discord token in this environment; steps 1–6 of the live checklist in
 - Real Discord connection **not executed** (no token here) — every Discord
   behaviour is covered by mocked tests and must be re-verified live by the
   owner using `docs/DISCORD.md` §8.
-- No deployment files changed or created; **nothing deployed** — the only
-  automation is `.github/workflows/ci.yml` (see below).
+- No deployment performed: **nothing deployed by this session.** The only
+  automation is `.github/workflows/ci.yml` (see below); the Docker/
+  Railway manifests present on `main` come from the owner's PR #2 and
+  were never built or launched here (no Docker daemon, no Railway
+  workspace id).
 - Dependency added: `discord.py>=2.7.1` (MIT) — declared in `pyproject.toml`.
 
 ## CI status — green
@@ -89,6 +95,13 @@ skill validation; mock provider, no secrets) runs on every push and PR.
 | CI #1 | push | `e66a9e8` on `v1/discord-text` | **success** (26 s) |
 | CI #2 | pull request #1 | `e66a9e8` | **success** (30 s) |
 | CI #3 | push | `30822fd` on `main` | **success** (25 s) |
+| CI #9 | pull request #2 | `68a6101` on `fix/railway-discord-deployment` | **success** (29 s) |
+| CI #10 | push | `e88267f` on `main` | **success** (39 s) |
+| CI #11 | push | `1215745` on `v2/capabilities` | **success** (32 s) |
+| CI #12 | push | `9827173` on `v2/capabilities` | **success** (35 s) |
+
+**12 runs total, all `success`, zero failures in the repository's run
+history** (`?status=failure` → `total_count: 0`).
 
 `v1/discord-text` was merged into `main` (merge commit `30822fd`); the
 merged tree is byte-identical to the feature branch, so local results and
@@ -103,11 +116,14 @@ freebuff/codebuff anywhere in tracked files.
 
 ### Test totals
 
-| | baseline | after Phase 1 | after advanced integration |
-|---|---|---|---|
-| pytest | 96 passed | 167 passed | **250 passed** |
-| eval suite | 14/14 | 14/14 | 14/14 |
-| improve scan | 0 findings | 0 findings | 0 findings |
+| | baseline | after Phase 1 | after advanced integration | after orchestration |
+|---|---|---|---|---|
+| pytest | 96 passed | 167 passed | 250 passed | **299 passed** |
+| eval suite | 14/14 | 14/14 | 14/14 | 14/14 |
+| improve scan | 0 findings | 0 findings | 0 findings | 0 findings |
+
+Local re-verification on `v2/capabilities` @ `9827173` (after merging
+`main`): all five gates exit 0 — pytest, health, eval, scan, skills.
 
 ## Advanced capability integration — status
 
