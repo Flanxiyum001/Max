@@ -145,3 +145,34 @@ def test_invalid_session_id_is_rejected_cleanly(agent):
     reply = agent.ask("hi", session_id="../evil")
     assert reply.ok is False
     assert reply.error == "bad_session"
+
+def test_large_history_respects_character_budget_without_rewriting_disk(agent):
+    agent.config.history_char_budget = 18
+    agent.provider = MockProvider(script=[
+        {"text": "replyone"},
+        {"text": "replytwo"},
+        {"text": "done"},
+    ])
+    agent.ask("old-old-old", session_id="budget")
+    agent.ask("recent", session_id="budget")
+    before = agent.sessions.load("budget")
+    result = agent.ask("current", session_id="budget")
+    assert result.ok
+    request = agent.provider.requests[-1]["messages"]
+    assert request[0]["role"] == "system"
+    assert request[-1] == {"role": "user", "content": "current"}
+    assert request[1]["role"] == "user"
+    # The newest complete pair is preserved; older turns are dropped.
+    assert [m["content"] for m in request[1:-1]] == ["recent", "replytwo"]
+    assert len(agent.sessions.load("budget")) == len(before) + 2
+
+
+def test_zero_history_budget_keeps_current_user_message(agent):
+    agent.config.history_char_budget = 0
+    agent.provider = MockProvider(script=[{"text": "ok"}, {"text": "fresh"}])
+    agent.ask("previous", session_id="no-history")
+    reply = agent.ask("new", session_id="no-history")
+    assert reply.text == "fresh"
+    assert [m["role"] for m in agent.provider.requests[-1]["messages"]] == [
+        "system", "user"
+    ]
