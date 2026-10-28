@@ -129,7 +129,12 @@ class Agent:
                 break
             kept.append(old)
             used += size
-        messages.extend(reversed(kept))
+        kept.reverse()
+        # If the budget boundary cuts between a user/assistant pair,
+        # don't begin the provider history with an orphan assistant.
+        while kept and kept[0]["role"] != "user":
+            kept.pop(0)
+        messages.extend(kept)
         messages.append({"role": "user", "content": text})
 
         tools = self.registry.schemas() if self.registry.names() else None
