@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 from ..core.tools import AuditLog
@@ -62,6 +63,7 @@ class MaxDiscordBot(discord.Client if discord is not None else object):  # type:
         self.audit = audit
         self.tree = discord.app_commands.CommandTree(self)
         self._synced_guilds: set[int] = set()
+        self._last_route_log: dict[tuple[int, str], float] = {}
 
         # Discord-native setup works without reading message content and
         # without any pre-authorized conversation channel.
@@ -154,9 +156,11 @@ class MaxDiscordBot(discord.Client if discord is not None else object):  # type:
                 "discord_slash_sync_failed", guild=guild.id, error=type(exc).__name__
             )
             log.warning("MAX slash setup unavailable for guild %s (%s)", guild.id, type(exc).__name__)
+            print(f"MAX_SLASH_SYNC_FAILED guild={guild.id} error={type(exc).__name__}", flush=True)
         else:
             self._synced_guilds.add(guild.id)
             log.info("MAX_SETUP_COMMANDS_READY guild=%s", guild.id)
+            print(f"MAX_SETUP_COMMANDS_READY guild={guild.id}", flush=True)
 
     async def on_guild_join(self, guild: Any) -> None:
         await self._sync_setup_commands(guild)
@@ -220,9 +224,18 @@ class MaxDiscordBot(discord.Client if discord is not None else object):  # type:
             except Exception:
                 pass
             return
-        if result.reason == "setup_required" or result.action == "command":
-            log.info(
-                "MAX_DISCORD_ROUTE action=%s reason=%s", result.action, result.reason
+        # Log outcome metadata only (never message content, author IDs,
+        # prompts or provider secrets). Rate-limit suppressed-message logs.
+        route_key = (view.channel_id, result.reason or result.action)
+        now = time.monotonic()
+        last_log = self._last_route_log.get(route_key, -1e10)
+        if result.replies or (now - last_log >= 60.0):
+            self._last_route_log[route_key] = now
+            print(
+                f"MAX_MESSAGE_ROUTED channel={view.channel_id} "
+                f"action={result.action} reason={result.reason or '-'} "
+                f"chunks={len(result.replies)} error={result.error}",
+                flush=True,
             )
         for chunk in result.replies:
             try:
@@ -231,6 +244,11 @@ class MaxDiscordBot(discord.Client if discord is not None else object):  # type:
                 self.audit.record(
                     "discord_send_failed", channel=view.channel_id,
                     error=type(exc).__name__,
+                )
+                print(
+                    f"MAX_MESSAGE_SEND_FAILED channel={view.channel_id} "
+                    f"error={type(exc).__name__}",
+                    flush=True,
                 )
                 break
             if sent is not None:
