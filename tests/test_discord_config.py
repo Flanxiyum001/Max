@@ -84,3 +84,8 @@ def test_legacy_owner_ids_can_activate_channels(tmp_path, monkeypatch):
     cfg = make(tmp_path, monkeypatch, MAX_DISCORD_ADMINS="333")
     assert cfg.is_admin(333)
     assert not cfg.is_admin(111)
+
+def test_wake_mode_env_selection(tmp_path, monkeypatch):
+    cfg = make(tmp_path, monkeypatch, MAX_DISCORD_RESPONSE_MODE="wake")
+    assert cfg.response_mode == "wake"
+    assert "token" not in repr(cfg.redacted())
