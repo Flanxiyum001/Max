@@ -42,7 +42,7 @@ cp .env.example .env   # then edit
 | `MAX_DISCORD_ADMINS` / `MAX_DISCORD_ADMIN_ROLES` | who may run `allow`/`deny`/`channels` | empty |
 | `MAX_DISCORD_DM_MODE` | `off` (default) \| `allowlist` \| `everyone` | `off` |
 | `MAX_DISCORD_DM_USERS` | DM allowlist when mode is `allowlist` | empty |
-| `MAX_DISCORD_RESPONSE_MODE` | `all` \| `mention` \| `command` | `all` |
+| `MAX_DISCORD_RESPONSE_MODE` | `all` \| `mention` \| `command` \| `wake` | `all` |
 | `MAX_DISCORD_COMMAND_PREFIX` | admin/diagnostic commands | `!max` |
 | `MAX_DISCORD_COOLDOWN_S` | per-channel minimum interval | `2` |
 | `MAX_DISCORD_ERROR_COOLDOWN_S` | backoff after provider failure | `30` |
@@ -120,6 +120,34 @@ can never stop normal chat (covered by
 * Prompt-injection flags from the core are surfaced in the reply and audit.
 * Every command, suppression, reply and send failure is audited to
   `var/audit/audit.jsonl` (actor, channel, outcome — no message contents).
+
+## Wake/sleep conversation mode (no prefix or mention)
+
+Set `MAX_DISCORD_RESPONSE_MODE=wake`. In a server text channel already
+approved with `/max_enable` (or the administrator's existing allowlist):
+
+1. Say **hi max** (case-insensitive; `Hi, Max!` also works). MAX acknowledges and wakes.
+2. Talk normally, about any subject, without typing a prefix or mentioning MAX.
+   Any human participant's messages in **that channel** are eligible for replies.
+3. Say **bye max**. MAX acknowledges and then stays silent until the next `hi max`.
+
+While sleeping, other chat is ignored without a model call. MAX stays connected
+to Discord; "sleep" means **not replying**, not disconnecting. Each authorized
+channel has an independent awake state, persisted in the existing
+`MAX_DISCORD_ALLOWLIST_FILE` (for Railway: `/data/discord/allowlist.json`).
+An administrative channel denial clears that channel's awake state.
+
+The wake and sleep phrases are recognized before rate limits and provider
+backoff, so `bye max` works even during AI provider outages. Ordinary chat
+still observes normal rate limiting and provider quotas. `wake` mode is
+server-channel only: DMs remain subject to their existing privacy policy and
+are not woken by phrases. Unapproved or explicitly ignored channels cannot
+start listening. Old `!max` admin commands and `/max_status` still work for
+diagnostics, but **ordinary conversation does not require them**.
+
+The `/max_status` command shows whether this channel is listening or sleeping.
+To revert to the old always-reply behavior, set
+`MAX_DISCORD_RESPONSE_MODE=all` and redeploy.
 
 ## 7. Memory privacy
 
