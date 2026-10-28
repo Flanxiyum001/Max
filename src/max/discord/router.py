@@ -14,6 +14,7 @@ Decision order (fail closed):
 
 from __future__ import annotations
 
+import re
 import time
 from collections import OrderedDict, deque
 from dataclasses import dataclass, field
@@ -442,8 +443,61 @@ class DiscordRouter:
                 self._audit_suppressed(view, "channel_not_allowlisted")
                 return RouteResult("suppressed", reason="channel_not_allowlisted")
 
-        # response behaviour
+        # Explicit wake mode: no prefix or mention is needed once a human
+        # has activated this allowlisted channel. Triggers bypass provider
+        # backoff and chat cooldown so "bye max" can always turn MAX off.
         mode = self.config.response_mode
+        if mode == "wake":
+            if view.is_dm:
+                self._audit_suppressed(view, "wake_mode_dm_unsupported")
+                return RouteResult("suppressed", reason="wake_mode_dm_unsupported")
+
+            if re.fullmatch(r"hi[\\s,]+max[.!?]*", content, flags=re.IGNORECASE):
+                if self.store.is_awake(view.channel_id, view.guild_id):
+                    return RouteResult(
+                        "reply", replies=["I'm already here!"], reason="already_awake"
+                    )
+                try:
+                    activated = self.store.set_awake(
+                        view.channel_id, view.guild_id, view.author_id, True
+                    )
+                except OSError as exc:
+                    self.audit.record("discord_wake_save_failed", error=type(exc).__name__)
+                    return RouteResult(
+                        "reply", replies=["I couldn't save my wake state. Check storage."],
+                        reason="wake_save_failed", error=True,
+                    )
+                if not activated:
+                    return RouteResult("suppressed", reason="wake_not_permitted")
+                return RouteResult(
+                    "reply", replies=["Hey! I'm here. Just chat normally. Say `bye max` when you're done."],
+                    reason="awakened",
+                )
+
+            if re.fullmatch(r"bye[\\s,]+max[.!?]*", content, flags=re.IGNORECASE):
+                if not self.store.is_awake(view.channel_id, view.guild_id):
+                    return RouteResult("suppressed", reason="already_asleep")
+                try:
+                    deactivated = self.store.set_awake(
+                        view.channel_id, view.guild_id, view.author_id, False
+                    )
+                except OSError as exc:
+                    self.audit.record("discord_wake_save_failed", error=type(exc).__name__)
+                    return RouteResult(
+                        "reply", replies=["I couldn't save my sleep state. Check storage."],
+                        reason="wake_save_failed", error=True,
+                    )
+                if not deactivated:
+                    return RouteResult("suppressed", reason="wake_not_permitted")
+                return RouteResult(
+                    "reply", replies=["Bye! I'll stay quiet until you say `hi max`."],
+                    reason="fell_asleep",
+                )
+
+            if not self.store.is_awake(view.channel_id, view.guild_id):
+                return RouteResult("suppressed", reason="sleeping")
+
+        # response behaviour
         addressed = (
             view.bot_id in view.mentioned_ids
             if view.bot_id is not None
