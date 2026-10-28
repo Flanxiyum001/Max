@@ -63,6 +63,7 @@ class Config:
     retries: int = 1
 
     max_iters: int = 8
+    history_char_budget: int = 24000  # maximum prior-context characters per request
     tools_allow: list[str] = field(default_factory=list)
     tools_deny: list[str] = field(default_factory=list)
 
@@ -154,6 +155,7 @@ class Config:
             "timeout_s": self.timeout_s,
             "retries": self.retries,
             "max_iters": self.max_iters,
+            "history_char_budget": self.history_char_budget,
             "tools_allow": self.tools_allow,
             "tools_deny": self.tools_deny,
             "data_dir": str(self.data_dir),
@@ -243,6 +245,7 @@ class Config:
             timeout_s=float(env("MAX_TIMEOUT_S", "60") or 60),
             retries=int(env("MAX_RETRIES", "1") or 1),
             max_iters=int(env("MAX_MAX_ITERS", "8") or 8),
+            history_char_budget=max(0, int(env("MAX_HISTORY_CHAR_BUDGET", "24000") or 0)),
             tools_allow=_split(env("MAX_TOOLS_ALLOW")),
             tools_deny=_split(env("MAX_TOOLS_DENY")),
             data_dir=env_path("MAX_DATA_DIR", "var"),
