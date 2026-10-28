@@ -519,6 +519,25 @@ class DiscordRouter:
                 error=True,
                 audit_event="discord_provider_error",
             )
+        # Some OpenAI-compatible endpoints return HTTP 200 with an empty
+        # message. Sending zero Discord chunks looks exactly like a dead bot.
+        if not isinstance(text, str) or not text.strip():
+            self.audit.record(
+                "discord_empty_provider_reply",
+                channel=view.channel_id,
+                guild=view.guild_id,
+                session=session,
+            )
+            return RouteResult(
+                "reply",
+                replies=[
+                    "MAX received an empty AI response. Try again or run /max_status "
+                    "to check the model provider."
+                ],
+                session_id=session,
+                error=True,
+                audit_event="discord_empty_provider_reply",
+            )
         self.backoff.note_success()
 
         event = "discord_reply_sent"
