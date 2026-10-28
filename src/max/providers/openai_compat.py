@@ -55,6 +55,10 @@ class OpenAICompatProvider(ChatProvider):
         self.retries = max(0, int(retries))
         self._open = opener or urllib.request.urlopen
         self._sleep = sleep
+        # Auto-detect endpoints that lack tool/function calling. Keep the
+        # downgrade scoped to this provider instance; never disable tools
+        # for unrelated providers or on authentication/server errors.
+        self._tools_supported: bool | None = None
 
     # ------------------------------------------------------------- public
     def complete(self, messages: list[dict], tools: list[dict] | None = None) -> ProviderResult:
@@ -73,7 +77,6 @@ class OpenAICompatProvider(ChatProvider):
                 for t in tools
             ]
 
-        body = json.dumps(payload).encode("utf-8")
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
@@ -84,6 +87,9 @@ class OpenAICompatProvider(ChatProvider):
 
         attempt = 0
         while True:
+            if self._tools_supported is False:
+                payload.pop("tools", None)
+            body = json.dumps(payload).encode("utf-8")
             started = time.monotonic()
             try:
                 request = urllib.request.Request(url, data=body, headers=headers, method="POST")
@@ -91,6 +97,16 @@ class OpenAICompatProvider(ChatProvider):
                     raw = response.read(_MAX_BODY_BYTES)
             except urllib.error.HTTPError as exc:
                 err = self._classify_http(exc)
+                if (
+                    "tools" in payload
+                    and self._tools_supported is not False
+                    and self._tool_unsupported(err)
+                ):
+                    # One compatibility retry, without tools, even when the
+                    # normal network retry budget is exhausted. HTTP 401/429
+                    # or generic 400s never trigger this path.
+                    self._tools_supported = False
+                    continue
                 if err.retryable and attempt < self.retries:
                     attempt += 1
                     self._sleep(min(0.5 * (2 ** (attempt - 1)), 2.0))
@@ -129,6 +145,25 @@ class OpenAICompatProvider(ChatProvider):
             return self._parse(raw, latency_ms)
 
     # ------------------------------------------------------------ helpers
+    @staticmethod
+    def _tool_unsupported(error: ProviderError) -> bool:
+        # Only downgrade for an explicit unsupported parameter/capability.
+        # Generic HTTP 400 errors (bad model, malformed messages, etc.) must
+        # remain errors instead of silently hiding problems.
+        detail = str(error).lower()
+        if error.code not in {"http_400", "http_422", "http_501"}:
+            return False
+        mentions_tools = any(
+            token in detail for token in ("tools", "tool calling", "tool_calls", "function calling")
+        )
+        unsupported = any(
+            token in detail for token in (
+                "not supported", "unsupported", "not available",
+                "unrecognized", "unknown field", "not permitted", "unexpected",
+            )
+        )
+        return mentions_tools and unsupported
+
     def _classify_http(self, exc: urllib.error.HTTPError) -> ProviderError:
         status = getattr(exc, "code", 0) or 0
         try:
@@ -197,4 +232,5 @@ class OpenAICompatProvider(ChatProvider):
             "base_url": self.base_url,
             "model": self.model,
             "key_configured": bool(self.api_key),
+            "tool_calling_supported": self._tools_supported,
         }
