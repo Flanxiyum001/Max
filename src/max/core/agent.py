@@ -116,7 +116,20 @@ class Agent:
             return AgentReply(text=f"invalid session id: {exc}", ok=False, error="bad_session")
 
         messages: list[dict] = [{"role": "system", "content": self.system_prompt()}]
-        messages += self.sessions.history(session_id)[:-1]  # prior turns only
+        prior = self.sessions.history(session_id)[:-1]  # prior turns only
+        # Long-running channels must not accumulate unbounded context size.
+        # Keep only a suffix of complete recent turns, never truncate the
+        # current user message or silently alter durable transcript storage.
+        budget = max(0, getattr(self.config, "history_char_budget", 24000))
+        kept: list[dict] = []
+        used = 0
+        for old in reversed(prior):
+            size = len(str(old.get("content", "")))
+            if used + size > budget:
+                break
+            kept.append(old)
+            used += size
+        messages.extend(reversed(kept))
         messages.append({"role": "user", "content": text})
 
         tools = self.registry.schemas() if self.registry.names() else None
