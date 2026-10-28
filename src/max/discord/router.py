@@ -283,6 +283,7 @@ class DiscordRouter:
                 f"commands here: {'yes' if dm_ok else 'no (dm policy)'}",
                 f"caller admin: {self.is_setup_admin(view)}",
                 f"provider backoff active: {self.backoff.suppressed()}",
+                f"wake mode listening: {self.store.is_awake(view.channel_id, view.guild_id) if self.config.response_mode == 'wake' and not view.is_dm else 'n/a'}",
             ]
             return RouteResult("command", replies=lines)
         if name == "perms":
@@ -452,7 +453,7 @@ class DiscordRouter:
                 self._audit_suppressed(view, "wake_mode_dm_unsupported")
                 return RouteResult("suppressed", reason="wake_mode_dm_unsupported")
 
-            if re.fullmatch(r"hi[\\s,]+max[.!?]*", content, flags=re.IGNORECASE):
+            if re.fullmatch(r"hi[\s,]+max[.!?]*", content, flags=re.IGNORECASE):
                 if self.store.is_awake(view.channel_id, view.guild_id):
                     return RouteResult(
                         "reply", replies=["I'm already here!"], reason="already_awake"
@@ -474,7 +475,7 @@ class DiscordRouter:
                     reason="awakened",
                 )
 
-            if re.fullmatch(r"bye[\\s,]+max[.!?]*", content, flags=re.IGNORECASE):
+            if re.fullmatch(r"bye[\s,]+max[.!?]*", content, flags=re.IGNORECASE):
                 if not self.store.is_awake(view.channel_id, view.guild_id):
                     return RouteResult("suppressed", reason="already_asleep")
                 try:
