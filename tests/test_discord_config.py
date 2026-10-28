@@ -88,4 +88,4 @@ def test_legacy_owner_ids_can_activate_channels(tmp_path, monkeypatch):
 def test_wake_mode_env_selection(tmp_path, monkeypatch):
     cfg = make(tmp_path, monkeypatch, MAX_DISCORD_RESPONSE_MODE="wake")
     assert cfg.response_mode == "wake"
-    assert "token" not in repr(cfg.redacted())
+    assert cfg.redacted()["token_set"] is False
