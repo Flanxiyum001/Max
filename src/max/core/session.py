@@ -76,7 +76,7 @@ class SessionStore:
                 pending = handle.read(size) + pending
                 # The first segment may be part of a split UTF-8/JSON line;
                 # keep it intact until the preceding newline is found.
-                parts = pending.split(b"\\n")
+                parts = pending.split(b"\n")
                 pending = parts[0]
                 for raw in reversed(parts[1:]):
                     if not raw.strip():
