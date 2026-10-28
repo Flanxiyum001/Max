@@ -42,6 +42,7 @@ class MessageView:
     bot_id: int | None = None
     reference_message_id: int | None = None
     author_roles: set[int] = field(default_factory=set)
+    guild_owner_id: int | None = None
 
 
 @dataclass
@@ -147,6 +148,18 @@ class DiscordRouter:
             author=view.author_id,
         )
 
+    def is_setup_admin(self, view: MessageView) -> bool:
+        """Trusted MAX administrator or actual Discord guild owner.
+
+        Never infer ownership from a user-provided message, nickname or role
+        name; guild_owner_id comes from the Discord gateway's guild object.
+        """
+        return self.config.is_admin(view.author_id, view.author_roles) or (
+            view.guild_id is not None
+            and view.guild_owner_id is not None
+            and view.author_id == view.guild_owner_id
+        )
+
     def session_id(self, view: MessageView) -> str:
         if view.is_dm or view.guild_id is None:
             return f"dm_u{view.author_id}"
@@ -214,7 +227,7 @@ class DiscordRouter:
 
         # ---- central authorization for privileged commands ----------------
         if name in ADMIN_COMMANDS:
-            is_admin = self.config.is_admin(view.author_id, view.author_roles)
+            is_admin = self.is_setup_admin(view)
             if not is_admin:
                 self.audit.record(
                     "discord_command_denied", command=name, actor=view.author_id,
