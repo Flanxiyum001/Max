@@ -473,3 +473,16 @@ def test_owner_id_from_other_guild_does_not_grant_admin(tmp_path):
         content="!max allow",
     ))
     assert result.error is True
+
+def test_empty_ai_response_surfaces_a_diagnostic_instead_of_silence(tmp_path):
+    router, audit, _, _ = make_router(
+        tmp_path,
+        ask=lambda text, session: reply(text=""),
+    )
+    result = router.handle(view(message_id=6520, content="hi"))
+    assert result.action == "reply"
+    assert result.error is True
+    assert len(result.replies) == 1
+    assert "empty AI response" in result.replies[0]
+    assert audit.events("discord_empty_provider_reply")
+
