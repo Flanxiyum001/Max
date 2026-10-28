@@ -64,6 +64,7 @@ class MaxDiscordBot(discord.Client if discord is not None else object):  # type:
         self.tree = discord.app_commands.CommandTree(self)
         self._synced_guilds: set[int] = set()
         self._last_route_log: dict[tuple[int, str], float] = {}
+        self._channel_locks: dict[int, asyncio.Lock] = {}
 
         # Discord-native setup works without reading message content and
         # without any pre-authorized conversation channel.
@@ -92,6 +93,9 @@ class MaxDiscordBot(discord.Client if discord is not None else object):  # type:
                 f"MAX connected. Channel enabled: {allowed}.",
                 f"Setup permission: {owner}. Provider: {provider}; key present: {provider_ready}.",
             ]
+            if self.config.response_mode == "wake" and allowed:
+                listening = self.router.store.is_awake(channel_id, guild.id)
+                lines.append(f"Wake mode: {'listening' if listening else 'sleeping'}. Say hi max / bye max.")
             if not allowed:
                 lines.append("Server owner or configured MAX admin: run /max_enable here.")
             await interaction.response.send_message("\n".join(lines), ephemeral=True)
@@ -135,7 +139,9 @@ class MaxDiscordBot(discord.Client if discord is not None else object):  # type:
                 return
             self.audit.record("discord_slash_channel_enabled", guild=guild.id, channel=channel_id)
             await interaction.response.send_message(
-                "This channel is enabled. Send `hi` in the channel to test Max.",
+                "This channel is enabled. Say `hi max` to wake MAX, then `bye max` to sleep."
+                if self.config.response_mode == "wake"
+                else "This channel is enabled. Send `hi` to test MAX.",
                 ephemeral=True,
             )
 
@@ -208,51 +214,54 @@ class MaxDiscordBot(discord.Client if discord is not None else object):  # type:
         if message.author.id == (self.user.id if self.user else -1):
             return
         view = self._view(message)
-        # the agent is blocking (HTTP/IO) — keep the event loop free
-        try:
-            result = await asyncio.to_thread(self.router.handle, view)
-        except Exception as exc:  # noqa: BLE001 - report unexpected router failures
-            self.audit.record(
-                "discord_router_crashed", channel=view.channel_id,
-                error=type(exc).__name__,
-            )
-            log.exception("MAX failed to route Discord message")
+        # A channel is a shared conversation: preserve arrival order across
+        # wake, model replies and sleep without blocking other channels.
+        async with self._channel_locks.setdefault(view.channel_id, asyncio.Lock()):
+            # the agent is blocking (HTTP/IO) — keep the event loop free
             try:
-                await message.channel.send(
-                    "MAX encountered an internal error while handling your message."
-                )
-            except Exception:
-                pass
-            return
-        # Log outcome metadata only (never message content, author IDs,
-        # prompts or provider secrets). Rate-limit suppressed-message logs.
-        route_key = (view.channel_id, result.reason or result.action)
-        now = time.monotonic()
-        last_log = self._last_route_log.get(route_key, -1e10)
-        if result.replies or (now - last_log >= 60.0):
-            self._last_route_log[route_key] = now
-            print(
-                f"MAX_MESSAGE_ROUTED channel={view.channel_id} "
-                f"action={result.action} reason={result.reason or '-'} "
-                f"chunks={len(result.replies)} error={result.error}",
-                flush=True,
-            )
-        for chunk in result.replies:
-            try:
-                sent = await message.channel.send(chunk)
-            except Exception as exc:  # noqa: BLE001 - transport failure, audited
+                result = await asyncio.to_thread(self.router.handle, view)
+            except Exception as exc:  # noqa: BLE001 - report unexpected router failures
                 self.audit.record(
-                    "discord_send_failed", channel=view.channel_id,
+                    "discord_router_crashed", channel=view.channel_id,
                     error=type(exc).__name__,
                 )
+                log.exception("MAX failed to route Discord message")
+                try:
+                    await message.channel.send(
+                        "MAX encountered an internal error while handling your message."
+                    )
+                except Exception:
+                    pass
+                return
+            # Log outcome metadata only (never message content, author IDs,
+            # prompts or provider secrets). Rate-limit suppressed-message logs.
+            route_key = (view.channel_id, result.reason or result.action)
+            now = time.monotonic()
+            last_log = self._last_route_log.get(route_key, -1e10)
+            if result.replies or (now - last_log >= 60.0):
+                self._last_route_log[route_key] = now
                 print(
-                    f"MAX_MESSAGE_SEND_FAILED channel={view.channel_id} "
-                    f"error={type(exc).__name__}",
+                    f"MAX_MESSAGE_ROUTED channel={view.channel_id} "
+                    f"action={result.action} reason={result.reason or '-'} "
+                    f"chunks={len(result.replies)} error={result.error}",
                     flush=True,
                 )
-                break
-            if sent is not None:
-                self.router.remember_own_message(sent.id)
+            for chunk in result.replies:
+                try:
+                    sent = await message.channel.send(chunk)
+                except Exception as exc:  # noqa: BLE001 - transport failure, audited
+                    self.audit.record(
+                        "discord_send_failed", channel=view.channel_id,
+                        error=type(exc).__name__,
+                    )
+                    print(
+                        f"MAX_MESSAGE_SEND_FAILED channel={view.channel_id} "
+                        f"error={type(exc).__name__}",
+                        flush=True,
+                    )
+                    break
+                if sent is not None:
+                    self.router.remember_own_message(sent.id)
 
     async def on_error(self, event: str, *args: Any) -> None:
         self.audit.record("discord_event_error", event=event)

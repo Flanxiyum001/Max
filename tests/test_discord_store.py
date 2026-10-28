@@ -78,3 +78,27 @@ def test_corrupt_state_file_fails_open_to_env_baseline(tmp_path):
     store, _, _ = make(tmp_path)
     assert store.is_allowed(10, guild_id=7) is True   # env baseline still works
     assert store.is_allowed(999, guild_id=7) is False  # and nothing is granted
+
+def test_wake_state_persists_and_is_erased_by_channel_denial(tmp_path):
+    store, audit, cfg = make(tmp_path)
+    assert store.set_awake(10, 7, 5, True)
+    assert store.is_awake(10, 7)
+    reloaded = ChannelStore(cfg, audit)
+    assert reloaded.is_awake(10, 7)
+    assert not reloaded.is_awake(10, 999)
+    assert not reloaded.set_awake(11, 7, 5, True)
+
+    assert reloaded.remove(10, 5, guild_id=7)
+    assert not reloaded.is_awake(10, 7)
+    assert reloaded.add(10, 5, guild_id=7)
+    assert not reloaded.is_awake(10, 7)
+    assert not ChannelStore(cfg, audit).is_awake(10, 7)
+
+
+def test_older_allowlist_json_without_awake_data_starts_asleep(tmp_path):
+    (tmp_path / "allowlist.json").write_text(
+        '{"added": {}, "removed": {}}', encoding="utf-8"
+    )
+    store, _, _ = make(tmp_path)
+    assert store.is_allowed(10, 7)
+    assert not store.is_awake(10, 7)

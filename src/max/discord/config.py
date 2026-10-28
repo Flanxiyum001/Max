@@ -16,7 +16,7 @@ from pathlib import Path
 from ..config import REPO_ROOT
 
 DM_MODES = ("off", "allowlist", "everyone")
-RESPONSE_MODES = ("all", "mention", "command")
+RESPONSE_MODES = ("all", "mention", "command", "wake")
 
 
 def _ids(raw: str) -> set[int]:
@@ -46,7 +46,7 @@ class DiscordConfig:
     dm_mode: str = "off"  # off | allowlist | everyone
     dm_users: set[int] = field(default_factory=set)
 
-    response_mode: str = "all"  # all | mention | command
+    response_mode: str = "all"  # all | mention | command | wake (hi max / bye max)
     cooldown_s: float = 2.0
     provider_error_cooldown_s: float = 30.0
     max_message_len: int = 1900
