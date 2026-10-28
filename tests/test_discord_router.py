@@ -438,3 +438,38 @@ def test_owner_setup_hint_never_bypasses_ignored_channel(tmp_path):
     router, _, _, _ = make_router(tmp_path, config=cfg)
     result = router.handle(view(message_id=4010, author_id=ADMIN, content="hi"))
     assert result.action == "suppressed" and not result.replies
+
+def test_real_guild_owner_can_bootstrap_without_max_admin_list(tmp_path):
+    cfg = DiscordConfig(
+        allowed_channels=set(),
+        admin_users=set(),
+        allowlist_file=tmp_path / "allowlist.json",
+        cooldown_s=0.0,
+    )
+    router, _, _, store = make_router(tmp_path, config=cfg)
+    owner_id = 8080
+    owner_msg = view(
+        message_id=6501, author_id=owner_id, guild_owner_id=owner_id, content="hi"
+    )
+    assert router.handle(owner_msg).reason == "setup_required"
+    result = router.handle(view(
+        message_id=6502, author_id=owner_id,
+        guild_owner_id=owner_id, content="!max allow"
+    ))
+    assert result.action == "command"
+    assert store.is_allowed(CHANNEL, GUILD)
+    stranger = view(
+        message_id=6503, author_id=6503, guild_owner_id=owner_id,
+        content="!max deny"
+    )
+    assert router.handle(stranger).error is True
+    assert store.is_allowed(CHANNEL, GUILD)
+
+
+def test_owner_id_from_other_guild_does_not_grant_admin(tmp_path):
+    router, _, _, _ = make_router(tmp_path)
+    result = router.handle(view(
+        message_id=6504, author_id=9, guild_owner_id=8080,
+        content="!max allow",
+    ))
+    assert result.error is True
