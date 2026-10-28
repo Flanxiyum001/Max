@@ -486,3 +486,81 @@ def test_empty_ai_response_surfaces_a_diagnostic_instead_of_silence(tmp_path):
     assert "empty AI response" in result.replies[0]
     assert audit.events("discord_empty_provider_reply")
 
+def test_wake_mode_sleeps_until_hi_max_then_replies_to_any_topic(tmp_path):
+    calls = []
+    cfg = DiscordConfig(
+        allowed_channels={CHANNEL}, response_mode="wake",
+        allowlist_file=tmp_path / "allowlist.json", cooldown_s=0.0,
+    )
+    router, audit, _, store = make_router(
+        tmp_path, config=cfg,
+        ask=lambda text, session: (calls.append((text, session)) or reply("hello")),
+    )
+    assert router.handle(view(message_id=7101, content="what are we doing?")).reason == "sleeping"
+    assert calls == []
+    wake = router.handle(view(message_id=7102, content="Hi, Max!"))
+    assert wake.reason == "awakened" and wake.replies
+    assert store.is_awake(CHANNEL, GUILD)
+    assert not calls  # start/stop phrases do not call the model
+
+    # Completely ordinary messages from other people, without names, trigger replies.
+    normal = router.handle(view(message_id=7103, author_id=777, content="I love pizza"))
+    assert normal.action == "reply" and normal.replies == ["hello"]
+    assert len(calls) == 1
+
+    stop = router.handle(view(message_id=7104, author_id=777, content="BYE MAX."))
+    assert stop.reason == "fell_asleep"
+    assert not store.is_awake(CHANNEL, GUILD)
+    assert router.handle(view(message_id=7105, content="can you hear me")).reason == "sleeping"
+    assert len(calls) == 1
+    assert [e["action"] for e in audit.events("discord_wake_changed")] == ["wake", "sleep"]
+
+
+def test_wake_mode_never_crosses_channel_or_guild_boundaries(tmp_path):
+    cfg = DiscordConfig(
+        allowed_channels={CHANNEL, 99}, response_mode="wake",
+        allowed_guilds={GUILD}, allowlist_file=tmp_path / "allowlist.json",
+        cooldown_s=0.0,
+    )
+    router, _, _, store = make_router(tmp_path, config=cfg)
+    assert router.handle(view(message_id=7201, content="hi max")).reason == "awakened"
+    assert router.handle(view(message_id=7202, channel_id=99, content="hello")).reason == "sleeping"
+    assert router.handle(view(message_id=7203, guild_id=800, content="hi max")).reason == "channel_not_allowlisted"
+    assert not store.is_awake(99, GUILD)
+    assert not store.is_awake(CHANNEL, 800)
+
+
+def test_wake_mode_still_requires_approved_channels_and_blocks_dms(tmp_path):
+    cfg = DiscordConfig(
+        response_mode="wake", dm_mode="everyone",
+        allowlist_file=tmp_path / "allowlist.json",
+        cooldown_s=0.0,
+    )
+    router, _, _, _ = make_router(tmp_path, config=cfg)
+    assert router.handle(view(message_id=7301, content="hi max")).reason == "channel_not_allowlisted"
+    assert router.handle(view(message_id=7302, content="hi max", guild_id=None, is_dm=True)).reason == "wake_mode_dm_unsupported"
+
+
+def test_wake_commands_override_cooldown_and_model_backoff(tmp_path):
+    cfg = DiscordConfig(
+        allowed_channels={CHANNEL}, response_mode="wake",
+        allowlist_file=tmp_path / "allowlist.json", cooldown_s=60.0,
+        provider_error_cooldown_s=60.0,
+    )
+    router, _, _, _ = make_router(
+        tmp_path, config=cfg, ask=lambda text, session: reply("error", ok=False, error="model_offline")
+    )
+    assert router.handle(view(message_id=7401, content="hi max")).reason == "awakened"
+    assert router.handle(view(message_id=7402, content="something")).error
+    assert router.handle(view(message_id=7403, content="bye max")).reason == "fell_asleep"
+    assert router.handle(view(message_id=7404, content="hi max")).reason == "awakened"
+
+
+def test_wake_mode_legacy_prefix_commands_remain_available(tmp_path):
+    cfg = DiscordConfig(
+        allowed_channels={CHANNEL}, response_mode="wake",
+        allowlist_file=tmp_path / "allowlist.json",
+    )
+    router, _, _, _ = make_router(tmp_path, config=cfg)
+    assert router.handle(view(message_id=7450, content="!max status")).action == "command"
+    assert router.handle(view(message_id=7451, content="hello")).reason == "sleeping"
