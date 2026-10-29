@@ -133,7 +133,7 @@ def test_edit_requires_distinct_spoken_confirmation_and_consumes_token_once(tmp_
     bridge, _, _ = make(tmp_path)
     actions = []
     bridge._approvals.adapter = SimpleNamespace(
-        execute=lambda action: actions.append(action) or "Sent Ctrl+K"
+        execute=lambda action: actions.append(action) or "Completed shortcut in premiere. Check the application to confirm."
     )
     pending = bridge.submit("Max, cut at playhead in Premiere", source="microphone")
     assert pending["action"] == "voice_confirmation" and not actions
@@ -154,7 +154,7 @@ def test_mutation_cancelled_by_sleep(tmp_path):
     bridge, _, _ = make(tmp_path)
     actions = []
     bridge._approvals.adapter = SimpleNamespace(
-        execute=lambda action: actions.append(action) or "Sent Ctrl+K"
+        execute=lambda action: actions.append(action) or "Completed shortcut in premiere. Check the application to confirm."
     )
     bridge.submit("Max, cut at playhead in Premiere", source="microphone")
     bridge.submit("bye max", source="microphone")
