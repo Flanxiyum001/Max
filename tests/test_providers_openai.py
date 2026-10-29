@@ -220,3 +220,61 @@ def test_mock_provider_can_fail_then_recover():
     with pytest.raises(ProviderRateLimit):
         mock.complete([])
     assert mock.complete([]).text == "back"
+
+def test_unsupported_tool_schemas_fallback_once_and_are_cached():
+    success = json.dumps({"choices": [{"message": {"content": "hello"}}]}).encode()
+    opener = make_opener([
+        http_error(400, b'{"error":"tool calling is not supported"}'),
+        success,
+        success,
+    ])
+    p = provider(opener, retries=0)
+    schemas = [{"name": "read_file", "description": "read", "parameters": {"type": "object"}}]
+    first = p.complete([{"role": "user", "content": "hi"}], tools=schemas)
+    second = p.complete([{"role": "user", "content": "again"}], tools=schemas)
+    assert first.text == second.text == "hello"
+    assert len(opener.calls) == 3
+    assert "tools" in opener.calls[0]["body"]
+    assert "tools" not in opener.calls[1]["body"]
+    assert "tools" not in opener.calls[2]["body"]
+    assert p.health()["tool_calling_supported"] is False
+
+
+def test_http_422_explicit_unsupported_tool_parameter_downgrades():
+    success = json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode()
+    opener = make_opener([
+        http_error(422, b'{"detail":"unsupported parameter: tools"}'),
+        success,
+    ])
+    result = provider(opener).complete(
+        [{"role": "user", "content": "hi"}],
+        tools=[{"name": "help", "parameters": {"type": "object"}}],
+    )
+    assert result.text == "ok"
+    assert len(opener.calls) == 2
+
+
+def test_unrelated_http_400_does_not_drop_tools_or_retry():
+    opener = make_opener([http_error(400, b'{"error":"invalid model identifier"}')])
+    p = provider(opener, retries=0)
+    with pytest.raises(ProviderServerError) as exc:
+        p.complete(
+            [{"role": "user", "content": "hi"}],
+            tools=[{"name": "read_file", "parameters": {"type": "object"}}],
+        )
+    assert exc.value.code == "http_400"
+    assert len(opener.calls) == 1
+    assert p.health()["tool_calling_supported"] is None
+
+
+def test_auth_failure_never_downgrades_tool_capability():
+    opener = make_opener([http_error(401, b'{"error":"tools not supported"}')])
+    p = provider(opener)
+    with pytest.raises(ProviderAuthError):
+        p.complete(
+            [{"role": "user", "content": "hi"}],
+            tools=[{"name": "read_file", "parameters": {"type": "object"}}],
+        )
+    assert len(opener.calls) == 1
+    assert p.health()["tool_calling_supported"] is None
+
