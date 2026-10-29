@@ -25,7 +25,7 @@ button,input{font:inherit}button{cursor:pointer}button:focus-visible,input:focus
 .orbtitle p{font:10px Consolas,monospace;letter-spacing:.14em;color:#906c4d;margin:13px 0}
 .coordinates{position:absolute;left:28px;top:24px;font:10px Consolas,monospace;line-height:2;color:#8258388f;letter-spacing:.14em}
 .visualstate{position:absolute;top:27px;right:30px;font:10px Consolas,monospace;color:#c6904a;letter-spacing:2px}
-.chatpanel{margin:19px 24px 19px 0;min-height:0;display:grid;grid-template-rows:auto auto auto auto minmax(0,1fr) auto;position:relative;border:1px solid #76401e63;border-radius:13px;background:linear-gradient(145deg,#1b100bdf,#0b090ae9 55%,#100b08f4);box-shadow:0 5px 55px #0009,inset 0 0 30px #e9a02006;overflow:hidden}
+.chatpanel{margin:19px 24px 19px 0;min-height:0;display:grid;grid-template-rows:auto auto auto auto auto minmax(0,1fr) auto;position:relative;border:1px solid #76401e63;border-radius:13px;background:linear-gradient(145deg,#1b100bdf,#0b090ae9 55%,#100b08f4);box-shadow:0 5px 55px #0009,inset 0 0 30px #e9a02006;overflow:hidden}
 .phead{display:flex;justify-content:space-between;align-items:center;gap:8px;border-bottom:1px solid #6d45213b;padding:22px 23px 19px}
 .ptitle{font-size:13px;letter-spacing:.14em;font-weight:700}.psub{font:10px Consolas,monospace;color:#b1845d;margin-top:7px;letter-spacing:.06em}
 .tiny{border:1px solid #8b572d; background:#25170f;color:#ffc07e;padding:8px 10px;border-radius:6px;font:10px Consolas,monospace;letter-spacing:.06em;white-space:nowrap}
@@ -44,6 +44,11 @@ button,input{font:inherit}button{cursor:pointer}button:focus-visible,input:focus
 .control:hover{border-color:#ffa343;color:#ffd395}.control.selected{background:#5b3215;color:#ffd58b}
 .control.mic-live{border-color:#ff5d43;background:#512017;color:#ffbc9a;box-shadow:0 0 14px #ff593c50}
 .approval{display:none;margin:10px 17px 0;border:1px solid #d08a39;border-radius:9px;background:#38200e;padding:13px;line-height:1.5}
+.speech-panel{display:none;background:#21170e;border:1px solid #8b5628;border-radius:8px;margin:11px 17px 0;padding:12px;line-height:1.5;color:#f2cb96}
+.speech-panel.on{display:block}.speech-panel strong{font:11px Consolas,monospace;letter-spacing:.07em}
+.speech-panel p{font-size:12px;color:#c49f75;margin:7px 0}
+.speech-panel button{background:#673816;color:#ffe5b2;border:1px solid #c08441;border-radius:5px;padding:9px 12px}
+.speech-panel button:disabled{opacity:.5;cursor:not-allowed}
 .phone{display:none;background:#21150d;border:1px solid #774621;border-radius:7px;margin:11px 17px 0;padding:11px 12px;line-height:1.45}
 .phone.on{display:block}.phone p{margin:4px 0;color:#c69a73;font-size:11px}
 .phone input{width:100%;min-width:0;background:#110a05;border:1px solid #81512a;color:#ffd89e;border-radius:5px;font:11px Consolas,monospace;padding:8px}
@@ -80,6 +85,12 @@ button,input{font:inherit}button{cursor:pointer}button:focus-visible,input:focus
       <small>The key stays in this app's memory, is not saved to disk, and is sent only to the endpoint you choose when requesting a response.</small>
     </div>
   </div>
+  <div class="speech-panel" id="speech-panel" role="status">
+    <strong>LOCAL SPEECH RECOGNITION</strong>
+    <p id="speech-status">Checking Faster Whisper installation and local model cache...</p>
+    <button id="install-speech" type="button">INSTALL LOCAL WHISPER MODEL</button>
+    <p>Downloads only after your confirmation from the Faster Whisper Hugging Face model registry. Audio is still transcribed locally. Ollama and speech recognition are separate.</p>
+  </div>
   <div class="phone" id="phone-panel" role="status">
     <strong>PHONE COMPANION — LOCAL ONLY</strong>
     <p>This URL works on this PC. To access from your phone, set up Tailscale Serve private HTTPS to local port 8765, then use its private address with the same #token.</p>
@@ -93,7 +104,7 @@ button,input{font:inherit}button{cursor:pointer}button:focus-visible,input:focus
   </div>
   <div class="messages" id="messages" role="log" aria-live="polite"></div>
   <form class="composer" id="form"><input id="prompt" type="text" maxlength="4000" autocomplete="off" spellcheck="true" aria-label="Message Max" placeholder="Enter a command, or say hi max..." /><button class="send" id="send" type="submit" title="Send message" aria-label="Send">➤</button>
-  <div class="actions"><button type="button" class="control" id="mic">◉ TALK</button><button type="button" class="control selected" id="voice">VOICE ON</button><button type="button" class="control" id="handsfree" aria-pressed="false">HANDS-FREE OFF</button><button type="button" class="control" id="phone">PHONE OFF</button><button type="button" class="control" id="wake">WAKE MAX</button><span class="hint" id="hint">MIC OFF UNTIL ENABLED • APPROVAL REQUIRED FOR PC INPUT</span></div></form>
+  <div class="actions"><button type="button" class="control" id="mic">◉ TALK</button><button type="button" class="control" id="speech-button">SPEECH SETUP</button><button type="button" class="control selected" id="voice">VOICE ON</button><button type="button" class="control" id="handsfree" aria-pressed="false">HANDS-FREE OFF</button><button type="button" class="control" id="phone">PHONE OFF</button><button type="button" class="control" id="wake">WAKE MAX</button><span class="hint" id="hint">MIC OFF UNTIL ENABLED • APPROVAL REQUIRED FOR PC INPUT</span></div></form>
 </section>
 </main>
 <footer class="footer"><span>MAX // LOCAL CONTROL • NO REMOTE UI SERVER</span><span>SECURE EXECUTION / APPROVAL REQUIRED</span></footer>
@@ -117,6 +128,19 @@ function updateState(state){
  if(state.model_error)$('setup-msg').textContent=state.model_error;
  else $('setup-msg').textContent='Text commands can work offline. Real AI replies require an installed Ollama model or a configured OpenAI-compatible provider in .env.';
  ui.voice=!!state.voice;
+ if(state.speech){
+  const st=state.speech;
+  $('speech-status').textContent=st.cached?
+   'Whisper '+st.model+' is cached locally. Try TALK or HANDS-FREE.':
+   st.backend_installed?
+    'Faster Whisper installed; Whisper '+st.model+' is not cached yet. Install it once below.':
+    (st.error||'Faster Whisper is missing. Install the PC and STT extras first.');
+  $('install-speech').disabled=!st.backend_installed||ui.busy||ui.handsfree;
+ }
+ if(state.voice_error){
+  $('speech-panel').classList.add('on');
+  $('speech-status').textContent=state.voice_error;
+ }
  ui.handsfree=!!state.handsfree;
  ui.remote=!!state.remote;
  $('phone').textContent=ui.remote?'PHONE ON':'PHONE OFF';
@@ -177,6 +201,29 @@ $('approve').addEventListener('click',async()=>{
 $('deny').addEventListener('click',async()=>{
  clearApproval();try{const r=await api('deny_action');addMessage('SYSTEM',r.text,'system');}
  catch(err){addMessage('SYSTEM','Cancellation error: '+err.message,'system');}
+});
+$('speech-button').addEventListener('click',async()=>{
+ $('speech-panel').classList.toggle('on');
+ try{updateState(await api('state'));}
+ catch(err){addMessage('SYSTEM','Speech status unavailable: '+err.message,'system');}
+});
+$('install-speech').addEventListener('click',async()=>{
+ if(ui.busy||ui.handsfree)return;
+ const statusText=$('speech-status').textContent;
+ if(!window.confirm('Download the official Faster Whisper speech recognition model from Hugging Face to this PC? '
+     +'This needs Internet access and free disk space. Audio will still be processed locally.'))return;
+ $('install-speech').disabled=true;
+ $('speech-status').textContent='Installing Whisper locally from Hugging Face...';
+ setBusy(true);
+ try{
+  const result=await api('install_voice_model');
+  if(result.state)updateState(result.state);
+  addMessage('SYSTEM',result.text,'system');
+  $('speech-status').textContent=result.text;
+ }catch(err){
+  $('speech-status').textContent='Installation could not complete: '+err.message;
+  addMessage('SYSTEM',$('speech-status').textContent,'system');
+ }finally{setBusy(false);$('install-speech').disabled=ui.handsfree;}
 });
 $('handsfree').addEventListener('click',async()=>{
  const enabled=!ui.handsfree;
