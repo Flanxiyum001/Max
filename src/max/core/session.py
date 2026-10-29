@@ -55,13 +55,57 @@ class SessionStore:
         return out
 
     def history(self, session_id: str, limit: int = MAX_HISTORY_MESSAGES) -> list[dict]:
-        """Conversation-shaped history for the provider (no meta fields)."""
-        messages = [
-            {"role": entry["role"], "content": entry["content"]}
-            for entry in self.load(session_id)
-            if entry.get("role") in {"user", "assistant"} and entry.get("content")
-        ]
-        return messages[-limit:]
+        """Read only the newest conversation turns, not the full transcript.
+
+        Sessions remain append-only and fully recoverable via load(); model
+        prompts need only the last bounded number of messages. A reverse
+        chunk scan avoids repeatedly parsing multi-megabyte transcripts.
+        """
+        path = self.path(session_id)
+        if limit <= 0 or not path.is_file():
+            return []
+        recent: list[dict] = []
+        with path.open("rb") as handle:
+            handle.seek(0, 2)
+            position = handle.tell()
+            pending = b""
+            while position > 0 and len(recent) < limit:
+                size = min(position, 8192)
+                position -= size
+                handle.seek(position)
+                pending = handle.read(size) + pending
+                # The first segment may be part of a split UTF-8/JSON line;
+                # keep it intact until the preceding newline is found.
+                parts = pending.split(b"\n")
+                pending = parts[0]
+                for raw in reversed(parts[1:]):
+                    if not raw.strip():
+                        continue
+                    try:
+                        entry = json.loads(raw.decode("utf-8"))
+                    except (ValueError, UnicodeDecodeError):
+                        continue  # torn/corrupt lines are not prompt context
+                    if (
+                        isinstance(entry, dict)
+                        and entry.get("role") in {"user", "assistant"}
+                        and entry.get("content")
+                    ):
+                        recent.append({"role": entry["role"], "content": entry["content"]})
+                        if len(recent) >= limit:
+                            break
+            if pending and len(recent) < limit:
+                try:
+                    entry = json.loads(pending.decode("utf-8"))
+                except (ValueError, UnicodeDecodeError):
+                    entry = None
+                if (
+                    isinstance(entry, dict)
+                    and entry.get("role") in {"user", "assistant"}
+                    and entry.get("content")
+                ):
+                    recent.append({"role": entry["role"], "content": entry["content"]})
+        recent.reverse()
+        return recent
 
     def list_ids(self) -> list[str]:
         return sorted(p.stem for p in self.dir.glob("*.jsonl"))
