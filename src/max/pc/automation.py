@@ -79,7 +79,19 @@ class WindowsAction:
         if self.operation == "type":
             return f"Focus {self.application} and type exactly:\n{self.value}"
         if self.operation == "shortcut":
-            return f"Focus {self.application} and send {self.value.upper()}."
+            note = ""
+            if self.application == "premiere":
+                note = {
+                    "space": "Toggles playback; the current playback state is not detected.",
+                    "ctrl+k": "Adds an edit at the playhead on targeted tracks. This modifies the open sequence.",
+                    "m": "Adds a marker using Premiere's current timeline context.",
+                    "i": "Marks an In point in the current timeline context.",
+                    "o": "Marks an Out point in the current timeline context.",
+                    "home": "Moves to the start of the current timeline.",
+                    "end": "Moves to the end of the current timeline.",
+                    "ctrl+m": "Opens export settings only; does not render a video.",
+                }.get(self.value, "")
+            return f"Focus {self.application} and send {self.value.upper()}. " + note
         return f"Bring {self.application} to the foreground."
 
 
