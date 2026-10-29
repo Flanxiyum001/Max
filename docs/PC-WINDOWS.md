@@ -19,12 +19,30 @@ if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
 Or double-click `scripts\launch-max-pc.bat` after installing.
-The window uses Tkinter (bundled with the standard Windows Python installer):
-dark theme, animated orb, text input, voice output toggle, and a push-to-talk
-button. The sphere pulses while listening/responding.
+The desktop now uses **pywebview + Windows WebView2** for a cinematic amber
+holographic core, responsive chat composer, status indicator, push-to-talk and
+native male speech output. No external scripts or web-hosted UI are required.
+Install/update WebView2 Runtime if the GUI refuses to start; standard Windows
+11 installations usually include it. On Windows use **Python 3.12** for
+predictable native dependency support.
 
-**A real LLM is required for intelligent answers.** Without a configured
-provider, Max uses its deterministic mock provider. In `.env`, configure:
+The legacy Tkinter mock screen is no longer launched by `max pc run`.
+The chat composer remains visible at normal laptop resolutions.
+
+**A real LLM is required for intelligent answers.** When no real provider is
+configured, the UI displays **MODEL / NOT CONNECTED** rather than silently
+returning mock text. Click **CONNECT MODEL → DETECT LOCAL OLLAMA** to connect
+to an already installed local Ollama model, without installing or downloading
+anything. That connection is session-only: to persist across restarts set
+the same model in `.env`:
+
+```dotenv
+MAX_PROVIDER=openai
+MAX_BASE_URL=http://127.0.0.1:11434/v1
+MAX_MODEL=your-locally-installed-ollama-model
+```
+
+Alternatively, configure a hosted OpenAI-compatible model in `.env`:
 
 ```dotenv
 MAX_PROVIDER=openai
@@ -140,3 +158,19 @@ live performance be proven.
 **Next phases:** calibrated UI Automation, authenticated Spotify playback,
 persistent wake-word audio pipeline with mic privacy indicators, on-device
 latency instrumentation, and optional Hermes integration through audited MCP.
+
+## Troubleshooting the desktop GUI
+
+- **MODEL / NOT CONNECTED** means PC commands may work but intelligence is
+  not configured. Use Connect Model for installed Ollama or set
+  `MAX_PROVIDER`, `MAX_BASE_URL`, `MAX_MODEL` and your API-key environment
+  variable in a local `.env`. Restart Max afterward.
+- **WebView2 missing**: install Microsoft Edge WebView2 Runtime and rerun
+  `python -m max pc run`. Do not use an old installed Max package; reinstall
+  using `pip install -e ".[pc,stt,desktop]"`.
+- **Controls off-screen**: this release uses a responsive CSS layout with
+  a permanently visible composer; shrink the window to test small-screen mode.
+- **No audio**: speech packages must be installed and a local Whisper model
+  available. Text is independent of audio.
+- **Tools cannot control PC**: arbitrary app controls still require the
+  pre-existing approved desktop MCP flow (`MAX_DESKTOP_ENABLE=1`).
