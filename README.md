@@ -1,7 +1,8 @@
 # MAX — Windows Desktop Assistant + Discord Agent
 
-MAX now has a **local Windows desktop app** with an animated orb, optional
-push-to-talk transcription, Windows voice output, safe app launching,
+MAX now has a **voice-first Windows companion** (compact by default; an optional
+full dashboard is available using `--dashboard`), with optional push-to-talk
+transcription, Windows voice output, safe app launching,
 browser searches, and persisted gaming settings profiles. The original
 Discord agent remains supported. For full capabilities and limitations,
 see [Windows PC setup](docs/PC-WINDOWS.md).
@@ -20,7 +21,7 @@ if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 .\.venv\Scripts\python.exe -m max pc run
 ```
 
-Double-click `scripts\launch-max-pc.bat` after installation. Enter
+Double-click `scripts\launch-max-pc.bat` after installation. The compact assistant lets normal applications remain visible. Enter
 `hi max`, speak through **TALK**, then `bye max`. Configure a real
 model via `.env` for actual AI responses. The default model is a mock,
 and the app does **not** automatically alter game settings or play Spotify
