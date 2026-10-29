@@ -397,8 +397,12 @@ class PCBridge:
             self._busy.release()
 
 
-def run(controller: PCController, *, config: Config) -> None:
-    """Start the native desktop window. No HTTP listener, no external web assets."""
+def run(controller: PCController, *, config: Config, dashboard: bool = False) -> None:
+    """Run a compact voice-first companion; legacy holographic UI is optional.
+
+    The video reference shows normal Windows apps, not a large Jarvis UI.
+    Launch compact by default and let users explicitly select --dashboard.
+    """
     try:
         import webview
     except ImportError as exc:
@@ -406,14 +410,22 @@ def run(controller: PCController, *, config: Config) -> None:
             "Cinematic desktop requires pywebview. Reinstall with "
             'python -m pip install -e ".[pc]"'
         ) from exc
-    html = (Path(__file__).parent / "ui" / "index.html").read_text(encoding="utf-8")
+    ui_file = "index.html" if dashboard else "companion.html"
+    html = (Path(__file__).parent / "ui" / ui_file).read_text(encoding="utf-8")
     bridge = PCBridge(controller, config=config)
-    webview.create_window(
-        "MAX // PERSONAL AI",
-        html=html, js_api=bridge,
-        width=1180, height=800, min_size=(720, 540),
-        background_color="#080504", text_select=True,
-    )
+    if dashboard:
+        webview.create_window(
+            "MAX // PERSONAL AI", html=html, js_api=bridge,
+            width=1180, height=800, min_size=(720, 540),
+            background_color="#080504", text_select=True,
+        )
+    else:
+        webview.create_window(
+            "MAX // Voice Companion", html=html, js_api=bridge,
+            width=500, height=430, min_size=(390, 330),
+            background_color="#101216", text_select=True,
+            on_top=False,
+        )
     try:
         webview.start(debug=False)
     finally:
