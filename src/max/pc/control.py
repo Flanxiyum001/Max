@@ -19,7 +19,7 @@ import webbrowser
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote_plus, urlsplit
 
 _PROFILE_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$", re.I)
 _SPOTIFY_RE = re.compile(
@@ -197,6 +197,30 @@ class AppLauncher:
             return PCReply("The browser did not accept the URL.", "browser", False)
         return PCReply("Opened the website in your browser.", "browser")
 
+    def search_web(self, query: str) -> PCReply:
+        query = query.strip()
+        if not query or len(query) > 250:
+            return PCReply("Use a search query of 1-250 characters.", "browser", False)
+        return self.open_url("https://www.google.com/search?q=" + quote_plus(query))
+
+    def volume(self, action: str, *, press=None) -> PCReply:
+        if self.platform != "win32":
+            return PCReply("Windows audio controls are unavailable here.", "volume", False)
+        key = {"up": "volumeup", "down": "volumedown", "mute": "volumemute"}.get(action)
+        if not key:
+            return PCReply("Unsupported volume action.", "volume", False)
+        if press is None:
+            try:
+                import pyautogui
+                press = pyautogui.press
+            except ImportError:
+                return PCReply("Install the desktop extra to control volume.", "volume", False)
+        try:
+            press(key)
+            return PCReply("Windows volume " + action + " command sent.", "volume")
+        except Exception:
+            return PCReply("Windows did not accept the volume command.", "volume", False)
+
     def spotify_playlist(self, uri: str) -> PCReply:
         match = _SPOTIFY_RE.fullmatch(uri.strip())
         if not match:
@@ -240,6 +264,20 @@ class PCController:
         url = re.fullmatch(r"(?:open|browse|visit)\s+(https://\S+)", text, re.I)
         if url:
             return self.launcher.open_url(url.group(1))
+        search = re.fullmatch(r"(?:search (?:the )?web for|google)\\s+(.+)", text, re.I)
+        if search:
+            return self.launcher.search_web(search.group(1))
+        volume = re.fullmatch(r"(?:volume\\s+(up|down)|mute(?:\\s+volume)?)", text, re.I)
+        if volume:
+            return self.launcher.volume(volume.group(1).lower() if volume.group(1) else "mute")
+        if re.fullmatch(r"(?:what(?:'s| is) the time|what time is it)[?!.]?", text, re.I):
+            return PCReply("Your PC local time is " + datetime.now().strftime("%I:%M %p") + ".", "clock")
+        if re.fullmatch(r"(?:help|what can you do)[?!.]?", text, re.I):
+            return PCReply(
+                "I can open approved apps, search the web, change volume, remember Valorant "
+                "settings profiles, and answer questions with your configured AI. "
+                "Say bye max to put me to sleep.", "help"
+            )
         play = re.fullmatch(r"(?:play|open)\s+(?:my\s+)?(?:spotify\s+)?playlist\s+(.+)", text, re.I)
         if play:
             return self.launcher.spotify_playlist(play.group(1))
