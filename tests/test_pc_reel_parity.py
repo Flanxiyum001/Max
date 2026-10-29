@@ -31,7 +31,9 @@ def test_restaurant_search_is_research_not_auto_order(tmp_path):
     assert len(opened) == 1
 
 
-def test_premiere_launch_does_not_lie_about_installation(tmp_path):
+def test_premiere_launch_does_not_lie_about_installation(tmp_path, monkeypatch):
+    monkeypatch.setenv("PROGRAMDATA", str(tmp_path))
+    monkeypatch.setenv("APPDATA", str(tmp_path))
     pc = PCController(tmp_path, launcher=AppLauncher(platform="win32"))
     pc.handle("hi max")
     response = pc.handle("open premiere")
