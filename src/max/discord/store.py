@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from threading import RLock
 from pathlib import Path
 
 from ..core.tools import AuditLog
@@ -25,7 +26,9 @@ class ChannelStore:
         self.config = config
         self.path = Path(config.allowlist_file)
         self.audit = audit
-        self._data: dict = {"added": {}, "removed": {}}
+        self._lock = RLock()
+        # A missing "awake" entry means sleeping; old allowlist files remain valid.
+        self._data: dict = {"added": {}, "removed": {}, "awake": {}}
         self._load()
 
     # ------------------------------------------------------------- state
@@ -39,6 +42,12 @@ class ChannelStore:
         if isinstance(data, dict):
             self._data["added"] = dict(data.get("added") or {})
             self._data["removed"] = dict(data.get("removed") or {})
+            awake = data.get("awake")
+            if isinstance(awake, dict):
+                self._data["awake"] = {
+                    k: v for k, v in awake.items()
+                    if k.isdecimal() and isinstance(v, dict) and isinstance(v.get("guild"), int)
+                }
 
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -67,6 +76,36 @@ class ChannelStore:
         base -= set(self.config.ignored_channels)
         return base
 
+    def is_awake(self, channel_id: int, guild_id: int | None) -> bool:
+        """Activation is per guild channel and never bypasses the allowlist."""
+        if not self.is_allowed(channel_id, guild_id):
+            return False
+        with self._lock:
+            record = self._data["awake"].get(str(channel_id))
+            return isinstance(record, dict) and record.get("guild") == guild_id
+
+    def set_awake(
+        self, channel_id: int, guild_id: int | None, actor_id: int, awake: bool
+    ) -> bool:
+        """Persist the explicit conversational opt-in; deny unapproved channels."""
+        if guild_id is None or not self.is_allowed(channel_id, guild_id):
+            return False
+        key = str(channel_id)
+        with self._lock:
+            if awake:
+                if not self.is_awake(channel_id, guild_id):
+                    self._data["awake"][key] = {
+                        "guild": guild_id, "actor": actor_id, "ts": _now()
+                    }
+                    self._save()
+            elif self._data["awake"].pop(key, None) is not None:
+                self._save()
+        self._record(
+            "discord_wake_changed", channel=channel_id, guild=guild_id,
+            action="wake" if awake else "sleep", actor=actor_id,
+        )
+        return True
+
     def changes(self) -> dict:
         return {"added": dict(self._data["added"]), "removed": dict(self._data["removed"])}
 
@@ -81,7 +120,8 @@ class ChannelStore:
         if key not in self._data["added"]:
             self._data["added"][key] = {"ts": _now(), "actor": actor_id, "guild": guild_id}
             changed = True
-        self._data["removed"].pop(key, None)
+        if self._data["removed"].pop(key, None) is not None:
+            changed = True
         if changed:
             self._save()
         self._record("discord_config_change", actor=actor_id, channel=channel_id,
@@ -93,6 +133,8 @@ class ChannelStore:
         changed = False
         if key in self._data["added"]:
             self._data["added"].pop(key)
+            changed = True
+        if self._data["awake"].pop(key, None) is not None:
             changed = True
         if key not in self.config.allowed_channels and key not in self._data["removed"]:
             # never in the base list: record an explicit deny anyway (belt and braces)
