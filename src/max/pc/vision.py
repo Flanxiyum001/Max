@@ -81,8 +81,8 @@ def capture_foreground_window(application: str, *, gui=None, executable=None) ->
     An off-screen/secondary-monitor or ambiguous capture fails closed rather
     than uploading unexpected content from another window.
     """
-    if application not in WINDOW_TITLES:
-        raise VisionUnavailable("Choose Premiere, Notepad or VS Code.")
+    if application not in WINDOW_TITLES and application != "active":
+        raise VisionUnavailable("Only Premiere, Notepad and VS Code are available.")
     if gui is None:
         if sys.platform != "win32":
             raise VisionUnavailable("Screen observation is available only in the Windows PC app.")
@@ -100,10 +100,8 @@ def capture_foreground_window(application: str, *, gui=None, executable=None) ->
 
     window = active()
     title = str(getattr(window, "title", "") or "").casefold()
-    if not title or WINDOW_TITLES[application] not in title:
-        raise VisionUnavailable(
-            "Wrong foreground window. Switch to the selected app and try LOOK again."
-        )
+    if not title or (application != "active" and WINDOW_TITLES[application] not in title):
+        raise VisionUnavailable("Wrong foreground window. Open the requested app and ask Max again.")
     # Window titles can be spoofed by a browser tab or an unrelated window.
     # Fail closed unless the foreground HWND belongs to the expected program.
     hwnd = getattr(window, "_hWnd", None)
@@ -113,7 +111,18 @@ def capture_foreground_window(application: str, *, gui=None, executable=None) ->
         program = (_window_executable(hwnd) if executable is None else executable)
     except (OSError, RuntimeError, ValueError):
         raise VisionUnavailable("Could not verify the app process. No image was captured.") from None
-    if os.path.basename(str(program)).casefold() != WINDOW_PROGRAMS[application]:
+    process_name = os.path.basename(str(program)).casefold()
+    if application == "active":
+        application = next((
+            name for name, executable_name in WINDOW_PROGRAMS.items()
+            if executable_name == process_name
+            and WINDOW_TITLES[name] in title
+        ), None)
+        if application is None:
+            raise VisionUnavailable(
+                "I can only inspect Premiere, Notepad or VS Code right now. No image was captured."
+            )
+    elif process_name != WINDOW_PROGRAMS[application]:
         raise VisionUnavailable("The foreground window belongs to a different app. No image was captured.")
     if getattr(window, "isMinimized", False):
         raise VisionUnavailable("Restore the selected app before using LOOK.")
