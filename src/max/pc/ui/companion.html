@@ -14,15 +14,26 @@ form{display:flex;gap:8px}input{width:100%;min-width:0;background:#23252c;border
 <div id="messages" class="messages" role="log" aria-live="polite"></div>
 <div class="bottom">
 <div class="panel" id="approval"><strong>PC ACTION NEEDS APPROVAL</strong><p id="preview"></p><button id="approve">CONFIRM ACTION</button><button id="deny">CANCEL</button></div>
-<div class="panel" id="model-panel"><strong>MODEL</strong><p id="model-status">Detect an installed Ollama model.</p><button id="ollama">CONNECT LOCAL OLLAMA</button><p>Use the dashboard or .env to configure hosted providers.</p></div>
-<div class="panel" id="speech-panel"><strong>LOCAL WHISPER SPEECH</strong><p id="speech-status"></p><button id="install">INSTALL WHISPER MODEL</button></div>
+<div class="panel" id="model-panel"><strong>CHAT MODEL</strong><p id="model-status">Configure an API model, then test it with a real request.</p>
+<button id="ollama">CONNECT LOCAL OLLAMA</button> <button id="test-ai">TEST AI RESPONSE</button>
+<p>Or configure your existing free OpenAI-compatible provider:</p>
+<input id="api-url" type="url" autocomplete="off" placeholder="https://provider.example/v1" aria-label="API base URL">
+<input id="api-model" type="text" maxlength="128" autocomplete="off" placeholder="Exact model ID" aria-label="Model ID">
+<input id="api-key" type="password" maxlength="4096" autocomplete="off" placeholder="API key (not stored)" aria-label="API key">
+<button id="api-connect">CONFIGURE PROVIDER</button><p>Configuration alone does not prove connectivity. TEST AI sends a small real request and may use provider credits.</p></div>
+<div class="panel" id="speech-panel"><strong>SPEECH RECOGNITION — ENGLISH</strong><p id="speech-status"></p><button id="install">INSTALL WHISPER MODEL</button></div>
 <form id="form"><input id="prompt" maxlength="4000" placeholder="Say hi max, or enter a command…" aria-label="Message Max"><button id="send">SEND</button></form>
 <div class="note">Works alongside your Windows apps · input actions require approval</div></div></div>
 <script>
 (()=>{'use strict';const el=id=>document.getElementById(id),ui={awake:false,handsfree:false,busy:false,pending:null,initialized:false};
 function add(by,text,kind=''){let item=document.createElement('article');item.className='event '+kind;let a=document.createElement('div');a.className='who';a.textContent=by;let b=document.createElement('div');b.className='message';b.textContent=String(text||'');item.append(a,b);el('messages').appendChild(item);el('messages').scrollTop=el('messages').scrollHeight}
 async function api(name,...args){if(!window.pywebview?.api?.[name])throw Error('Native MAX bridge unavailable');return await window.pywebview.api[name](...args)}
-function state(s){if(!s)return;ui.awake=!!s.awake;ui.handsfree=!!s.handsfree;el('model').textContent=s.ready?'AI: '+s.model:'AI disconnected · connect Ollama';el('state').textContent=ui.handsfree?'● LISTENING':ui.awake?'● READY':'SLEEPING';el('handsfree').textContent=ui.handsfree?'● MIC ON':'MIC OFF';el('handsfree').classList.toggle('on',ui.handsfree);el('talk').disabled=ui.handsfree||ui.busy;el('wake').textContent=ui.awake?'SLEEP':'WAKE';if(s.speech){el('speech-status').textContent=s.speech.cached?'Whisper '+s.speech.model+' ready':s.speech.backend_installed?'Whisper '+s.speech.model+' not installed locally':s.speech.error||'Install faster-whisper';el('install').disabled=!s.speech.backend_installed}if(s.voice_error){el('speech-panel').classList.add('show');el('speech-status').textContent=s.voice_error}}
+function state(s){if(!s)return;ui.awake=!!s.awake;ui.handsfree=!!s.handsfree;el('model').textContent=s.ready?'AI: '+s.model+(s.model_verified?' ✓ verified':' · test needed'):'AI disconnected · connect model';el('state').textContent=ui.handsfree?'● LISTENING':ui.awake?'● READY':'SLEEPING';el('handsfree').textContent=ui.handsfree?'● MIC ON':'MIC OFF';el('handsfree').classList.toggle('on',ui.handsfree);el('talk').disabled=ui.handsfree||ui.busy;el('wake').textContent=ui.awake?'SLEEP':'WAKE';if(s.speech){el('speech-status').textContent=s.speech.backend==='cloud'?
+  (s.speech.backend_installed?'Cloud gpt-transcribe selected; audio goes to OpenAI when you use voice.':'Cloud speech selected, OPENAI_API_KEY missing.'):
+  s.speech.cached?'Local Whisper '+s.speech.model+' ready; language '+s.speech.language:
+  s.speech.backend_installed?'Whisper '+s.speech.model+' not cached. Install below; English locked by default.':
+  s.speech.error||'Install faster-whisper';
+  el('install').disabled=s.speech.backend==='cloud'||!s.speech.backend_installed}if(s.voice_error){el('speech-panel').classList.add('show');el('speech-status').textContent=s.voice_error}}
 function busy(v){ui.busy=v;el('send').disabled=v;el('prompt').disabled=v;el('talk').disabled=v||ui.handsfree}
 function showApproval(p){ui.pending=p;el('preview').textContent=p.preview;el('approval').classList.add('show')}
 async function send(msg){if(!msg.trim()||ui.busy)return;add('YOU',msg);busy(true);try{let r=await api('submit',msg.trim());add(r.ok?'MAX':'SYSTEM',r.text,r.ok?'':'system');if(r.approval)showApproval(r.approval);state(r.state)}catch(e){add('SYSTEM',e.message,'system')}finally{busy(false)}}
@@ -31,7 +42,29 @@ el('handsfree').onclick=async()=>{let on=!ui.handsfree;if(on&&!confirm('Enable m
 el('talk').onclick=async()=>{busy(true);try{let r=await api('record');if(r.ok){busy(false);await send(r.text)}else{add('SYSTEM',r.text,'system');el('speech-panel').classList.add('show')}}catch(e){add('SYSTEM',e.message,'system')}finally{busy(false)}};
 el('approve').onclick=async()=>{if(!ui.pending)return;let token=ui.pending.id;ui.pending=null;el('approval').classList.remove('show');try{let r=await api('approve_action',token);add('MAX / PC',r.text,r.ok?'':'system')}catch(e){add('SYSTEM',e.message,'system')}};
 el('deny').onclick=async()=>{ui.pending=null;el('approval').classList.remove('show');await api('deny_action');add('SYSTEM','Cancelled.','system')};
-el('connect').onclick=()=>el('model-panel').classList.toggle('show');el('ollama').onclick=async()=>{el('ollama').disabled=true;try{let r=await api('connect_ollama','');el('model-status').textContent=r.message;state(r.state);add('SYSTEM',r.message,'system')}catch(e){add('SYSTEM',e.message,'system')}finally{el('ollama').disabled=false}};
+el('connect').onclick=()=>el('model-panel').classList.toggle('show');
+el('api-connect').onclick=async()=>{
+  let url=el('api-url').value.trim(),model=el('api-model').value.trim(),key=el('api-key').value;
+  el('api-key').value='';el('api-connect').disabled=true;
+  try{
+    let r=await api('connect_provider',url,model,key);
+    el('model-status').textContent=r.message;
+    add('SYSTEM',r.message,'system');
+    state(r.state);
+  }catch(e){add('SYSTEM','Provider setup failed: '+e.message,'system')}
+  finally{el('api-connect').disabled=false}
+};
+el('test-ai').onclick=async()=>{
+  if(!confirm('Send one short model test request using provider credits?'))return;
+  el('test-ai').disabled=true;
+  try{
+    let r=await api('test_ai_connection');
+    el('model-status').textContent=r.message;
+    add('SYSTEM',r.message,'system');
+    state(await api('state'));
+  }catch(e){add('SYSTEM','Model test failed: '+e.message,'system')}
+  finally{el('test-ai').disabled=false}
+};el('ollama').onclick=async()=>{el('ollama').disabled=true;try{let r=await api('connect_ollama','');el('model-status').textContent=r.message;state(r.state);add('SYSTEM',r.message,'system')}catch(e){add('SYSTEM',e.message,'system')}finally{el('ollama').disabled=false}};
 el('speech').onclick=()=>el('speech-panel').classList.toggle('show');el('install').onclick=async()=>{if(!confirm('Download a local Faster Whisper speech model from Hugging Face?'))return;el('install').disabled=true;try{let r=await api('install_voice_model');add('SYSTEM',r.text,'system');state(r.state)}catch(e){add('SYSTEM',e.message,'system')}finally{el('install').disabled=false}};
 async function poll(){try{for(let ev of await api('poll_events')){if(ev.type==='error')add('SYSTEM',ev.text,'system');if(ev.type==='speech'||ev.type==='remote'){add(ev.type==='remote'?'PHONE':'VOICE',ev.heard);add('MAX',ev.response?.text||'');if(ev.response?.approval)showApproval(ev.response.approval);state(ev.response?.state)}}}catch(e){}}
 async function init(){if(ui.initialized)return;try{let s=await api('state');ui.initialized=true;state(s);add('MAX','Ready in the background. Enable the mic, say hi max, then speak normally.');setInterval(poll,800)}catch(e){add('SYSTEM','Desktop backend unavailable: '+e.message,'system')}}window.addEventListener('pywebviewready',init);setTimeout(init,2500);

@@ -70,6 +70,8 @@ class PCBridge:
         self._remote = None
         self.model_name = ""
         self.model_error = ""
+        self._active_provider = None
+        self._model_verified = False
         if config.provider not in ("mock", "test") and config.model and config.base_url:
             try:
                 self._activate(config)
@@ -82,6 +84,8 @@ class PCBridge:
             if provider is not None else self._builder(config)
         )
         self.controller.ask = lambda text, session: agent.ask(text, session_id=session)
+        self._active_provider = provider or getattr(agent, "provider", None)
+        self._model_verified = False
         self.model_name = config.model
         self.model_error = ""
 
@@ -90,6 +94,7 @@ class PCBridge:
             "awake": self.controller.awake,
             "ready": bool(self.controller.ask),
             "model": self.model_name or "NO MODEL CONNECTED",
+            "model_verified": self._model_verified,
             "model_error": self.model_error,
             "voice": self._voice_on,
             "handsfree": self._listening_active(),
@@ -99,6 +104,42 @@ class PCBridge:
             "greeting": greeting(),
             "version": "DESKTOP / V2",
         }
+
+    def test_ai_connection(self) -> dict:
+        """Make ONE explicit, billable test request when user presses TEST AI."""
+        if not self._busy.acquire(blocking=False):
+            return {"ok": False, "message": "MAX is busy. Try again."}
+        try:
+            provider = self._active_provider
+            if provider is None:
+                return {"ok": False, "message": "No testable provider configured. Connect a model first."}
+            try:
+                response = provider.complete([
+                    {"role": "user", "content": "Reply with the single word OK."}
+                ], tools=None)
+            except Exception as exc:
+                from ..providers.base import ProviderAuthError, ProviderRateLimit, ProviderTimeout, ProviderError
+                if isinstance(exc, ProviderAuthError):
+                    desc = "Authentication failed (401/403). Check the API key and account permissions."
+                elif isinstance(exc, ProviderRateLimit):
+                    desc = "Rate limit or credits exhausted (429). Check your provider quota."
+                elif isinstance(exc, ProviderTimeout):
+                    desc = "Request timed out. Check provider URL/network or try a smaller model."
+                elif isinstance(exc, ProviderError):
+                    code = getattr(exc, "code", "") or "provider_error"
+                    if code in {"http_404", "http_400", "http_422"}:
+                        desc = "Provider rejected the model or endpoint (" + code + "). Verify exact /v1 URL and model ID."
+                    else:
+                        desc = "Provider request failed (" + str(code)[:40] + "). Check service availability."
+                else:
+                    desc = "Model test failed (" + type(exc).__name__ + ")."
+                return {"ok": False, "message": desc}
+            if not str(getattr(response, "text", "")).strip():
+                return {"ok": False, "message": "Provider returned an empty response. Check model support and quota."}
+            self._model_verified = True
+            return {"ok": True, "message": "AI test succeeded: provider returned actual text from " + self.model_name + "."}
+        finally:
+            self._busy.release()
 
     def install_voice_model(self) -> dict:
         """Explicit one-click local model download; never triggered by listening."""
@@ -352,8 +393,8 @@ class PCBridge:
             self.config = config
             return {
                 "ok": True,
-                "message": "Model connected for this session: " + model +
-                    ". The key stays in memory only. An actual model reply is the next verification step.",
+                "message": "Provider configured: " + model +
+                    ". Press TEST AI to verify a real response. The key stays in memory for this session.",
                 "state": self.state(),
             }
         except Exception as exc:
@@ -386,8 +427,8 @@ class PCBridge:
             self._activate(config)
             self.config = config
             return {
-                "ok": True, "message": "Connected to local Ollama model: " + model +
-                    ". This connection lasts until MAX closes; configure .env to persist it.",
+                "ok": True, "message": "Ollama model configured: " + model +
+                    ". Press TEST AI to verify that it actually responds. This connection lasts until MAX closes.",
                 "models": models, "state": self.state(),
             }
         except Exception as exc:

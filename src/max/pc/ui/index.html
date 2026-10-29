@@ -75,7 +75,7 @@ button,input{font:inherit}button{cursor:pointer}button:focus-visible,input:focus
 </section>
 <section class="chatpanel">
   <div class="phead"><div><div class="ptitle">COMMAND INTERFACE</div><div class="psub" id="modelname">Checking AI model...</div></div><button class="tiny" id="connect" type="button">CONNECT MODEL</button></div>
-  <div class="setup" id="setup" role="status"><strong>AI SETUP NEEDED</strong><p id="setup-msg">Your model isn't configured. PC actions still work; AI chat needs a real model.</p><button id="ollama" type="button">DETECT LOCAL OLLAMA</button>
+  <div class="setup" id="setup" role="status"><strong>AI SETUP NEEDED</strong><p id="setup-msg">Your model isn't configured. PC actions still work; AI chat needs a real model.</p><button id="ollama" type="button">DETECT LOCAL OLLAMA</button> <button id="test-ai" type="button">TEST AI RESPONSE</button>
     <div class="custom">
       <label for="endpoint">OR CONNECT AN OPENAI-COMPATIBLE PROVIDER</label>
       <input id="endpoint" type="url" autocomplete="url" placeholder="https://provider.example/v1" aria-label="AI API endpoint">
@@ -123,19 +123,18 @@ function addMessage(who,message,kind){
 function updateState(state){
  if(!state)return;
  ui.awake=!!state.awake;ui.ready=!!state.ready;
- $('modelname').textContent=ui.ready?'MODEL / '+state.model:'MODEL / NOT CONNECTED';
- $('setup').classList.toggle('on',!ui.ready);
+ $('modelname').textContent=ui.ready?'MODEL / '+state.model+(state.model_verified?' • VERIFIED':' • NOT YET TESTED'):'MODEL / NOT CONNECTED';
+ $('setup').classList.toggle('on',!ui.ready&&!state.model_verified);
  if(state.model_error)$('setup-msg').textContent=state.model_error;
  else $('setup-msg').textContent='Text commands can work offline. Real AI replies require an installed Ollama model or a configured OpenAI-compatible provider in .env.';
  ui.voice=!!state.voice;
  if(state.speech){
   const st=state.speech;
-  $('speech-status').textContent=st.cached?
-   'Whisper '+st.model+' is cached locally. Try TALK or HANDS-FREE.':
-   st.backend_installed?
-    'Faster Whisper installed; Whisper '+st.model+' is not cached yet. Install it once below.':
-    (st.error||'Faster Whisper is missing. Install the PC and STT extras first.');
-  $('install-speech').disabled=!st.backend_installed||ui.busy||ui.handsfree;
+  $('speech-status').textContent=st.backend==='cloud'?
+    (st.backend_installed?'Cloud gpt-transcribe active: audio is sent to OpenAI when you use voice.':st.error):
+    st.cached?'Local Whisper '+st.model+' cached, language '+st.language:
+    st.backend_installed?'Local Whisper '+st.model+' not cached. Install it below.':st.error;
+  $('install-speech').disabled=st.backend==='cloud'||!st.backend_installed||ui.busy||ui.handsfree;
  }
  if(state.voice_error){
   $('speech-panel').classList.add('on');
@@ -306,6 +305,17 @@ $('custom-connect').addEventListener('click',async()=>{
  finally{$('custom-connect').disabled=false;}
 });
 
+$('test-ai').addEventListener('click',async()=>{
+ if(!window.confirm('Send one short, possibly billable request to test your AI provider?'))return;
+ $('test-ai').disabled=true;
+ try{
+   const result=await api('test_ai_connection');
+   $('setup-msg').textContent=result.message;
+   addMessage('SYSTEM',result.message,'system');
+   updateState(await api('state'));
+ }catch(err){addMessage('SYSTEM','Model test failed: '+err.message,'system');}
+ finally{$('test-ai').disabled=false;}
+});
 $('ollama').addEventListener('click',async()=>{
  $('ollama').disabled=true;$('setup-msg').textContent='Checking installed Ollama models on this PC...';
  try{

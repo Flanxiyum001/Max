@@ -72,11 +72,12 @@ def mic_wav(*, seconds: float = 4.5, sample_rate: int = 16000, recorder=None) ->
 
 @lru_cache(maxsize=4)
 def _cached_stt(model_size: str, device: str, compute_type: str,
-                allow_download: bool) -> SttService:
+                allow_download: bool, language: str) -> SttService:
     """Reuse the same loaded Whisper model across voice chunks on this PC."""
     return SttService(
         SttConfig(
             backend="faster-whisper",
+            language=language or None,
             model_size=model_size,
             device=device,
             compute_type=compute_type,
@@ -98,7 +99,15 @@ def speech_model_name() -> str:
 def speech_model_status(model_size: str | None = None) -> dict:
     """A local-cache-only check; never records audio or touches the network."""
     name = model_size or speech_model_name()
-    result = {"model": name, "backend_installed": False, "cached": False}
+    if os.environ.get("MAX_PC_STT_BACKEND", "local").lower() == "cloud":
+        available = bool(os.environ.get("OPENAI_API_KEY"))
+        return {
+            "model": "gpt-transcribe", "backend": "cloud", "backend_installed": available,
+            "cached": available, "language": "en",
+            "error": None if available else "Cloud speech requires OPENAI_API_KEY. No audio will be uploaded until it is configured.",
+        }
+    result = {"model": name, "backend": "local", "language": os.environ.get("MAX_PC_STT_LANGUAGE", "en"),
+              "backend_installed": False, "cached": False}
     if name not in _SAFE_MODELS:
         result["error"] = "Use MAX_STT_MODEL_SIZE=tiny, base or small."
         return result
@@ -153,6 +162,8 @@ def speech_failure(exc: Exception) -> str:
             return "Faster Whisper isn't installed. Reinstall with .[pc,stt,desktop]."
         if "failed to load whisper model" in detail or "model" in detail and "load" in detail:
             return "Local Whisper model missing or unable to load. Open SPEECH SETUP and install the speech model; if already installed, verify CPU/CUDA settings."
+        if "cloud" in detail:
+            return str(exc)[:180]
         if "timed out" in detail:
             return "Speech recognition timed out. Try MAX_STT_MODEL_SIZE=tiny and MAX_STT_DEVICE=cpu."
         return "Speech recognition failed (" + type(exc).__name__ + "). Check speech model and audio format."
@@ -163,11 +174,18 @@ def speech_failure(exc: Exception) -> str:
 
 def transcribe(wav: bytes, *, service=None) -> str:
     if service is None:
+        if os.environ.get("MAX_PC_STT_BACKEND", "local").lower() == "cloud":
+            from .cloud_stt import cloud_transcribe
+            return cloud_transcribe(wav)
+        language = os.environ.get("MAX_PC_STT_LANGUAGE", "en").strip().lower()
+        if language not in {"en", "auto"}:
+            raise ValueError("MAX_PC_STT_LANGUAGE must be en or auto")
         allow_download = os.environ.get("MAX_PC_STT_ALLOW_DOWNLOAD", "0") == "1"
         service = _cached_stt(
             os.environ.get("MAX_STT_MODEL_SIZE", "tiny"),
             os.environ.get("MAX_STT_DEVICE", "cpu"),
             os.environ.get("MAX_STT_COMPUTE_TYPE", "int8"),
             allow_download,
+            "" if language == "auto" else "en",
         )
     return service.transcribe_bytes(wav).text.strip()
