@@ -119,6 +119,15 @@ class WindowsAdapter:
                 target.restore()
             target.activate()
             time.sleep(.2)
+            # Windows can refuse focus changes or another window can steal
+            # focus. Never inject keystrokes unless the expected HWND owns it.
+            active = self._windows.getActiveWindow()
+            if (
+                active is None
+                or getattr(target, "_hWnd", None) is None
+                or getattr(active, "_hWnd", None) != target._hWnd
+            ):
+                return "The requested app is not the active window. Nothing was typed or pressed."
             if action.operation == "type":
                 self._pyauto.write(action.value, interval=.008)
             elif action.operation == "shortcut":
