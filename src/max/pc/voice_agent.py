@@ -125,8 +125,13 @@ class VoiceAgent:
         ):
             # These change no document contents. A foreground check remains
             # inside WindowsAdapter; never claim a verified visual outcome.
-            outcome = bridge._approvals.adapter.execute(plan)
-            return {"ok": True, "action": "desktop", "text": outcome}
+            try:
+                outcome = bridge._approvals.adapter.execute(plan)
+            except Exception as exc:
+                return {"ok": False, "action": "desktop",
+                        "text": "Windows action failed (" + type(exc).__name__ + ")."}
+            return {"ok": outcome.startswith("Completed "),
+                    "action": "desktop", "text": outcome}
 
         pending = bridge._approvals.plan(plan)
         if source == "microphone":
