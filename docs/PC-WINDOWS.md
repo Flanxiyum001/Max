@@ -1,5 +1,39 @@
 # MAX PC — Windows-first Jarvis milestone
 
+## Reference reel: voice-first desktop (October 2026)
+
+The user-supplied 72-second reel shows an assistant working **beside ordinary
+Windows applications**: opening an editor, manipulating a Premiere Pro timeline,
+performing web/video searches, and talking through a real telephone call.
+It does **not** show a giant amber orb as the primary application.
+
+For that reason `python -m max pc run` now opens the **compact voice
+companion** by default. It occupies a small movable window while Windows
+applications remain visible. The original holographic interface is preserved
+at `python -m max pc run --dashboard`.
+
+The compact app has wake/sleep, opt-in hands-free speech, push-to-talk,
+Ollama connection, Whisper setup and approval cards for Windows actions.
+
+### Demonstration-aligned commands
+
+| Say/type after `hi max` | Actual implementation |
+|---|---|
+| `open premiere` | Starts an installed Adobe Premiere Pro Start Menu shortcut, when found |
+| `switch to premiere` | Proposes foreground focus, requiring a PC click to confirm |
+| `export video in premiere` | Proposes **Ctrl+M to open Export settings**, not an actual rendered file |
+| `play funny cat videos on YouTube` | Opens YouTube search results; selecting and playing a result is manual |
+| `find biryani restaurants near me` | Opens a browser search, not a purchase |
+| `order biryani to my house` | Explicitly refuses checkout until an authorized ordering integration exists |
+| `type into notepad: hello` | Shows a one-time approval card and types only in the confirmed target window |
+
+The reel's **actual phone call, complete autonomous Premiere editing/export,
+and confirmed online ordering** are not implemented. The existing private
+phone-browser companion is **not** a phone call. The assistant cannot claim
+or verify completion of unsupported workflows.
+
+
+
 MAX PC is a **local Windows desktop UI** that runs on your gaming PC.
 It does **not** run inside the Railway Discord container, cannot access your
 Windows desktop from Railway, and never starts the microphone without pressing
@@ -19,9 +53,9 @@ if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
 Or double-click `scripts\launch-max-pc.bat` after installing.
-The desktop now uses **pywebview + Windows WebView2** for a cinematic amber
-holographic core, responsive chat composer, status indicator, push-to-talk and
-native male speech output. No external scripts or web-hosted UI are required.
+The desktop now uses **pywebview + Windows WebView2** with a compact voice-first
+companion by default. Use `--dashboard` to see the optional cinematic amber
+holographic core. Both retain chat, push-to-talk, speech status, and guarded PC control. No external scripts or web-hosted UI are required.
 Install/update WebView2 Runtime if the GUI refuses to start; standard Windows
 11 installations usually include it. On Windows use **Python 3.12** for
 predictable native dependency support.
