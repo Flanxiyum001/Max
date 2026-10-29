@@ -59,6 +59,36 @@ For fully local inference you can use an OpenAI-compatible local model server
 such as Ollama (`http://127.0.0.1:11434/v1`) **for the model only**.
 No agent code or credentials must be copied to an unreviewed external server.
 
+## Fixing Microphone/STT unavailable (SttError)
+
+The Ollama chat model and local speech transcription are **separate**.
+Connecting Qwen in Ollama does not install Whisper. When you see a speech
+failure, open **SPEECH SETUP** in the desktop app:
+
+1. Check that the faster-whisper backend is installed. If missing, run
+   `python -m pip install -e ".[pc,stt,desktop]"` using the same Python
+   environment that launches MAX.
+2. Click **INSTALL LOCAL WHISPER MODEL** and explicitly accept the model
+   download from Hugging Face. The default is multilingual `tiny`.
+   The installer caches model weights; speech continues to run locally.
+3. Click **TALK** and say "hi max". After a successful transcription,
+   **HANDS-FREE** can be enabled separately.
+
+For a one-time environment workaround, run
+`$env:MAX_PC_STT_ALLOW_DOWNLOAD = "1"` before launching MAX, which
+permits the *first* transcription to fetch the missing model. You can
+unset it again when the model is cached.
+
+If installation reports a model-load problem despite the model already
+being cached, use `MAX_STT_DEVICE=cpu` and
+`MAX_STT_COMPUTE_TYPE=int8`. For Windows microphone failures,
+check **Settings → Privacy & security → Microphone**, select a working
+Windows input device, and ensure SoundDevice/PortAudio can access it.
+
+Speech model downloads happen only after explicit opt-in; MAX does not
+record or send speech audio to Ollama. Speech status is separate from
+the AI model status.
+
 ## Voice
 
 - Text always works even without audio packages.

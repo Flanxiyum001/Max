@@ -21,7 +21,7 @@ from ..core.factory import build_agent
 from ..providers.openai_compat import OpenAICompatProvider
 from .control import PCController, greeting, _WAKE_RE
 from .automation import ApprovalQueue, parse_action
-from .voice import mic_wav, say, transcribe
+from .voice import mic_wav, say, transcribe, install_speech_model, speech_model_status, speech_failure
 
 _OLLAMA = "http://127.0.0.1:11434"
 
@@ -47,7 +47,8 @@ def detect_ollama(*, opener=None) -> list[str]:
 
 class PCBridge:
     def __init__(self, controller: PCController, *, config: Config, builder=build_agent,
-                 scanner=detect_ollama, speaker=say, recorder=mic_wav, stt=transcribe):
+                 scanner=detect_ollama, speaker=say, recorder=mic_wav, stt=transcribe,
+                 speech_installer=install_speech_model, speech_inspector=speech_model_status):
         self.controller = controller
         self.config = config
         self._builder = builder
@@ -55,6 +56,8 @@ class PCBridge:
         self._speaker = speaker
         self._recorder = recorder
         self._stt = stt
+        self._speech_installer = speech_installer
+        self._speech_inspector = speech_inspector
         self._busy = threading.Lock()
         self._voice_on = True
         self._approvals = ApprovalQueue()
@@ -91,10 +94,37 @@ class PCBridge:
             "voice": self._voice_on,
             "handsfree": self._listening_active(),
             "voice_error": self._voice_error,
+            "speech": self._speech_inspector(),
             "remote": bool(self._remote and self._remote.active),
             "greeting": greeting(),
             "version": "DESKTOP / V2",
         }
+
+    def install_voice_model(self) -> dict:
+        """Explicit one-click local model download; never triggered by listening."""
+        if self._listening_active():
+            return {
+                "ok": False, "text": "Turn HANDS-FREE OFF before installing speech.",
+                "state": self.state(),
+            }
+        if not self._busy.acquire(blocking=False):
+            return {"ok": False, "text": "MAX is busy. Retry installation after the current request.",
+                    "state": self.state()}
+        try:
+            message = self._speech_installer()
+            self._voice_error = ""
+            return {"ok": True, "text": message, "state": self.state()}
+        except Exception as exc:
+            if isinstance(exc, RuntimeError) and "isn't installed" in str(exc):
+                detail = "Faster Whisper isn't installed. Reinstall MAX using .[pc,stt,desktop]."
+            elif isinstance(exc, ValueError):
+                detail = "Invalid speech model setting. Use MAX_STT_MODEL_SIZE=tiny."
+            else:
+                detail = "Speech model installation failed (" + type(exc).__name__ + "). Check internet access, Hugging Face availability and disk space."
+            self._voice_error = detail
+            return {"ok": False, "text": detail, "state": self.state()}
+        finally:
+            self._busy.release()
 
     def _listening_active(self) -> bool:
         return bool(self._listening_thread and self._listening_thread.is_alive()
@@ -166,7 +196,7 @@ class PCBridge:
                     break
                 heard = self._stt(wav).strip()
             except Exception as exc:
-                self._voice_error = "Hands-free microphone unavailable (" + type(exc).__name__ + ")"
+                self._voice_error = speech_failure(exc)
                 self._emit({"type": "error", "text": self._voice_error})
                 self._listening_stop.set()
                 break
@@ -271,8 +301,7 @@ class PCBridge:
         except Exception as exc:
             return {
                 "ok": False,
-                "text": "Microphone/STT unavailable (" + type(exc).__name__ +
-                        "). Check voice dependencies and local Whisper model.",
+                "text": speech_failure(exc),
             }
         finally:
             self._busy.release()
