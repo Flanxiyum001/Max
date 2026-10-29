@@ -93,6 +93,57 @@ For fully local inference you can use an OpenAI-compatible local model server
 such as Ollama (`http://127.0.0.1:11434/v1`) **for the model only**.
 No agent code or credentials must be copied to an unreviewed external server.
 
+## Voice quality and API reliability
+
+The ChatGPT Live conversation interface uses dedicated streaming audio
+models rather than MAX's small local Whisper model. The installed PC app
+does not yet reproduce full duplex speech, semantic VAD, interruptions
+or the exact GPT-Live conversation experience.
+
+The Korean-language transcription bug came from leaving multilingual Whisper
+language auto-detection enabled on very short clips. MAX now defaults to
+**English-only local transcription** (`MAX_PC_STT_LANGUAGE=en`). To allow
+automatic multilingual detection, deliberately set
+`MAX_PC_STT_LANGUAGE=auto`.
+
+For better English accuracy without cloud cost, in the same PowerShell
+session before launching MAX set:
+
+```powershell
+$env:MAX_PC_STT_LANGUAGE = "en"
+$env:MAX_STT_MODEL_SIZE = "base.en"
+```
+
+Open **SPEECH SETUP** to install that model explicitly. Larger models use
+more CPU/memory, and may respond more slowly.
+
+### Optional OpenAI cloud speech recognition
+
+MAX also offers an opt-in recorded-audio route based on `gpt-transcribe`
+(official OpenAI /v1/audio/transcriptions). This is **separate from your
+free LLM chat API** and may require paid OpenAI audio credits:
+
+```powershell
+$env:MAX_PC_STT_BACKEND = "cloud"
+$env:OPENAI_API_KEY = "<set-your-own-private-OpenAI-key>"
+```
+
+Never commit your key to Git. Audio is sent to OpenAI only if this mode
+is explicitly enabled. In default `local` mode, microphone audio is processed
+on your PC. The provider is fixed to OpenAI HTTPS; a random free chat API
+key does not imply it can transcribe audio.
+
+### Verify your free LLM API
+
+In the default compact MAX window, open **CONNECT AI**, enter your
+provider's **exact OpenAI-compatible /v1 base URL**, model ID and API key.
+Then click **TEST AI RESPONSE**. It performs one small real network call,
+which may consume provider tokens, and reports whether it succeeded or
+whether credentials, quota, model name or endpoint were rejected. Simply
+configuring a client does not prove it is working. The key is kept in
+memory only for the current session. The speech recognizer, text model
+and voice output are separate components.
+
 ## Fixing Microphone/STT unavailable (SttError)
 
 The Ollama chat model and local speech transcription are **separate**.
