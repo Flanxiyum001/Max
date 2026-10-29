@@ -63,6 +63,9 @@ No agent code or credentials must be copied to an unreviewed external server.
 | `open notepad`, `open calculator`, `open paint` | Launches a fixed Windows application |
 | `open discord`, `open spotify`, `open valorant` | Uses installed app launcher or an official webpage |
 | `open https://www.example.com` | Opens a public HTTPS link; no local/private endpoints |
+| `search the web for Valorant sensitivity` | Opens a web search in the default browser |
+| `volume up`, `volume down`, `mute` | Uses one Windows media key action at a time (requires desktop extra) |
+| `what time is it`, `what can you do` | Local clock and command help |
 | `play Spotify playlist spotify:playlist:<playlist-id>` | Opens that playlist; **not** automatic playback |
 | `remember my Valorant settings: sens 0.4 crouch C walk shift` | Saves a local default profile |
 | `remember my Valorant settings for alt: sens 0.35 crouch V` | Saves a second account profile (no credentials) |
