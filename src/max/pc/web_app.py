@@ -26,6 +26,7 @@ from ..providers.openai_compat import OpenAICompatProvider
 from .control import PCController, greeting, _WAKE_RE
 from .automation import ApprovalQueue, parse_action
 from .vision import WINDOW_TITLES, VisionUnavailable, capture_foreground_window
+from .voice_agent import VoiceAgent
 from .voice import mic_wav, say, transcribe, install_speech_model, speech_model_status, speech_failure
 
 _OLLAMA = "http://127.0.0.1:11434"
@@ -71,6 +72,7 @@ class PCBridge:
         self._busy = threading.Lock()
         self._voice_on = True
         self._approvals = ApprovalQueue()
+        self._voice_agent = VoiceAgent(self)
         self._listening_stop = threading.Event()
         # A stop request does not end an in-flight sounddevice capture.
         # Serialize lifecycle transitions so re-enable cannot spawn two mics.
@@ -94,6 +96,7 @@ class PCBridge:
     def _activate(self, config: Config, *, provider=None) -> None:
         with self._vision_lock:
             self._vision_pending = None
+        self._voice_agent.reset()
         agent = (
             self._builder(config, provider=provider)
             if provider is not None else self._builder(config)
@@ -286,7 +289,7 @@ class PCBridge:
     def submit_remote(self, text: str) -> dict:
         # Remote commands travel through exactly the same wake/permission
         # checks; approvals can only be clicked in the native PC window.
-        reply = self.submit(text)
+        reply = self.submit(text, source="remote")
         if reply.get("action") != "busy":
             self._emit({"type": "remote", "heard": text, "response": reply})
         return reply
@@ -365,34 +368,39 @@ class PCBridge:
             # Ignore other conversations until an explicit wake phrase.
             if not self.controller.awake and not _WAKE_RE.fullmatch(heard):
                 continue
-            reply = self.submit(heard)
+            reply = self.submit(heard, source="microphone")
             if reply.get("action") == "busy":
                 continue
             self._emit({"type": "speech", "heard": heard, "response": reply})
         self._emit({"type": "microphone_off"})
 
-    def submit(self, text: str) -> dict:
+    def submit(self, text: str, source: str = "ui") -> dict:
         if not isinstance(text, str) or len(text) > 4000:
             return {"text": "Message must be at most 4,000 characters.",
                     "ok": False, "action": "error", "state": self.state()}
+        if source not in {"ui", "microphone", "remote"}:
+            return {"text": "Unsupported input source.", "ok": False, "action": "error"}
         if not self._busy.acquire(blocking=False):
             return {"text": "MAX is processing the previous request.",
                     "ok": False, "action": "busy", "state": self.state()}
         try:
             stripped = text.strip()
-            # A model response cannot authorize PC automation. Only explicit
-            # user text or transcription generates a pending local approval.
-            plan = parse_action(stripped) if self.controller.awake else None
-            if plan is not None:
-                pending = self._approvals.plan(plan)
-                return {
-                    "text": "Approval required before Windows control. Review the exact target and action.",
-                    "ok": True, "action": "approval",
-                    "approval": pending, "state": self.state(),
-                }
+            # Bounded capabilities are invoked only by human input, never
+            # by generated AI text. Spoken requests need no feature buttons.
+            intent = self._voice_agent.handle(stripped, source=source)
+            if intent is not None:
+                response = {**intent, "state": self.state()}
+                if self._voice_on and source != "remote":
+                    self._speaking.set()
+                    threading.Thread(
+                        target=self._speak_safely,
+                        args=(intent["text"],), daemon=True,
+                    ).start()
+                return response
             result = self.controller.handle(text)
             if result.action == "sleep":
                 self._approvals.cancel()
+                self._voice_agent.reset()
                 with self._vision_lock:
                     self._vision_pending = None
             if (
