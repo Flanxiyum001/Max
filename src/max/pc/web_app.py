@@ -151,7 +151,7 @@ class PCBridge:
         """Explicit one-click local model download; never triggered by listening."""
         if self._listening_thread and self._listening_thread.is_alive():
             return {
-                "ok": False, "text": "Wait for the microphone capture to finish before installing speech.",
+                "ok": False, "text": "Turn HANDS-FREE OFF and wait for the microphone capture to finish before installing speech.",
                 "state": self.state(),
             }
         if not self._busy.acquire(blocking=False):
