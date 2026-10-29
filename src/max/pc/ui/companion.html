@@ -1,16 +1,16 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MAX Companion</title>
 <style>
-:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#101216;color:#f6f5f3;font:13px "Segoe UI",Arial,sans-serif}button,input{font:inherit}button{cursor:pointer}
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#101216;color:#f6f5f3;font:13px "Segoe UI",Arial,sans-serif}button,input,select{font:inherit}button{cursor:pointer}
 .shell{height:100dvh;display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;overflow:hidden}header{display:flex;align-items:center;gap:11px;padding:13px 15px;border-bottom:1px solid #37383c}
 .mark{background:#58402a;color:#ffcf8d;border:1px solid #b17e3b;border-radius:10px;padding:10px;font-weight:800}h1{font-size:15px;margin:0}small{color:#aba9ae;font-size:10px}.head{flex:1;min-width:0}.state{font:11px Consolas,monospace;color:#e2af6f}
-.tools{display:flex;flex-wrap:wrap;gap:5px;padding:9px 10px;border-bottom:1px solid #393a40}.tools button,.panel button{padding:8px 10px;background:#24262b;color:#e8d8c3;border:1px solid #57514c;border-radius:6px;font-size:11px}.tools button.on{background:#764725;border-color:#e0a35a}
+.tools{display:flex;flex-wrap:wrap;gap:5px;padding:9px 10px;border-bottom:1px solid #393a40}.tools button,.tools select,.panel button{padding:8px 10px;background:#24262b;color:#e8d8c3;border:1px solid #57514c;border-radius:6px;font-size:11px}.tools button.on{background:#764725;border-color:#e0a35a}
 button:disabled{opacity:.45;cursor:not-allowed}button:focus-visible,input:focus-visible{outline:2px solid #d79b4f;outline-offset:1px}
 .messages{overflow-y:auto;min-height:0;padding:12px 14px}.event{margin:0 0 13px;overflow-wrap:anywhere}.who{font:10px Consolas,monospace;letter-spacing:1px;color:#e8b77c;margin-bottom:4px}.message{white-space:pre-wrap;line-height:1.5}.event.system .message{color:#a8a5af}
 .bottom{padding:9px 12px 12px;background:#18191e;border-top:1px solid #37383c}.panel{display:none;padding:10px 0;border-bottom:1px solid #4d3b2b;margin-bottom:8px}.panel.show{display:block}.panel strong{color:#f2c38c}.panel p{font-size:12px;line-height:1.4;color:#bda88b;white-space:pre-wrap;overflow-wrap:anywhere}
 form{display:flex;gap:8px}input{width:100%;min-width:0;background:#23252c;border:1px solid #514a47;border-radius:7px;color:#fff;padding:11px}form button{background:#dda860;border:0;border-radius:7px;color:#201409;padding:0 17px;font-weight:800}
 .note{margin:7px 0 0;text-align:center;color:#88858a;font-size:10px}
 </style></head><body><div class="shell"><header><span class="mark">M</span><div class="head"><h1>MAX / Companion</h1><small id="model">Checking AI model…</small></div><span class="state" id="state">SLEEPING</span></header>
-<div class="tools"><button id="handsfree">MIC OFF</button><button id="talk">TALK</button><button id="wake">WAKE</button><button id="connect">CONNECT AI</button><button id="speech">SPEECH SETUP</button></div>
+<div class="tools"><button id="handsfree">MIC OFF</button><button id="talk">TALK</button><button id="wake">WAKE</button><button id="connect">CONNECT AI</button><button id="speech">SPEECH SETUP</button><select id="look-app" aria-label="Application to observe"><option value="premiere">Premiere</option><option value="notepad">Notepad</option><option value="vscode">VS Code</option></select><button id="look">LOOK</button></div>
 <div id="messages" class="messages" role="log" aria-live="polite"></div>
 <div class="bottom">
 <div class="panel" id="approval"><strong>PC ACTION NEEDS APPROVAL</strong><p id="preview"></p><button id="approve">CONFIRM ACTION</button><button id="deny">CANCEL</button></div>
@@ -39,6 +39,23 @@ function showApproval(p){ui.pending=p;el('preview').textContent=p.preview;el('ap
 async function send(msg){if(!msg.trim()||ui.busy)return;add('YOU',msg);busy(true);try{let r=await api('submit',msg.trim());add(r.ok?'MAX':'SYSTEM',r.text,r.ok?'':'system');if(r.approval)showApproval(r.approval);state(r.state)}catch(e){add('SYSTEM',e.message,'system')}finally{busy(false)}}
 el('form').onsubmit=e=>{e.preventDefault();let v=el('prompt').value;el('prompt').value='';send(v)};el('wake').onclick=()=>send(ui.awake?'bye max':'hi max');
 el('handsfree').onclick=async()=>{let on=!ui.handsfree;if(on&&!confirm('Enable microphone input continuously until switched off?'))return;try{const st=await api('set_handsfree',on);state(st);add('SYSTEM',st.handsfree?'Microphone enabled; say hi max.':on?(st.voice_error||'Microphone could not start.'):'Microphone stopping.','system')}catch(e){add('SYSTEM',e.message,'system')}};
+el('look').onclick=async()=>{
+ if(ui.busy)return;
+ el('look').disabled=true;
+ try{
+   const app=el('look-app').value;
+   const p=await api('prepare_observation',app);
+   if(!p.ok){add('SYSTEM',p.text,'system');return;}
+   const destination=p.local?'your local AI model':'your connected AI provider (possibly cloud-hosted)';
+   const consent=window.confirm('LOOK will capture the visible '+app+' window and send its pixels to '+destination+'. It may contain sensitive data. Switch to '+app+' within 3 seconds after confirming. One image, one request, no storage. Proceed?');
+   if(!consent){await api('cancel_observation');add('SYSTEM','LOOK cancelled. Nothing captured.','system');return;}
+   add('SYSTEM','Switch to '+app+' now — capture in 3 seconds.','system');busy(true);
+   const result=await api('observe_screen',p.token);
+   add(result.ok?'MAX / VISION':'SYSTEM',result.text,result.ok?'':'system');
+   if(result.state)state(result.state);
+ }catch(e){add('SYSTEM','LOOK unavailable: '+e.message,'system')}
+ finally{busy(false);el('look').disabled=false}
+};
 el('talk').onclick=async()=>{busy(true);try{let r=await api('record');if(r.ok){busy(false);await send(r.text)}else{add('SYSTEM',r.text,'system');el('speech-panel').classList.add('show')}}catch(e){add('SYSTEM',e.message,'system')}finally{busy(false)}};
 el('approve').onclick=async()=>{if(!ui.pending)return;let token=ui.pending.id;ui.pending=null;el('approval').classList.remove('show');try{let r=await api('approve_action',token);add('MAX / PC',r.text,r.ok?'':'system')}catch(e){add('SYSTEM',e.message,'system')}};
 el('deny').onclick=async()=>{ui.pending=null;el('approval').classList.remove('show');await api('deny_action');add('SYSTEM','Cancelled.','system')};
