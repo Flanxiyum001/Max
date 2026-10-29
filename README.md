@@ -1,4 +1,43 @@
-# MAX — personal AI assistant (Stage 2 complete)
+# MAX — Windows Desktop Assistant + Discord Agent
+
+MAX now has a **local Windows desktop app** with an animated orb, optional
+push-to-talk transcription, Windows voice output, safe app launching,
+browser searches, and persisted gaming settings profiles. The original
+Discord agent remains supported. For full capabilities and limitations,
+see [Windows PC setup](docs/PC-WINDOWS.md).
+
+## Windows PC quick start
+
+From PowerShell in your cloned MAX directory:
+
+```powershell
+git pull
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[pc,stt,desktop]"
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+.\.venv\Scripts\python.exe -m max pc status --json
+.\.venv\Scripts\python.exe -m max pc smoke
+.\.venv\Scripts\python.exe -m max pc run
+```
+
+Double-click `scripts\launch-max-pc.bat` after installation. Enter
+`hi max`, speak through **TALK**, then `bye max`. Configure a real
+model via `.env` for actual AI responses. The default model is a mock,
+and the app does **not** automatically alter game settings or play Spotify
+without authorized playback integration.
+
+Desktop controls use explicit grants, and the microphone is never
+accessed passively. Windows CI tests the controller and CLI but cannot
+replace an interactive test on your own gaming PC.
+
+---
+
+## Historical Stage 2 notes
+
+The following sections are a historical snapshot. Individual test counts,
+dependency lists and older Discord status claims below may be out of date;
+use current GitHub Actions and `docs/PC-WINDOWS.md` for current state.
+
 
 MAX is a lightweight, always-on-friendly assistant core with an Agent-Skills
 skill registry, a policy-guarded self-improvement loop, a reproducible
