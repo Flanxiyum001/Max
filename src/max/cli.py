@@ -604,6 +604,9 @@ def cmd_pc(args) -> int:
             "microphone_installed": importlib.util.find_spec("sounddevice") is not None,
             "stt_installed": importlib.util.find_spec("faster_whisper") is not None,
             "provider": c.provider,
+            "real_model_configured": c.provider not in ("mock", "test") and bool(c.model and c.base_url),
+            "model": c.model or None,
+            "webview_installed": importlib.util.find_spec("webview") is not None,
             "desktop_tools_enabled": c.desktop_enabled,
             "profile_file": str(c.data_dir / "pc" / "valorant_profiles.json"),
         }, args.json)
@@ -620,23 +623,17 @@ def cmd_pc(args) -> int:
     if sys.platform != "win32":
         print("error: MAX PC UI requires Windows 10 or 11", file=sys.stderr)
         return 1
-    from .core.factory import build_agent
-    from .pc.app import run
+    from .pc.web_app import run
     c = Config.from_env()
-    try:
-        agent = build_agent(c)
-    except Exception as exc:
-        print(f"error: could not initialize MAX: {type(exc).__name__}", file=sys.stderr)
-        return 1
-    if c.provider == "mock":
+    if c.provider in ("mock", "test"):
         print(
-            "warning: MAX_PROVIDER=mock; chat will be simulated. "
-            "Configure a real OpenAI-compatible model in .env for AI answers.",
+            "warning: No real AI model configured. MAX will show a CONNECT MODEL setup "
+            "button; app controls remain usable. Configure .env or connect local Ollama.",
             file=sys.stderr,
         )
-    pc = PCController(c.data_dir, ask=lambda text, session: agent.ask(text, session))
+    pc = PCController(c.data_dir)
     try:
-        run(pc)
+        run(pc, config=c)
     except Exception as exc:
         print(f"error: MAX PC UI failed: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
