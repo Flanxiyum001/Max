@@ -7,6 +7,7 @@ Real AI is never simulated by the mock provider in the PC application.
 from __future__ import annotations
 
 import ipaddress
+from collections import deque
 import json
 import threading
 import urllib.error
@@ -18,7 +19,8 @@ from urllib.parse import urlsplit
 from ..config import Config
 from ..core.factory import build_agent
 from ..providers.openai_compat import OpenAICompatProvider
-from .control import PCController, greeting
+from .control import PCController, greeting, _WAKE_RE
+from .automation import ApprovalQueue, parse_action
 from .voice import mic_wav, say, transcribe
 
 _OLLAMA = "http://127.0.0.1:11434"
@@ -55,6 +57,13 @@ class PCBridge:
         self._stt = stt
         self._busy = threading.Lock()
         self._voice_on = True
+        self._approvals = ApprovalQueue()
+        self._listening_stop = threading.Event()
+        self._listening_thread = None
+        self._events = deque(maxlen=32)
+        self._events_lock = threading.Lock()
+        self._speaking = threading.Event()
+        self._voice_error = ""
         self.model_name = ""
         self.model_error = ""
         if config.provider not in ("mock", "test") and config.model and config.base_url:
@@ -79,9 +88,67 @@ class PCBridge:
             "model": self.model_name or "NO MODEL CONNECTED",
             "model_error": self.model_error,
             "voice": self._voice_on,
+            "handsfree": self._listening_active(),
+            "voice_error": self._voice_error,
             "greeting": greeting(),
             "version": "DESKTOP / V2",
         }
+
+    def _listening_active(self) -> bool:
+        return bool(self._listening_thread and self._listening_thread.is_alive()
+                    and not self._listening_stop.is_set())
+
+    def _emit(self, event: dict) -> None:
+        with self._events_lock:
+            self._events.append(event)
+
+    def poll_events(self) -> list[dict]:
+        """The local UI polls events without exposing network/remote listeners."""
+        with self._events_lock:
+            events = list(self._events)
+            self._events.clear()
+        return events
+
+    def set_handsfree(self, enabled: bool) -> dict:
+        """User-initiated continuous short clips, never enabled at startup."""
+        if enabled is not True:
+            self._listening_stop.set()
+            return self.state()
+        if self._listening_active():
+            return self.state()
+        self._listening_stop.clear()
+        self._voice_error = ""
+        self._listening_thread = threading.Thread(
+            target=self._listen_loop, daemon=True, name="max-local-microphone"
+        )
+        self._listening_thread.start()
+        return self.state()
+
+    def _listen_loop(self) -> None:
+        while not self._listening_stop.is_set():
+            if self._speaking.is_set():
+                self._listening_stop.wait(.15)
+                continue
+            try:
+                wav = self._recorder(seconds=3.0)
+                if self._listening_stop.is_set():
+                    break
+                heard = self._stt(wav).strip()
+            except Exception as exc:
+                self._voice_error = "Hands-free microphone unavailable (" + type(exc).__name__ + ")"
+                self._emit({"type": "error", "text": self._voice_error})
+                self._listening_stop.set()
+                break
+            if not heard or len(heard) > 4000:
+                continue
+            # Ignore other conversations until an explicit wake phrase.
+            if not self.controller.awake and not _WAKE_RE.fullmatch(heard):
+                continue
+            reply = self.submit(heard)
+            if reply.get("action") == "busy":
+                continue
+            self._emit({"type": "speech", "heard": heard, "response": reply})
+        self._emit({"type": "microphone_off"})
 
     def submit(self, text: str) -> dict:
         if not isinstance(text, str) or len(text) > 4000:
@@ -91,7 +158,20 @@ class PCBridge:
             return {"text": "MAX is processing the previous request.",
                     "ok": False, "action": "busy", "state": self.state()}
         try:
+            stripped = text.strip()
+            # A model response cannot authorize PC automation. Only explicit
+            # user text or transcription generates a pending local approval.
+            plan = parse_action(stripped) if self.controller.awake else None
+            if plan is not None:
+                pending = self._approvals.plan(plan)
+                return {
+                    "text": "Approval required before Windows control. Review the exact target and action.",
+                    "ok": True, "action": "approval",
+                    "approval": pending, "state": self.state(),
+                }
             result = self.controller.handle(text)
+            if result.action == "sleep":
+                self._approvals.cancel()
             if (
                 not self.controller.ask and result.action == "chat"
                 and self.controller.awake
@@ -105,7 +185,7 @@ class PCBridge:
                 "text": result.text, "ok": result.ok,
                 "action": result.action, "state": self.state(),
             }
-            if self._voice_on and result.action not in {"sleeping", "busy", "setup"}:
+            if self._voice_on and result.action not in {"sleeping", "busy", "setup", "approval"}:
                 threading.Thread(
                     target=self._speak_safely,
                     args=(result.text,), daemon=True,
@@ -120,10 +200,28 @@ class PCBridge:
             self._busy.release()
 
     def _speak_safely(self, text: str) -> None:
+        self._speaking.set()
         try:
             self._speaker(text)
         except Exception:
             pass
+        finally:
+            self._speaking.clear()
+
+    def approve_action(self, token: str) -> dict:
+        if not self._busy.acquire(blocking=False):
+            return {"ok": False, "text": "MAX is busy; approval not executed."}
+        try:
+            ok, message = self._approvals.approve(
+                token, awake=self.controller.awake
+            )
+            return {"ok": ok, "text": message, "state": self.state()}
+        finally:
+            self._busy.release()
+
+    def deny_action(self) -> dict:
+        self._approvals.cancel()
+        return {"ok": True, "text": "Cancelled. No PC actions executed.", "state": self.state()}
 
     def set_voice(self, enabled: bool) -> dict:
         self._voice_on = enabled is True
@@ -253,4 +351,8 @@ def run(controller: PCController, *, config: Config) -> None:
         width=1180, height=800, min_size=(720, 540),
         background_color="#080504", text_select=True,
     )
-    webview.start(debug=False)
+    try:
+        webview.start(debug=False)
+    finally:
+        bridge.set_handsfree(False)
+        bridge.deny_action()
