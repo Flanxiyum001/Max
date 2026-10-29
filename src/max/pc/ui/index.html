@@ -229,9 +229,9 @@ $('handsfree').addEventListener('click',async()=>{
  if(enabled&&!window.confirm('Turn on the microphone continuously while MAX is open? '
    +'Only speech after “hi max” will be processed. Click again to stop.'))return;
  try{const st=await api('set_handsfree',enabled);updateState(st);
- addMessage('SYSTEM',enabled?
+ addMessage('SYSTEM',st.handsfree?
   'Hands-free enabled. Say “hi max” to wake, then ask a question. Say “bye max” to sleep. Turn OFF to close the mic.':
-  'Hands-free disabled. The microphone is stopping.','system');
+  enabled?(st.voice_error||'Microphone did not start.'):'Hands-free disabled. The microphone is stopping.','system');
  }catch(err){addMessage('SYSTEM','Hands-free unavailable: '+err.message,'system');}
 });
 $('phone').addEventListener('click',async()=>{

@@ -38,11 +38,12 @@ cp .env.example .env   # then edit
 | `MAX_DISCORD_TOKEN` | bot token (env/secret store only) | empty |
 | `MAX_DISCORD_ALLOWED_CHANNELS` | comma-separated channel IDs that get no-prefix chat | empty = nowhere |
 | `MAX_DISCORD_IGNORED_CHANNELS` | never replied to (wins over everything) | empty |
-| `MAX_DISCORD_GUILD_IDS` | optional server allowlist | empty = any |
+| `MAX_DISCORD_GUILD_IDS` | explicit server IDs; required for broad wake coverage | empty = any for listed channels |
+| `MAX_DISCORD_ALLOW_ALL_GUILD_CHANNELS` | opt-in wake mode for any channel in named guilds; ignored and denied channels stay blocked | `0` |
 | `MAX_DISCORD_ADMINS` / `MAX_DISCORD_ADMIN_ROLES` | who may run `allow`/`deny`/`channels` | empty |
 | `MAX_DISCORD_DM_MODE` | `off` (default) \| `allowlist` \| `everyone` | `off` |
 | `MAX_DISCORD_DM_USERS` | DM allowlist when mode is `allowlist` | empty |
-| `MAX_DISCORD_RESPONSE_MODE` | `all` \| `mention` \| `command` | `all` |
+| `MAX_DISCORD_RESPONSE_MODE` | `all` \| `mention` \| `command` \| `wake` | `all` |
 | `MAX_DISCORD_COMMAND_PREFIX` | admin/diagnostic commands | `!max` |
 | `MAX_DISCORD_COOLDOWN_S` | per-channel minimum interval | `2` |
 | `MAX_DISCORD_ERROR_COOLDOWN_S` | backoff after provider failure | `30` |
@@ -233,3 +234,15 @@ warning: messages arrived without text — enable the Message Content Intent in 
 That is the classic symptom of the privileged Message Content Intent being
 disabled, which is why commands that only need the bot mentioned can appear
 to work while ordinary conversation stays silent.
+
+### Wake mode in every channel of one or more approved servers
+
+The default is deliberately **deny-by-default**: MAX only listens in explicitly allowed channels. To make `hi max` activate normal chat and `bye max` put MAX to sleep in **any channel of specified servers**, configure all three variables in your deployment (replace the example ID with the real server ID):
+
+```ini
+MAX_DISCORD_RESPONSE_MODE=wake
+MAX_DISCORD_GUILD_IDS=123456789012345678
+MAX_DISCORD_ALLOW_ALL_GUILD_CHANNELS=1
+```
+
+This does **not** enable all servers, channels on the ignored list, channels explicitly denied with `!max deny`, or DMs. Only one channel is awake at a time; activating MAX in one channel does not wake another. To return to explicit channel-only operation, set the new flag to `0`; your existing allowlist remains untouched. Ensure the Discord Message Content Intent is enabled in the bot's developer settings. No live service settings are changed by updating this documentation.

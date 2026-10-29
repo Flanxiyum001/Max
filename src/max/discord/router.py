@@ -338,6 +338,13 @@ class DiscordRouter:
             dm_ok = (not view.is_dm) or self.config.dm_mode != "off"
             lines = [
                 f"response_mode: {self.config.response_mode}",
+                "all-channel wake coverage: " + (
+                    "active for configured guilds"
+                    if self.config.response_mode == "wake"
+                    and self.config.allow_all_guild_channels
+                    and bool(self.config.allowed_guilds)
+                    else "off (requires wake mode, opt-in and explicit guild IDs)"
+                ),
                 f"this channel allowlisted: {allowed}",
                 f"dm_mode: {self.config.dm_mode}",
                 f"commands here: {'yes' if dm_ok else 'no (dm policy)'}",

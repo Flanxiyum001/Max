@@ -67,7 +67,15 @@ class ChannelStore:
         removed = str(channel_id) in self._data["removed"]
         if removed:
             return False
-        return base or added
+        # Broad coverage is never implicit: the operator must choose wake
+        # mode, opt in to every channel, AND name exact allowed guild IDs.
+        # Persisted admin denies and ignored channels always take precedence.
+        broad_wake = (
+            self.config.response_mode == "wake"
+            and self.config.allow_all_guild_channels
+            and bool(self.config.allowed_guilds)
+        )
+        return base or added or broad_wake
 
     def effective_allowlist(self) -> set[int]:
         base = set(self.config.allowed_channels)

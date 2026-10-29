@@ -39,6 +39,9 @@ class DiscordConfig:
     allowed_channels: set[int] = field(default_factory=set)
     ignored_channels: set[int] = field(default_factory=set)
     allowed_guilds: set[int] = field(default_factory=set)  # empty = any guild
+    # Explicit operator opt-in: wake mode only, and only for named guilds.
+    # This does not bypass ignored/denied channels or change DM policy.
+    allow_all_guild_channels: bool = False
 
     admin_users: set[int] = field(default_factory=set)
     admin_roles: set[int] = field(default_factory=set)
@@ -78,6 +81,7 @@ class DiscordConfig:
             "allowed_channels": sorted(self.allowed_channels),
             "ignored_channels": sorted(self.ignored_channels),
             "allowed_guilds": sorted(self.allowed_guilds),
+            "allow_all_guild_channels": self.allow_all_guild_channels,
             "admin_users": sorted(self.admin_users),
             "admin_roles": sorted(self.admin_roles),
             "dm_mode": self.dm_mode,
@@ -123,6 +127,7 @@ class DiscordConfig:
             allowed_channels=_ids(env("MAX_DISCORD_ALLOWED_CHANNELS")),
             ignored_channels=_ids(env("MAX_DISCORD_IGNORED_CHANNELS")),
             allowed_guilds=_ids(env("MAX_DISCORD_GUILD_IDS")),
+            allow_all_guild_channels=envb("MAX_DISCORD_ALLOW_ALL_GUILD_CHANNELS", False),
             # Existing Railway installations stored the owner IDs under
             # MAX_OWNER_DISCORD_IDS. Use them only when the new admin
             # allowlist is absent; never make all guild members admins.
