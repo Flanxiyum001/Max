@@ -122,7 +122,7 @@ def test_voice_direct_low_risk_action_without_button(tmp_path):
     bridge, _, _ = make(tmp_path)
     actions = []
     bridge._approvals.adapter = SimpleNamespace(
-        execute=lambda action: actions.append(action) or "Sent Space to Premiere"
+        execute=lambda action: actions.append(action) or "Completed shortcut in premiere. Check the application to confirm."
     )
     reply = bridge.submit("Max, play the timeline in Premiere", source="microphone")
     assert reply["ok"] and reply["action"] == "desktop"
