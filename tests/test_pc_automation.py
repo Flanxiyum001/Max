@@ -53,8 +53,10 @@ def test_one_shot_and_expired_approval():
 
 
 def test_windows_adapter_targets_approved_visible_window():
-    title = SimpleNamespace(title="notes - Notepad", isMinimized=False, activate=lambda: None)
-    gui = SimpleNamespace(getAllWindows=lambda: [title])
+    title = SimpleNamespace(title="notes - Notepad", _hWnd=12,
+                            isMinimized=False, activate=lambda: None)
+    gui = SimpleNamespace(getAllWindows=lambda: [title],
+                          getActiveWindow=lambda: title)
     typed = []
     keys = []
     auto = SimpleNamespace(
@@ -99,3 +101,20 @@ def test_sleep_and_cancel_revoke_pending_actions(tmp_path):
     p = bridge.submit("switch to notepad")["approval"]
     bridge.deny_action()
     assert not bridge.approve_action(p["id"])["ok"]
+
+
+
+def test_focus_steal_blocks_keyboard_injection():
+    target = SimpleNamespace(title="Notepad", _hWnd=10, isMinimized=False,
+                             activate=lambda: None)
+    other = SimpleNamespace(title="Password manager", _hWnd=20)
+    windows = SimpleNamespace(getAllWindows=lambda: [target],
+                              getActiveWindow=lambda: other)
+    typed = []
+    auto = SimpleNamespace(FAILSAFE=False,
+                           write=lambda *a, **k: typed.append(a),
+                           hotkey=lambda *a: typed.append(a))
+    adapter = WindowsAdapter(pyauto=auto, windows=windows)
+    result = adapter.execute(WindowsAction("type", "notepad", "Hello"))
+    assert "Nothing was typed" in result
+    assert typed == []
