@@ -51,6 +51,12 @@ def startup_summary(
     return {
         "prefix": config.command_prefix,
         "response_mode": config.response_mode,
+        "all_guild_channels_active": (
+            config.response_mode == "wake"
+            and config.allow_all_guild_channels
+            and bool(config.allowed_guilds)
+        ),
+        "all_guild_channels_requested": config.allow_all_guild_channels,
         "dm_mode": config.dm_mode,
         "allowlisted_channels": len(store.effective_allowlist()),
         "configured_channels": len(config.allowed_channels),
