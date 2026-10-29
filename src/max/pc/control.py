@@ -175,6 +175,24 @@ class AppLauncher:
                 except OSError:
                     pass
             return self.open_url("https://discord.com/app")
+        if app in {"premiere", "premiere pro", "adobe premiere pro"}:
+            # Prefer a real installed Start Menu shortcut. Never guess a
+            # version-dependent executable or claim an app launched if absent.
+            roots = [
+                Path(os.environ.get("PROGRAMDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs",
+                Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs",
+            ]
+            shortcuts = []
+            for root in roots:
+                if root.is_dir():
+                    shortcuts.extend(p for p in root.glob("**/Adobe Premiere Pro*.lnk") if p.is_file())
+            if shortcuts:
+                try:
+                    os.startfile(str(sorted(shortcuts, reverse=True)[0]))  # Windows only
+                    return PCReply("Opening Adobe Premiere Pro.", "app")
+                except OSError:
+                    pass
+            return PCReply("Adobe Premiere Pro shortcut wasn't found. Open the installed app manually.", "app", False)
         if app == "valorant":
             paths = [
                 Path(os.environ.get("PROGRAMFILES", "C:/Program Files")) / "Riot Games" / "Riot Client" / "RiotClientServices.exe",
@@ -258,12 +276,45 @@ class PCController:
         if not self.awake:
             return PCReply("MAX is sleeping. Say hi Max to wake him.", "sleeping", False)
 
-        value = re.fullmatch(r"(?:launch|open|start)\s+(notepad|calculator|paint|explorer|browser|chrome|spotify|discord|valorant)[.!]?", text, re.I)
+        # Natural voice commands may begin with the assistant's name.
+        # This changes no permissions: sleeping still requires "hi max".
+        text = re.sub(r"^max[,!]?\\s+", "", text, flags=re.I).strip()
+        value = re.fullmatch(r"(?:launch|open|start)\s+(notepad|calculator|paint|explorer|browser|chrome|spotify|discord|valorant|premiere(?: pro)?|adobe premiere pro)[.!]?", text, re.I)
         if value:
             return self.launcher.open_app(value.group(1))
         url = re.fullmatch(r"(?:open|browse|visit)\s+(https://\S+)", text, re.I)
         if url:
             return self.launcher.open_url(url.group(1))
+        # The original demonstration searches for videos and restaurant
+        # information. Opening results is useful but is *not* an order,
+        # autonomous browser session or confirmed video playback.
+        youtube = re.fullmatch(
+            r"(?:play|find|search for|show me)\\s+(.+?)\\s+(?:video\\s+)?(?:on\\s+)?youtube[.!]?", text, re.I
+        )
+        if youtube:
+            query = youtube.group(1).strip()
+            if not query or len(query) > 180:
+                return PCReply("YouTube query must be between 1 and 180 characters.", "browser", False)
+            opened = self.launcher.open_url(
+                "https://www.youtube.com/results?search_query=" + quote_plus(query)
+            )
+            return PCReply(
+                "Opened YouTube results for " + query +
+                ". Select the video to play; automatic playback was not verified.",
+                "browser", opened.ok
+            )
+        food = re.fullmatch(
+            r"(?:find|show me|search for)\\s+(.+?)\\s+(?:restaurants?|food)(?:\\s+near me)?[.!]?",
+            text, re.I
+        )
+        if food:
+            return self.launcher.search_web(food.group(1) + " restaurants near me")
+        if re.fullmatch(r"(?:order|buy)\\s+.+", text, re.I):
+            return PCReply(
+                "I can help find a restaurant, but I won't place or pay for an order "
+                "without an authenticated ordering integration and your confirmation.",
+                "ordering", False
+            )
         search = re.fullmatch(r"(?:search (?:the )?web for|google)\s+(.+)", text, re.I)
         if search:
             return self.launcher.search_web(search.group(1))
