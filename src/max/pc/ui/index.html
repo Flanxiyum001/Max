@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:;">
+<title>MAX — INTELLIGENCE SYSTEM</title>
+<style>
+:root{color-scheme:dark;--ink:#f4e4d0;--sub:#ac8b70;--gold:#ffab3a;--border:#54331e;--surface:#110b08;--bg:#060404}
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);font:14px "Segoe UI",Inter,Arial,sans-serif;color:var(--ink)}
+button,input{font:inherit}button{cursor:pointer}button:focus-visible,input:focus-visible{outline:2px solid #ffb65b;outline-offset:2px}
+.shell{height:100dvh;display:grid;grid-template-rows:74px minmax(0,1fr) 26px;overflow:hidden;position:relative;background:radial-gradient(ellipse 65% 90% at 30% 45%,#241106 0%,transparent 75%),#070504}
+.shell:before{position:absolute;content:"";inset:0;pointer-events:none;opacity:.16;background:repeating-linear-gradient(0deg,transparent,transparent 3px,#a05a1711 4px);z-index:5}
+.top{display:flex;align-items:center;justify-content:space-between;padding:0 33px;border-bottom:1px solid #8a4c2338;position:relative;z-index:10;min-width:0}
+.brand{display:flex;align-items:center;gap:14px}.brandmark{font-size:28px;letter-spacing:.35em;font-weight:800;color:#fff1d7;text-shadow:0 0 25px #e48a3480}.brandline{border-left:1px solid #925a35;padding-left:14px;font:10px Consolas,monospace;letter-spacing:2px;color:#b58a61}
+.status{display:flex;align-items:center;gap:9px;color:#e8ba7c;font:11px Consolas,monospace;letter-spacing:1.3px}
+.dot{width:7px;height:7px;border-radius:50%;background:#79563c;box-shadow:0 0 7px #ff951755}
+.dot.live{background:#ffb74c;box-shadow:0 0 10px #f90,0 0 23px #e86817}
+.main{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(360px,.78fr);min-height:0}
+.orbzone{position:relative;min-height:0;display:flex;flex-direction:column;justify-content:center;align-items:center;overflow:hidden}
+#field{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.hud{position:absolute;inset:26px;pointer-events:none;border:1px solid #a66b2020;clip-path:polygon(0 0,14% 0,14% 1px,86% 1px,86% 0,100% 0,100% 100%,0 100%)}
+.hud:before,.hud:after{content:"";position:absolute;width:26px;height:26px;border-color:#e3a14a7c;border-style:solid}.hud:before{top:0;left:0;border-width:1px 0 0 1px}.hud:after{right:0;bottom:0;border-width:0 1px 1px 0}
+.orbtitle{pointer-events:none;z-index:1;text-align:center;position:absolute;bottom:12%;width:100%}
+.eyebrow{font:10px Consolas,monospace;letter-spacing:.32em;color:#c39258;text-transform:uppercase;margin-bottom:11px}
+.orbtitle h1{font-size:clamp(26px,3vw,47px);margin:0;letter-spacing:.17em;font-weight:300;color:#ffdb9d;text-shadow:0 0 36px #ff9a344a}
+.orbtitle p{font:10px Consolas,monospace;letter-spacing:.14em;color:#906c4d;margin:13px 0}
+.coordinates{position:absolute;left:28px;top:24px;font:10px Consolas,monospace;line-height:2;color:#8258388f;letter-spacing:.14em}
+.visualstate{position:absolute;top:27px;right:30px;font:10px Consolas,monospace;color:#c6904a;letter-spacing:2px}
+.chatpanel{margin:19px 24px 19px 0;min-height:0;display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;position:relative;border:1px solid #76401e63;border-radius:13px;background:linear-gradient(145deg,#1b100bdf,#0b090ae9 55%,#100b08f4);box-shadow:0 5px 55px #0009,inset 0 0 30px #e9a02006;overflow:hidden}
+.phead{display:flex;justify-content:space-between;align-items:center;gap:8px;border-bottom:1px solid #6d45213b;padding:22px 23px 19px}
+.ptitle{font-size:13px;letter-spacing:.14em;font-weight:700}.psub{font:10px Consolas,monospace;color:#b1845d;margin-top:7px;letter-spacing:.06em}
+.tiny{border:1px solid #8b572d; background:#25170f;color:#ffc07e;padding:8px 10px;border-radius:6px;font:10px Consolas,monospace;letter-spacing:.06em;white-space:nowrap}
+.tiny:hover{background:#4c2d13}.setup{margin:16px 18px 0;padding:13px 14px;background:#4d291222;border:1px solid #9f602c66;border-radius:7px;display:none;font-size:12px;color:#e6ad71;line-height:1.45}
+.setup.on{display:block}.setup strong{color:#ffe0a6}.setup p{margin:4px 0 9px}.setup button{border:1px solid #d49245;background:#5a3215;color:#ffe0b2;border-radius:5px;padding:7px 12px}
+.messages{overflow-y:auto;min-height:0;padding:18px 19px 10px;display:flex;flex-direction:column;gap:19px;scrollbar-color:#704020 transparent;scrollbar-width:thin}
+.msg{display:flex;flex-direction:column;gap:7px;max-width:100%}.msg .by{font:10px Consolas,monospace;letter-spacing:1.7px;color:#ad793e}.msg .bubble{font-size:13px;line-height:1.63;white-space:pre-wrap;overflow-wrap:anywhere;color:#e7d5c0;background:#3521126b;border:1px solid #6a40202c;padding:12px 13px;border-radius:8px}.msg.user{align-items:flex-end}.msg.user .by{color:#d9b384}.msg.user .bubble{background:#6b3b1828;border-color:#ba733b33;color:#ffdfb1}.msg.system .bubble{background:transparent;border-color:#684b3229;color:#a78a6c;font-size:12px}
+.composer{padding:13px 17px 16px;background:#130d0a;border-top:1px solid #6d45213b;display:grid;grid-template-columns:minmax(0,1fr) 44px;gap:9px}
+.composer input{width:100%;border:1px solid #6e492e;border-radius:7px;background:#21140d;color:#fff1d6;padding:0 13px;min-height:46px;outline:none}.composer input::placeholder{color:#8c715d}
+.composer input:focus{border-color:#e49a49;box-shadow:0 0 0 2px #d5822229}
+.send{background:linear-gradient(145deg,#f5ae52,#a75f24);border:0;color:#1b0d05;border-radius:7px;font-size:19px;font-weight:700}
+.send:disabled,.tiny:disabled,.control:disabled{opacity:.45;cursor:not-allowed}
+.actions{grid-column:1/3;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.control{border:1px solid #66462a;background:#20150f;color:#cca575;border-radius:5px;font:10px Consolas,monospace;letter-spacing:1px;padding:8px 10px}
+.control:hover{border-color:#ffa343;color:#ffd395}.control.selected{background:#5b3215;color:#ffd58b}
+.hint{flex:1;text-align:right;font:10px Consolas,monospace;color:#7d634c}
+.footer{border-top:1px solid #7c4c242b;display:flex;justify-content:space-between;padding:6px 22px;color:#785a42;font:10px Consolas,monospace;letter-spacing:1px}
+@media(max-width:860px){.shell{grid-template-rows:58px minmax(0,1fr) 24px}.top{padding:0 17px}.brandmark{font-size:20px}.brandline{display:none}.main{grid-template-columns:minmax(0,1fr)}.orbzone{min-height:175px;max-height:37vh}.orbtitle{bottom:8px}.orbtitle h1{font-size:23px}.orbtitle p,.coordinates,.visualstate{display:none}.chatpanel{margin:0 12px 9px;min-height:0}.phead{padding:12px 16px}.messages{padding:11px}.footer{padding:4px 12px}}
+@media(max-height:640px) and (min-width:861px){.orbtitle{bottom:3%}.orbtitle h1{font-size:28px}.chatpanel{margin-top:8px;margin-bottom:8px}.phead{padding:11px 18px}.composer{padding:9px}}
+@media(prefers-reduced-motion:reduce){#field{opacity:.65}}
+</style>
+</head>
+<body>
+<div class="shell">
+<header class="top"><div class="brand"><span class="brandmark">MAX</span><span class="brandline">PERSONAL INTELLIGENCE<br>DESKTOP SYSTEM // V2</span></div><div class="status"><span class="dot" id="dot"></span><span id="status">BOOTING</span></div></header>
+<main class="main">
+<section class="orbzone" aria-label="Animated intelligence core">
+  <canvas id="field" aria-hidden="true"></canvas><div class="hud"></div>
+  <div class="coordinates">SYS.CORE // 01<br>RENDER / LOCAL<br>AUTHORIZATION / REQUIRED</div>
+  <div class="visualstate" id="visual-state">CORE // DORMANT</div>
+  <div class="orbtitle"><div class="eyebrow">Neural interaction matrix</div><h1 id="corelabel">STANDBY</h1><p>AWAITING ACTIVATION • SAY HI MAX</p></div>
+</section>
+<section class="chatpanel">
+  <div class="phead"><div><div class="ptitle">COMMAND INTERFACE</div><div class="psub" id="modelname">Checking AI model...</div></div><button class="tiny" id="connect" type="button">CONNECT MODEL</button></div>
+  <div class="setup" id="setup" role="status"><strong>AI SETUP NEEDED</strong><p id="setup-msg">Your model isn't configured. PC actions still work; AI chat needs a real model.</p><button id="ollama" type="button">DETECT LOCAL OLLAMA</button></div>
+  <div class="messages" id="messages" role="log" aria-live="polite"></div>
+  <form class="composer" id="form"><input id="prompt" type="text" maxlength="4000" autocomplete="off" spellcheck="true" aria-label="Message Max" placeholder="Enter a command, or say hi max..." /><button class="send" id="send" type="submit" title="Send message" aria-label="Send">➤</button>
+  <div class="actions"><button type="button" class="control" id="mic">◉ TALK</button><button type="button" class="control selected" id="voice">VOICE ON</button><button type="button" class="control" id="wake">WAKE MAX</button><span class="hint" id="hint">PUSH TO TALK • NO PASSIVE MIC</span></div></form>
+</section>
+</main>
+<footer class="footer"><span>MAX // LOCAL CONTROL • NO REMOTE UI SERVER</span><span>SECURE EXECUTION / APPROVAL REQUIRED</span></footer>
+</div>
+<script>
+(function(){
+'use strict';
+const $=id=>document.getElementById(id);
+const ui={busy:false,recording:false,voice:true,awake:false,ready:false,mode:'STANDBY',bridge:false};
+function addMessage(who,message,kind){
+ const item=document.createElement('article'); item.className='msg '+kind;
+ const by=document.createElement('div'); by.className='by'; by.textContent=who;
+ const bubble=document.createElement('div'); bubble.className='bubble'; bubble.textContent=String(message||'');
+ item.append(by,bubble); $('messages').appendChild(item); $('messages').scrollTop=$('messages').scrollHeight;
+}
+function updateState(state){
+ if(!state)return;
+ ui.awake=!!state.awake;ui.ready=!!state.ready;
+ $('modelname').textContent=ui.ready?'MODEL / '+state.model:'MODEL / NOT CONNECTED';
+ $('setup').classList.toggle('on',!ui.ready);
+ if(state.model_error)$('setup-msg').textContent=state.model_error;
+ else $('setup-msg').textContent='Text commands can work offline. Real AI replies require an installed Ollama model or a configured OpenAI-compatible provider in .env.';
+ ui.voice=!!state.voice;
+ $('voice').textContent=ui.voice?'VOICE ON':'VOICE OFF';
+ $('voice').classList.toggle('selected',ui.voice);
+ $('wake').textContent=ui.awake?'SLEEP MAX':'WAKE MAX';
+ if(!ui.busy&&!ui.recording)setMode(ui.awake?'ONLINE':'STANDBY');
+}
+function setMode(mode){
+ ui.mode=mode;
+ $('status').textContent=mode;
+ $('visual-state').textContent='CORE // '+mode;
+ $('corelabel').textContent=mode==='ONLINE'?'MAX ONLINE':mode;
+ $('dot').classList.toggle('live',mode!=='STANDBY'&&mode!=='BOOTING');
+}
+function setBusy(busy){
+ ui.busy=busy;$('send').disabled=busy;$('mic').disabled=busy;$('prompt').disabled=busy;
+ if(busy)setMode('PROCESSING');
+ else setMode(ui.awake?'ONLINE':'STANDBY');
+}
+async function api(name,...args){
+ if(!window.pywebview||!window.pywebview.api||typeof window.pywebview.api[name]!=='function')
+   throw new Error('Native MAX bridge is unavailable. Restart with: python -m max pc run');
+ return await window.pywebview.api[name](...args);
+}
+async function submit(text){
+ text=String(text||'').trim();if(!text||ui.busy)return;
+ addMessage('YOU',text,'user');setBusy(true);
+ try{
+   const reply=await api('submit',text);
+   addMessage(reply.ok?'MAX':'MAX / NOTICE',reply.text,reply.ok?'max':'system');
+   updateState(reply.state);
+ }catch(err){addMessage('SYSTEM','Request failed: '+err.message,'system');}
+ finally{setBusy(false);$('prompt').focus();}
+}
+$('form').addEventListener('submit',e=>{e.preventDefault();const value=$('prompt').value;$('prompt').value='';submit(value);});
+$('wake').addEventListener('click',()=>submit(ui.awake?'bye max':'hi max'));
+$('voice').addEventListener('click',async()=>{
+ try{updateState(await api('set_voice',!ui.voice));}
+ catch(err){addMessage('SYSTEM',err.message,'system');}
+});
+$('mic').addEventListener('click',async()=>{
+ if(ui.busy||ui.recording)return;
+ ui.recording=true;$('mic').textContent='● LISTENING';$('mic').disabled=true;setMode('LISTENING');
+ try{const result=await api('record');
+   if(result.ok)await submit(result.text);
+   else addMessage('SYSTEM',result.text,'system');
+ }catch(err){addMessage('SYSTEM','Audio failed: '+err.message,'system');}
+ finally{ui.recording=false;$('mic').textContent='◉ TALK';$('mic').disabled=false;setMode(ui.awake?'ONLINE':'STANDBY');}
+});
+$('connect').addEventListener('click',()=>{$('setup').classList.toggle('on');});
+$('ollama').addEventListener('click',async()=>{
+ $('ollama').disabled=true;$('setup-msg').textContent='Checking installed Ollama models on this PC...';
+ try{
+   const response=await api('connect_ollama','');
+   if(response.state)updateState(response.state);
+   $('setup-msg').textContent=response.message;
+   addMessage('SYSTEM',response.message,'system');
+ }catch(err){$('setup-msg').textContent='Could not contact Ollama: '+err.message;}
+ finally{$('ollama').disabled=false;}
+});
+async function start(){
+ try{const st=await api('state');ui.bridge=true;updateState(st);
+   addMessage('MAX',st.greeting||'MAX ready.','max');
+   addMessage('SYSTEM','Say “hi max” to wake me. Try “open notepad” or “search the web for...”.','system');
+ }catch(err){addMessage('SYSTEM','Desktop backend unavailable: '+err.message,'system');setMode('OFFLINE');}
+ $('prompt').focus();
+}
+window.addEventListener('pywebviewready',start);
+setTimeout(()=>{if(!ui.bridge)start()},2500);
+
+/* Self-contained, GPU-friendly amber hologram. No network scripts/assets.
+   Procedural ring perspective, refracted arcs, circuit streams and particles. */
+const canvas=$('field'),ctx=canvas.getContext('2d',{alpha:false});let W=0,H=0,DPR=1,last=0,particles=[];
+let seed=2047;function random(){seed=(seed*1664525+1013904223)>>>0;return seed/4294967296;}
+function size(){
+ const box=canvas.getBoundingClientRect();W=box.width;H=box.height;
+ DPR=Math.min(window.devicePixelRatio||1,1.5);canvas.width=Math.max(1,Math.round(W*DPR));canvas.height=Math.max(1,Math.round(H*DPR));
+ ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+window.addEventListener('resize',size);size();
+for(let i=0;i<440;i++)particles.push({a:random()*Math.PI*2,r:.18+random()*.95,z:random(),s:.3+random()*.9,p:random()*Math.PI*2});
+function render(ms){
+ requestAnimationFrame(render);
+ if(ms-last<30)return;
+ last=ms;if(!W||!H)return;
+ const t=ms*.001,active=ui.mode!=='STANDBY'&&ui.mode!=='BOOTING';
+ const speed=active?1.6:.48,cx=W*.50,cy=H*.43,base=Math.min(W*.44,H*.53);
+ ctx.globalCompositeOperation='source-over';ctx.fillStyle='#070403';ctx.fillRect(0,0,W,H);
+ const glow=ctx.createRadialGradient(cx,cy,8,cx,cy,base*1.4);
+ glow.addColorStop(0,active?'#8e3f0c':'#55250c');glow.addColorStop(.31,'#341508');glow.addColorStop(.64,'#130903');glow.addColorStop(1,'#070403');
+ ctx.fillStyle=glow;ctx.fillRect(0,0,W,H);
+ ctx.save();ctx.translate(cx,cy);ctx.globalCompositeOperation='lighter';
+ // Three angular satellite planes emulate a volumetric gyroscopic intelligence core.
+ for(let k=0;k<11;k++){
+   const r=base*(.31+k*.057),rotation=(k%2?1:-1)*t*speed*(.035+.007*k),tilt=.48+.37*Math.sin(t*.14+k*.49);
+   const opacity=(.08+.14*((k%3)/2))*(active?1.25:1);
+   ctx.save();ctx.rotate(rotation);ctx.scale(1,tilt);ctx.lineWidth=.6+(k%4)*.30;
+   for(let s=0;s<9;s++){
+     const start=s*Math.PI*2/9+Math.sin(t*.24+k)*.12;
+     const len=.16+random()*0; // deterministic visible cutouts, not random motion
+     ctx.strokeStyle='rgba(255,'+(110+(k*11)%110)+',31,'+opacity+')';
+     ctx.shadowBlur=8;ctx.shadowColor='#ed7519';
+     ctx.beginPath();ctx.arc(0,0,r,start,start+len+(s%3)*.18);ctx.stroke();
+   }
+   ctx.restore();
+ }
+ // Floating geometry: radial arc sections and delicate crossing circuits.
+ for(let layer=0;layer<3;layer++){
+   ctx.save();ctx.rotate((layer%2?-1:1)*t*speed*.06+layer*1.4);
+   const rx=base*(.45+layer*.25),ry=rx*(.61+layer*.13);
+   ctx.strokeStyle='rgba(255,167,56,'+(.12+layer*.05)+')';ctx.lineWidth=.7;ctx.shadowBlur=11;ctx.shadowColor='#ffb54c';
+   ctx.beginPath();ctx.ellipse(0,0,rx,ry,layer*.78,Math.PI*.18,Math.PI*1.76);ctx.stroke();
+   for(let j=0;j<25;j++){let a=j*2.4+layer*3,tick=Math.sin(t*.6+j)*3;
+      let x=Math.cos(a)*rx,y=Math.sin(a)*ry;
+      ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x*1.14+tick,y*1.14);ctx.stroke();
+   }ctx.restore();
+ }
+ // Dense high-frequency gold particle swarm, mostly orbital rather than planar.
+ for(const p of particles){
+   const a=p.a+t*speed*(.06+p.s*.07)*(p.z>.5?1:-1),r=base*p.r;
+   const x=Math.cos(a)*r,y=Math.sin(a)*r*(.53+.30*Math.sin(p.p+.12*t));
+   const bright=(.23+.60*Math.abs(Math.sin(p.p+t*.4)))*(active?1.2:1);
+   ctx.fillStyle='rgba(255,'+(120+Math.floor(p.z*100))+',45,'+Math.min(.92,bright)+')';
+   ctx.shadowColor='#ff8b16';ctx.shadowBlur=p.z>.78?12:3;
+   ctx.beginPath();ctx.arc(x,y,p.z>.9?1.8:.55+p.z*.8,0,Math.PI*2);ctx.fill();
+ }
+ // Central halo and intense orange reactor.
+ const rad=base*.20;
+ const inner=ctx.createRadialGradient(0,0,2,0,0,rad*1.8);
+ inner.addColorStop(0,active?'rgba(255,237,150,.75)':'rgba(255,188,79,.55)');
+ inner.addColorStop(.16,'rgba(255,153,28,.41)');inner.addColorStop(.48,'rgba(245,94,10,.13)');inner.addColorStop(1,'rgba(0,0,0,0)');
+ ctx.fillStyle=inner;ctx.shadowBlur=28;ctx.shadowColor='#ff8f1c';ctx.beginPath();ctx.arc(0,0,rad*1.8,0,Math.PI*2);ctx.fill();
+ for(let k=0;k<7;k++){
+   ctx.beginPath();ctx.lineWidth=k%2?.7:1.8;ctx.strokeStyle='rgba(255,'+(142+12*k)+',65,'+(.22+.07*(k%3))+')';
+   ctx.shadowBlur=14;ctx.arc(0,0,rad*(.70+k*.16),t*speed*.16+k*.35,Math.PI*2-.31+k*.35+t*speed*.16);
+   ctx.stroke();
+ }
+ ctx.beginPath();ctx.arc(0,0,rad*.20,0,Math.PI*2);ctx.fillStyle='#ffce79';ctx.shadowBlur=34;ctx.shadowColor='#ffb33f';ctx.fill();
+ ctx.restore();
+ // cinematic streaks at the edges
+ ctx.globalCompositeOperation='screen';
+ for(let i=0;i<13;i++){
+   const y=((i*.117+t*(i%2?.002:-.002))%1)*H;
+   const grad=ctx.createLinearGradient(0,y,W,y);
+   grad.addColorStop(0,'rgba(255,134,35,0)');grad.addColorStop(.35,'rgba(255,147,35,.018)');grad.addColorStop(1,'rgba(255,134,35,0)');
+   ctx.fillStyle=grad;ctx.fillRect(0,y,W,1.1);
+ }
+ ctx.globalCompositeOperation='source-over';
+}
+requestAnimationFrame(render);
+})();
+</script>
+</body></html>
