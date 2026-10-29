@@ -167,6 +167,8 @@ class PCBridge:
             # After the user explicitly confirms, give them time to switch
             # from the MAX companion to their chosen target application.
             self._vision_wait(3.0)
+            if time.monotonic() >= deadline:
+                return {"ok": False, "text": "LOOK authorization expired before capture. No image was sent.", "action": "vision"}
             if not self.controller.awake:
                 return {"ok": False, "text": "MAX is sleeping. No image was sent.", "action": "vision"}
             snapshot = self._vision_capture(application)
