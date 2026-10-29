@@ -163,8 +163,9 @@ class PhoneCompanion:
                     if timestamp - companion._last < .65:
                         return self._json(429, {"error": "Slow down"})
                     companion._last = timestamp
-                response = companion.bridge.submit_remote(text)
-                # Never return one-time desktop approval token to phone.
+                # Copy the result: the PC UI event must retain its approval
+                # while the phone response must never include the token.
+                response = dict(companion.bridge.submit_remote(text))
                 response.pop("approval", None)
                 if response.get("action") == "approval":
                     response["text"] = "Approval pending on your PC. Confirm there, not on your phone."
