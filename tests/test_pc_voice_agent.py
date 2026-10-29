@@ -172,3 +172,48 @@ def test_html_has_no_look_button():
         assert 'id="look"' not in data
         assert "el('look')" not in data
         assert "$('look')" not in data
+
+
+def test_expired_cloud_voice_confirmation_never_sends_image(tmp_path):
+    bridge, shots, calls = make(tmp_path, base_url="https://llm.example.org/v1")
+    clock = [1000.0]
+    bridge._voice_agent.now = lambda: clock[0]
+    pending = bridge.submit("Max, look at Premiere", source="microphone")
+    assert pending["action"] == "vision_confirmation"
+    clock[0] += 26
+    refused = bridge.submit("Max confirm screen share", source="microphone")
+    assert not refused["ok"]
+    assert shots == [] and calls == []
+
+
+def test_desktop_run_handsfree_is_explicit_opt_in(monkeypatch, tmp_path):
+    import sys
+    from max.pc import web_app
+
+    started = []
+    created = []
+    class FakeBridge:
+        def __init__(self, controller, config):
+            self.active = False
+        def set_handsfree(self, state):
+            self.active = state
+            started.append(state)
+        def remote_stop(self): pass
+        def deny_action(self): pass
+
+    def start(func=None, debug=False):
+        if func is not None:
+            func()
+
+    monkeypatch.setattr(web_app, "PCBridge", FakeBridge)
+    monkeypatch.setitem(sys.modules, "webview", SimpleNamespace(
+        create_window=lambda *args, **kwargs: created.append((args, kwargs)),
+        start=start,
+    ))
+    config = Config(repo_root=tmp_path, data_dir=tmp_path, provider="mock")
+    web_app.run(PCController(tmp_path), config=config)
+    assert started == [False]  # shutdown only; no microphone opened at startup
+    started.clear()
+    web_app.run(PCController(tmp_path), config=config, handsfree=True)
+    assert started == [True, False]
+    assert len(created) == 2
