@@ -33,7 +33,10 @@ The chat composer remains visible at normal laptop resolutions.
 configured, the UI displays **MODEL / NOT CONNECTED** rather than silently
 returning mock text. Click **CONNECT MODEL → DETECT LOCAL OLLAMA** to connect
 to an already installed local Ollama model, without installing or downloading
-anything. That connection is session-only: to persist across restarts set
+anything. Alternatively, expand **CONNECT MODEL** and enter a trusted HTTPS
+OpenAI-compatible endpoint ending in `/v1`, model ID, and optional API key.
+That key is used only for requests to that endpoint; it is never written to
+disk by the app. Both quick connections are session-only. That connection is session-only: to persist across restarts set
 the same model in `.env`:
 
 ```dotenv
