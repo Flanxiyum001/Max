@@ -169,3 +169,52 @@ def test_discord_run_requires_token(tmp_path, monkeypatch, capsys):
     assert main(["discord", "run"]) == 1
     err = capsys.readouterr().err
     assert "MAX_DISCORD_TOKEN" in err and "docs/DISCORD.md" in err
+
+def test_discord_native_setup_commands_are_registered(tmp_path):
+    bot, _ = make_bot(tmp_path)
+    names = {cmd.name for cmd in bot.tree.get_commands()}
+    assert "max_status" in names and "max_enable" in names
+
+
+def test_server_owner_can_enable_channel_via_slash(tmp_path):
+    bot, audit = make_bot(tmp_path)
+    guild = SimpleNamespace(id=7, owner_id=7001)
+    sent = []
+
+    class Response:
+        async def send_message(self, body, *, ephemeral=False):
+            sent.append((body, ephemeral))
+
+    interaction = SimpleNamespace(
+        guild=guild,
+        channel_id=19,
+        user=SimpleNamespace(id=7001),
+        response=Response(),
+    )
+    assert not bot.router.store.is_allowed(19, 7)
+    command = next(c for c in bot.tree.get_commands() if c.name == "max_enable")
+    asyncio.run(command.callback(interaction))
+    assert bot.router.store.is_allowed(19, 7)
+    assert sent and sent[-1][1] is True
+    assert audit.events("discord_slash_channel_enabled")
+
+
+def test_slash_setup_denies_non_owner_unlisted_user(tmp_path):
+    bot, _ = make_bot(tmp_path)
+    guild = SimpleNamespace(id=7, owner_id=7001)
+    sent = []
+
+    class Response:
+        async def send_message(self, body, *, ephemeral=False):
+            sent.append(body)
+
+    interaction = SimpleNamespace(
+        guild=guild,
+        channel_id=19,
+        user=SimpleNamespace(id=123),
+        response=Response(),
+    )
+    command = next(c for c in bot.tree.get_commands() if c.name == "max_enable")
+    asyncio.run(command.callback(interaction))
+    assert not bot.router.store.is_allowed(19, 7)
+    assert "Only this server" in sent[0]
