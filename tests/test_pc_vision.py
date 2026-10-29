@@ -198,8 +198,8 @@ def test_foreground_capture_bounded_ephemeral_jpeg_without_disk(tmp_path):
 def test_capture_fails_when_foreground_window_switches_during_screenshot():
     gui = FakeGui()
     original = gui.screenshot
-    def capture_then_switch():
-        out = original()
+    def capture_then_switch(*, region):
+        out = original(region=region)
         gui.window = SimpleNamespace(
             title="Notepad", _hWnd=20, left=0, top=0,
             width=600, height=400, isMinimized=False,
