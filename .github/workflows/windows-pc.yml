@@ -28,13 +28,16 @@ jobs:
           python -c "import webview; print('pywebview imported')"
       - name: Headless PC unit tests
         shell: pwsh
-        run: python -m pytest tests/test_pc_control.py tests/test_pc_voice.py tests/test_pc_web_app.py tests/test_pc_automation.py tests/test_pc_handsfree.py tests/test_pc_remote.py tests/test_pc_voice_setup.py -q
+        run: python -m pytest tests/test_pc_control.py tests/test_pc_voice.py tests/test_pc_web_app.py tests/test_pc_automation.py tests/test_pc_handsfree.py tests/test_pc_remote.py tests/test_pc_voice_setup.py tests/test_pc_reel_parity.py -q
       - name: Validate embedded cinematic UI JavaScript
         shell: pwsh
         run: |
           python -c "from pathlib import Path; h=Path('src/max/pc/ui/index.html').read_text(encoding='utf-8'); Path('_max-ui-check.js').write_text(h.rsplit('<script>',1)[1].split('</script>',1)[0], encoding='utf-8')"
           node --check _max-ui-check.js
           Remove-Item _max-ui-check.js
+          python -c "from pathlib import Path; h=Path('src/max/pc/ui/companion.html').read_text(encoding='utf-8'); Path('_max-compact-check.js').write_text(h.rsplit('<script>',1)[1].split('</script>',1)[0], encoding='utf-8')"
+          node --check _max-compact-check.js
+          Remove-Item _max-compact-check.js
       - name: Check PC CLI without accessing hardware or network
         shell: pwsh
         run: |
