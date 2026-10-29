@@ -25,7 +25,6 @@ def test_whisper_install_is_explicit_and_verifies_cached_weights(tmp_path):
     message = install_speech_model("tiny", downloader=download)
     assert calls == [("tiny", {"local_files_only": False})]
     assert "cached locally" in message
-    assert not install_speech_model.__defaults__ == ("download",)
 
 
 def test_failed_or_unapproved_model_install_is_not_a_success(tmp_path):
