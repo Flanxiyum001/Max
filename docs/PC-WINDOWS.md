@@ -1,5 +1,50 @@
 # MAX PC — Windows-first Jarvis milestone
 
+## MAX LOOK — first screen-aware desktop milestone
+
+**Status:** read-only local PC feature. From the compact companion (default)
+or full dashboard, choose **Premiere**, **Notepad**, or **VS Code** and click
+**LOOK**. MAX must be awake, and you must have connected a **vision-capable**
+model and passed **TEST AI RESPONSE** first.
+
+1. The app asks for **explicit per-image consent** and warns whether the
+   connected provider is local or external. **Cancel** means no screenshot.
+2. After confirming, switch to the selected Windows app within **3 seconds**.
+3. MAX verifies the actual foreground process executable and title, then
+   captures only the window region on the **primary monitor** (no video or
+   continuous monitoring). If the window is wrong, minimized, offscreen, or
+   changes during capture, it fails closed without uploading.
+4. The JPEG is compressed to at most 1280 × 900 pixels / 1.2 MB. It is kept
+   in memory, **not written to MAX's disk or chat history**, and passed to the
+   configured model as an image attachment. This is one model request in the
+   normal OpenAI-compatible client workflow; the provider adapter may retry
+   on transient errors and such retries can consume credits.
+5. MAX returns a **text-only observation**. It cannot yet click the elements
+   it sees, guarantee that a model correctly interpreted the image, or verify
+   a subsequent task has happened.
+
+**Privacy matters.** Window pixels may show private documents, notification
+overlays or credentials. Use a disposable/safe window, close sensitive popups,
+and inspect what is visible *before* approving. A cloud model provider receives
+the image and applies its own data retention/processing policy; "not saved by
+MAX" does not mean the provider does not retain it. For local image processing
+use a vision-capable local Ollama model. Text-only models may reject image
+messages. There is no automatic, spoken, model-generated, or phone-triggered
+screen upload.
+
+**Windows setup:** Install the optional desktop packages via
+\`python -m pip install -e ".[pc,stt,desktop]"\`. This capability does not run
+on the deployed headless server and cannot be end-to-end proven in GitHub CI.
+If capture is denied, ensure the selected app is foreground on the primary
+monitor, not the MAX window. No executable data, window title or screenshot
+is written to the app logs.
+
+**Next Jarvis milestone:** Read-only scene interpretation → proposed
+multi-step plan → explicit action approval → one action at a time → fresh
+observation and actual outcome verification. Real-time wake-word audio, VAD,
+streaming ASR, low-latency TTS, user memory and OS service integrations
+remain separate engineering work. This release does not claim autonomy.
+
 ## Reference reel: voice-first desktop (October 2026)
 
 The user-supplied 72-second reel shows an assistant working **beside ordinary
