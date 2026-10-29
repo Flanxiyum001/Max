@@ -278,7 +278,7 @@ class PCController:
 
         # Natural voice commands may begin with the assistant's name.
         # This changes no permissions: sleeping still requires "hi max".
-        text = re.sub(r"^max[,!]?\\s+", "", text, flags=re.I).strip()
+        text = re.sub(r"^max[,!]?\s+", "", text, flags=re.I).strip()
         value = re.fullmatch(r"(?:launch|open|start)\s+(notepad|calculator|paint|explorer|browser|chrome|spotify|discord|valorant|premiere(?: pro)?|adobe premiere pro)[.!]?", text, re.I)
         if value:
             return self.launcher.open_app(value.group(1))
@@ -289,7 +289,7 @@ class PCController:
         # information. Opening results is useful but is *not* an order,
         # autonomous browser session or confirmed video playback.
         youtube = re.fullmatch(
-            r"(?:play|find|search for|show me)\\s+(.+?)\\s+(?:video\\s+)?(?:on\\s+)?youtube[.!]?", text, re.I
+            r"(?:play|find|search for|show me)\s+(.+?)\s+(?:video\s+)?(?:on\s+)?youtube[.!]?", text, re.I
         )
         if youtube:
             query = youtube.group(1).strip()
@@ -304,12 +304,12 @@ class PCController:
                 "browser", opened.ok
             )
         food = re.fullmatch(
-            r"(?:find|show me|search for)\\s+(.+?)\\s+(?:restaurants?|food)(?:\\s+near me)?[.!]?",
+            r"(?:find|show me|search for)\s+(.+?)\s+(?:restaurants?|food)(?:\s+near me)?[.!]?",
             text, re.I
         )
         if food:
             return self.launcher.search_web(food.group(1) + " restaurants near me")
-        if re.fullmatch(r"(?:order|buy)\\s+.+", text, re.I):
+        if re.fullmatch(r"(?:order|buy)\s+.+", text, re.I):
             return PCReply(
                 "I can help find a restaurant, but I won't place or pay for an order "
                 "without an authenticated ordering integration and your confirmation.",
