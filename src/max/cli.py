@@ -633,7 +633,8 @@ def cmd_pc(args) -> int:
         )
     pc = PCController(c.data_dir)
     try:
-        run(pc, config=c, dashboard=getattr(args, 'dashboard', False))
+        run(pc, config=c, dashboard=getattr(args, 'dashboard', False),
+            handsfree=getattr(args, 'handsfree', False))
     except Exception as exc:
         print(f"error: MAX PC UI failed: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
@@ -762,6 +763,10 @@ def main(argv: list[str] | None = None) -> int:
     pc_run.add_argument(
         "--dashboard", action="store_true",
         help="open the full holographic dashboard instead of the compact voice companion",
+    )
+    pc_run.add_argument(
+        "--handsfree", action="store_true",
+        help="explicitly enable microphone listening at startup; say hi max to wake",
     )
     pc_smoke = pc_sub.add_parser("smoke", help="run headless wake/chat/sleep smoke")
 
