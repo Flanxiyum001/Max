@@ -323,6 +323,18 @@ class PCController:
             return self.launcher.volume(volume.group(1).lower() if volume.group(1) else "mute")
         if re.fullmatch(r"(?:what(?:'s| is) the time|what time is it)[?!.]?", text, re.I):
             return PCReply("Your PC local time is " + datetime.now().strftime("%I:%M %p") + ".", "clock")
+        if re.fullmatch(
+            r"(?:help|what can you do)(?: (?:in|with|for))? (?:adobe )?premiere(?: pro)?[?!.]?",
+            text, re.I,
+        ):
+            return PCReply(
+                "In Premiere, I can propose app focus, playback toggle, timeline start/end, "
+                "In/Out points, a marker, a cut at the playhead, or the export dialog. "
+                "Try: 'Max, add a marker in Premiere'. Every Windows action needs "
+                "your approval in the MAX PC window. I cannot see the sequence, "
+                "edit an entire video, or confirm a finished export.",
+                "help",
+            )
         if re.fullmatch(r"(?:help|what can you do)[?!.]?", text, re.I):
             return PCReply(
                 "I can open approved apps, search the web, change volume, remember Valorant "

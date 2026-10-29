@@ -32,24 +32,40 @@ SHORTCUTS = {
     "ctrl+z": ("ctrl", "z"),
     "ctrl+shift+s": ("ctrl", "shift", "s"),
     "escape": ("esc",),
-    "ctrl+m": ("ctrl", "m"),  # Premiere Export dialog, not a completed export
+    "ctrl+m": ("ctrl", "m"),  # Premiere export settings, not completed export
+    "ctrl+k": ("ctrl", "k"),  # Premiere Add Edit at playhead (timeline edit)
     "space": ("space",),
+    "home": ("home",),
+    "end": ("end",),
+    "m": ("m",),
+    "i": ("i",),
+    "o": ("o",),
 }
-_TEXT = re.compile(
-    r"^(?:type|write|enter)\s+(?:in|into)\s+"
-    r"(notepad|vscode|chrome|edge|explorer|spotify|discord|premiere)\s*:\s*(.{1,500})$",
-    re.I | re.S,
+
+_APP_PATTERN = r"(?:adobe premiere pro|premiere(?: pro)?|notepad|vscode|chrome|edge|explorer|spotify|discord)"
+_PREMIERE_PATTERN = r"(?:adobe premiere pro|premiere(?: pro)?)"
+_TEXT = re.compile(r"^(?:type|write|enter)\s+(?:in|into)\s+(" + _APP_PATTERN + r")\s*:\s*(.{1,500})$", re.I | re.S)
+_PRESS = re.compile(r"^(?:press|hit)\s+([a-z+\s]+)\s+(?:in|inside)\s+(" + _APP_PATTERN + r")$", re.I)
+_FOCUS = re.compile(r"^(?:focus|switch to|activate)\s+(" + _APP_PATTERN + r")$", re.I)
+_PREMIERE_INTENTS = (
+    (r"(?:play|pause|toggle|start|stop)(?: the)? (?:timeline|playback|video)(?: in| on) " + _PREMIERE_PATTERN, "space"),
+    (r"(?:go to|jump to|navigate to)(?: the)? (?:beginning|start)(?: of (?:the )?timeline)?(?: in| on) " + _PREMIERE_PATTERN, "home"),
+    (r"(?:go to|jump to|navigate to)(?: the)? end(?: of (?:the )?timeline)?(?: in| on) " + _PREMIERE_PATTERN, "end"),
+    (r"(?:add|place|insert)(?: a)? marker(?: at (?:the )?playhead)?(?: in| on) " + _PREMIERE_PATTERN, "m"),
+    (r"(?:mark|set)(?: an)? in point(?: in| on) " + _PREMIERE_PATTERN, "i"),
+    (r"(?:mark|set)(?: an)? out point(?: in| on) " + _PREMIERE_PATTERN, "o"),
+    (r"(?:add an? edit|cut|split)(?: clip)? at (?:the )?playhead(?: in| on) " + _PREMIERE_PATTERN, "ctrl+k"),
 )
-_PRESS = re.compile(
-    r"^(?:press|hit)\s+([a-z+\s]+)\s+(?:in|inside)\s+"
-    r"(notepad|vscode|chrome|edge|explorer|spotify|discord|premiere)$",
-    re.I,
-)
-_FOCUS = re.compile(
-    r"^(?:focus|switch to|activate)\s+"
-    r"(notepad|vscode|chrome|edge|explorer|spotify|discord|premiere)$",
-    re.I,
-)
+
+
+def _app_name(name: str) -> str:
+    return "premiere" if name.casefold() in {"adobe premiere pro", "premiere pro"} else name.casefold()
+
+
+def _strip_address(text: str) -> str:
+    # User utterances with a vocative must hit the exact same approval gate.
+    text = re.sub(r"^(?:hey\s+)?max\s*[,!:.]?\s+", "", text, flags=re.I)
+    return re.sub(r"^please\s+", "", text, flags=re.I)
 
 
 @dataclass(frozen=True)
@@ -63,37 +79,58 @@ class WindowsAction:
         if self.operation == "type":
             return f"Focus {self.application} and type exactly:\n{self.value}"
         if self.operation == "shortcut":
-            return f"Focus {self.application} and send {self.value.upper()}."
+            note = ""
+            if self.application == "premiere":
+                note = {
+                    "space": "Toggles playback; the current playback state is not detected.",
+                    "ctrl+k": "Adds an edit at the playhead on targeted tracks. This modifies the open sequence.",
+                    "m": "Adds a marker using Premiere's current timeline context.",
+                    "i": "Marks an In point in the current timeline context.",
+                    "o": "Marks an Out point in the current timeline context.",
+                    "home": "Moves to the start of the current timeline.",
+                    "end": "Moves to the end of the current timeline.",
+                    "ctrl+m": "Opens export settings only; does not render a video.",
+                }.get(self.value, "")
+            return f"Focus {self.application} and send {self.value.upper()}. " + note
         return f"Bring {self.application} to the foreground."
 
 
 def parse_action(text: str) -> WindowsAction | None:
     if not isinstance(text, str):
         return None
-    text = text.strip()
+    text = _strip_address(text.strip())
     match = _TEXT.fullmatch(text)
     if match:
         data = match.group(2)
-        # No multiline copy/paste, control chars, path-like shell commands,
-        # or secrets via this convenience workflow.
+        # Never normalize typed content; no control characters or multiline.
         if not data.strip() or any(ord(ch) < 32 or ord(ch) == 127 for ch in data):
             return None
-        return WindowsAction("type", match.group(1).lower(), data)
-    match = _PRESS.fullmatch(text)
+        return WindowsAction("type", _app_name(match.group(1)), data)
+    match = _PRESS.fullmatch(text.rstrip(".!?"))
     if match:
         combo = re.sub(r"\s+", "", match.group(1)).lower()
         if combo not in SHORTCUTS:
             return None
-        return WindowsAction("shortcut", match.group(2).lower(), combo)
-    if re.fullmatch(r"(?:open|show)\s+(?:the\s+)?(?:export\s+)?dialog\s+in\s+premiere", text, re.I) or re.fullmatch(
-        r"(?:export|render)\s+(?:the\s+)?(?:video|timeline|sequence)\s+in\s+premiere", text, re.I
+        app = _app_name(match.group(2))
+        # Premiere-specific timeline controls are not universal shortcuts.
+        if combo in {"ctrl+k", "home", "end", "m", "i", "o"} and app != "premiere":
+            return None
+        return WindowsAction("shortcut", app, combo)
+    if re.fullmatch(
+        r"(?:open|show)(?: the)?(?: export)? dialog in " + _PREMIERE_PATTERN + r"[.!?]?",
+        text, re.I,
+    ) or re.fullmatch(
+        r"(?:export|render)(?: the)? (?:video|timeline|sequence) in " + _PREMIERE_PATTERN + r"[.!?]?",
+        text, re.I,
     ):
-        # Ctrl+M opens Premiere's export settings; it does NOT render, pick
-        # an output destination, choose a preset or publish the result.
+        # Ctrl+M only opens export settings, never renders an output file.
         return WindowsAction("shortcut", "premiere", "ctrl+m")
-    match = _FOCUS.fullmatch(text)
+    for pattern, shortcut in _PREMIERE_INTENTS:
+        if re.fullmatch(pattern + r"[.!?]?", text, re.I):
+            return WindowsAction("shortcut", "premiere", shortcut)
+    match = _FOCUS.fullmatch(text.rstrip(".!?"))
     if match:
-        return WindowsAction("focus", match.group(1).lower())
+        return WindowsAction("focus", _app_name(match.group(1)))
     return None
 
 
