@@ -86,6 +86,81 @@ def _cached_stt(model_size: str, device: str, compute_type: str,
     )
 
 
+_SAFE_MODELS = frozenset({"tiny", "tiny.en", "base", "base.en", "small", "small.en"})
+
+
+def speech_model_name() -> str:
+    """Only named, size-bounded local Whisper models are installable via the UI."""
+    return os.environ.get("MAX_STT_MODEL_SIZE", "tiny").strip().lower()
+
+
+@lru_cache(maxsize=8)
+def speech_model_status(model_size: str | None = None) -> dict:
+    """A local-cache-only check; never records audio or touches the network."""
+    name = model_size or speech_model_name()
+    result = {"model": name, "backend_installed": False, "cached": False}
+    if name not in _SAFE_MODELS:
+        result["error"] = "Use MAX_STT_MODEL_SIZE=tiny, base or small."
+        return result
+    try:
+        from faster_whisper.utils import download_model
+    except ImportError:
+        result["error"] = "faster-whisper is not installed. Reinstall .[pc,stt,desktop]."
+        return result
+    result["backend_installed"] = True
+    try:
+        from pathlib import Path
+        cache = Path(download_model(name, local_files_only=True))
+        result["cached"] = (cache / "model.bin").is_file()
+    except (OSError, RuntimeError, ValueError):
+        result["cached"] = False
+    return result
+
+
+def install_speech_model(model_size: str | None = None, *, downloader=None) -> str:
+    """Explicit opt-in download from Faster Whisper's published model registry.
+
+    The call is only reachable via a deliberate INSTALL button, never at app
+    startup or when merely pressing TALK. Normal transcription remains offline.
+    """
+    from pathlib import Path
+
+    name = model_size or speech_model_name()
+    if name not in _SAFE_MODELS:
+        raise ValueError("Unsupported speech model. Choose tiny, base or small.")
+    if downloader is None:
+        try:
+            from faster_whisper.utils import download_model
+        except ImportError as exc:
+            raise RuntimeError(
+                "faster-whisper isn't installed. Run pip install -e '.[pc,stt,desktop]'"
+            ) from exc
+        downloader = download_model
+    cache = Path(downloader(name, local_files_only=False))
+    if not (cache / "model.bin").is_file():
+        raise RuntimeError("Speech model download incomplete. Retry after checking network/storage.")
+    speech_model_status.cache_clear()
+    return f"Whisper {name} is cached locally. Try TALK or HANDS-FREE."
+
+
+def speech_failure(exc: Exception) -> str:
+    """Useful errors without showing file paths, credentials or stack traces."""
+    from ..speech import SttError
+
+    if isinstance(exc, SttError):
+        detail = str(exc).lower()
+        if "not installed" in detail or "not available" in detail:
+            return "Faster Whisper isn't installed. Reinstall with .[pc,stt,desktop]."
+        if "failed to load whisper model" in detail or "model" in detail and "load" in detail:
+            return "Local Whisper model missing or unable to load. Open SPEECH SETUP and install the speech model; if already installed, verify CPU/CUDA settings."
+        if "timed out" in detail:
+            return "Speech recognition timed out. Try MAX_STT_MODEL_SIZE=tiny and MAX_STT_DEVICE=cpu."
+        return "Speech recognition failed (" + type(exc).__name__ + "). Check speech model and audio format."
+    if isinstance(exc, (OSError, RuntimeError)):
+        return "Microphone unavailable. Check Windows Settings > Privacy & security > Microphone, your input device, and sounddevice installation."
+    return "Speech input failed (" + type(exc).__name__ + "). Open SPEECH SETUP for diagnostics."
+
+
 def transcribe(wav: bytes, *, service=None) -> str:
     if service is None:
         allow_download = os.environ.get("MAX_PC_STT_ALLOW_DOWNLOAD", "0") == "1"
