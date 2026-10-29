@@ -21,6 +21,7 @@ WINDOWS = {
     "explorer": ("file explorer", "explorer"),
     "spotify": ("spotify",),
     "discord": ("discord",),
+    "premiere": ("adobe premiere pro",),
 }
 SHORTCUTS = {
     "ctrl+s": ("ctrl", "s"),
@@ -31,20 +32,22 @@ SHORTCUTS = {
     "ctrl+z": ("ctrl", "z"),
     "ctrl+shift+s": ("ctrl", "shift", "s"),
     "escape": ("esc",),
+    "ctrl+m": ("ctrl", "m"),  # Premiere Export dialog, not a completed export
+    "space": ("space",),
 }
 _TEXT = re.compile(
     r"^(?:type|write|enter)\s+(?:in|into)\s+"
-    r"(notepad|vscode|chrome|edge|explorer|spotify|discord)\s*:\s*(.{1,500})$",
+    r"(notepad|vscode|chrome|edge|explorer|spotify|discord|premiere)\s*:\s*(.{1,500})$",
     re.I | re.S,
 )
 _PRESS = re.compile(
     r"^(?:press|hit)\s+([a-z+\s]+)\s+(?:in|inside)\s+"
-    r"(notepad|vscode|chrome|edge|explorer|spotify|discord)$",
+    r"(notepad|vscode|chrome|edge|explorer|spotify|discord|premiere)$",
     re.I,
 )
 _FOCUS = re.compile(
     r"^(?:focus|switch to|activate)\s+"
-    r"(notepad|vscode|chrome|edge|explorer|spotify|discord)$",
+    r"(notepad|vscode|chrome|edge|explorer|spotify|discord|premiere)$",
     re.I,
 )
 
@@ -82,6 +85,12 @@ def parse_action(text: str) -> WindowsAction | None:
         if combo not in SHORTCUTS:
             return None
         return WindowsAction("shortcut", match.group(2).lower(), combo)
+    if re.fullmatch(r"(?:open|show)\\s+(?:the\\s+)?(?:export\\s+)?dialog\\s+in\\s+premiere", text, re.I) or re.fullmatch(
+        r"(?:export|render)\\s+(?:the\\s+)?(?:video|timeline|sequence)\\s+in\\s+premiere", text, re.I
+    ):
+        # Ctrl+M opens Premiere's export settings; it does NOT render, pick
+        # an output destination, choose a preset or publish the result.
+        return WindowsAction("shortcut", "premiere", "ctrl+m")
     match = _FOCUS.fullmatch(text)
     if match:
         return WindowsAction("focus", match.group(1).lower())
