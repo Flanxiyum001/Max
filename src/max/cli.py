@@ -589,6 +589,60 @@ def cmd_discord(args) -> int:
     return 0
 
 
+# ------------------------------------------------------------------- Windows PC
+def cmd_pc(args) -> int:
+    """Local Windows desktop UI; never starts Discord or a cloud service."""
+    import importlib.util
+    import platform
+    from .pc import PCController
+    if args.pc_cmd == "status":
+        c = Config.from_env()
+        _print({
+            "platform": platform.system(),
+            "windows_ready": sys.platform == "win32",
+            "voice_tts_installed": importlib.util.find_spec("pyttsx3") is not None,
+            "microphone_installed": importlib.util.find_spec("sounddevice") is not None,
+            "stt_installed": importlib.util.find_spec("faster_whisper") is not None,
+            "provider": c.provider,
+            "desktop_tools_enabled": c.desktop_enabled,
+            "profile_file": str(c.data_dir / "pc" / "valorant_profiles.json"),
+        }, args.json)
+        return 0
+    if args.pc_cmd == "smoke":
+        import tempfile
+        with tempfile.TemporaryDirectory() as temp:
+            pc = PCController(Path(temp), ask=lambda _t, _s: "test response")
+            assert pc.handle("hi max").action == "wake"
+            assert pc.handle("hello").text == "test response"
+            assert pc.handle("bye max").action == "sleep"
+        print("MAX PC smoke: PASS")
+        return 0
+    if sys.platform != "win32":
+        print("error: MAX PC UI requires Windows 10 or 11", file=sys.stderr)
+        return 1
+    from .core.factory import build_agent
+    from .pc.app import run
+    c = Config.from_env()
+    try:
+        agent = build_agent(c)
+    except Exception as exc:
+        print(f"error: could not initialize MAX: {type(exc).__name__}", file=sys.stderr)
+        return 1
+    if c.provider == "mock":
+        print(
+            "warning: MAX_PROVIDER=mock; chat will be simulated. "
+            "Configure a real OpenAI-compatible model in .env for AI answers.",
+            file=sys.stderr,
+        )
+    pc = PCController(c.data_dir, ask=lambda text, session: agent.ask(text, session))
+    try:
+        run(pc)
+    except Exception as exc:
+        print(f"error: MAX PC UI failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 # ------------------------------------------------------------------- bench
 def cmd_bench(args) -> int:
     from .bench import run_benchmarks
@@ -699,6 +753,14 @@ def main(argv: list[str] | None = None) -> int:
     dd_deny = desktop_sub.add_parser("deny", help="refuse one pending approval")
     dd_deny.add_argument("id")
     dd_deny.add_argument("--yes", action="store_true", help="skip the interactive confirmation")
+
+    p_pc = sub.add_parser("pc", help="Windows desktop UI, voice and gaming profiles")
+    p_pc.set_defaults(func=cmd_pc)
+    pc_sub = p_pc.add_subparsers(dest="pc_cmd", required=True)
+    pc_status = pc_sub.add_parser("status", help="check local PC dependencies")
+    pc_status.add_argument("--json", action="store_true")
+    pc_run = pc_sub.add_parser("run", help="start animated Windows desktop UI")
+    pc_smoke = pc_sub.add_parser("smoke", help="run headless wake/chat/sleep smoke")
 
     p_bench = sub.add_parser("bench", help="resource and latency benchmarks")
     p_bench.add_argument("--configs", default="A,D")
