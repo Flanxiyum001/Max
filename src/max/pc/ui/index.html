@@ -25,7 +25,7 @@ button,input{font:inherit}button{cursor:pointer}button:focus-visible,input:focus
 .orbtitle p{font:10px Consolas,monospace;letter-spacing:.14em;color:#906c4d;margin:13px 0}
 .coordinates{position:absolute;left:28px;top:24px;font:10px Consolas,monospace;line-height:2;color:#8258388f;letter-spacing:.14em}
 .visualstate{position:absolute;top:27px;right:30px;font:10px Consolas,monospace;color:#c6904a;letter-spacing:2px}
-.chatpanel{margin:19px 24px 19px 0;min-height:0;display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;position:relative;border:1px solid #76401e63;border-radius:13px;background:linear-gradient(145deg,#1b100bdf,#0b090ae9 55%,#100b08f4);box-shadow:0 5px 55px #0009,inset 0 0 30px #e9a02006;overflow:hidden}
+.chatpanel{margin:19px 24px 19px 0;min-height:0;display:grid;grid-template-rows:auto auto auto minmax(0,1fr) auto;position:relative;border:1px solid #76401e63;border-radius:13px;background:linear-gradient(145deg,#1b100bdf,#0b090ae9 55%,#100b08f4);box-shadow:0 5px 55px #0009,inset 0 0 30px #e9a02006;overflow:hidden}
 .phead{display:flex;justify-content:space-between;align-items:center;gap:8px;border-bottom:1px solid #6d45213b;padding:22px 23px 19px}
 .ptitle{font-size:13px;letter-spacing:.14em;font-weight:700}.psub{font:10px Consolas,monospace;color:#b1845d;margin-top:7px;letter-spacing:.06em}
 .tiny{border:1px solid #8b572d; background:#25170f;color:#ffc07e;padding:8px 10px;border-radius:6px;font:10px Consolas,monospace;letter-spacing:.06em;white-space:nowrap}
@@ -117,7 +117,7 @@ function updateState(state){
  $('voice').textContent=ui.voice?'VOICE ON':'VOICE OFF';
  $('voice').classList.toggle('selected',ui.voice);
  $('wake').textContent=ui.awake?'SLEEP MAX':'WAKE MAX';
- if(!ui.busy&&!ui.recording)setMode(ui.awake?'ONLINE':'STANDBY');
+ if(!ui.busy&&!ui.recording)setMode(ui.handsfree?'LISTENING':(ui.awake?'ONLINE':'STANDBY'));
 }
 function setMode(mode){
  ui.mode=mode;
@@ -210,7 +210,7 @@ $('mic').addEventListener('click',async()=>{
    if(result.ok)await submit(result.text);
    else addMessage('SYSTEM',result.text,'system');
  }catch(err){addMessage('SYSTEM','Audio failed: '+err.message,'system');}
- finally{ui.recording=false;$('mic').textContent='◉ TALK';$('mic').disabled=false;setMode(ui.awake?'ONLINE':'STANDBY');}
+ finally{ui.recording=false;$('mic').textContent='◉ TALK';$('mic').disabled=ui.handsfree;setMode(ui.awake?'ONLINE':'STANDBY');}
 });
 $('connect').addEventListener('click',()=>{$('setup').classList.toggle('on');});
 $('custom-connect').addEventListener('click',async()=>{
