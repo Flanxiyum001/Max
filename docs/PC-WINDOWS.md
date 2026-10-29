@@ -27,6 +27,16 @@ Ollama connection, Whisper setup and approval cards for Windows actions.
 | `order biryani to my house` | Explicitly refuses checkout until an authorized ordering integration exists |
 | `type into notepad: hello` | Shows a one-time approval card and types only in the confirmed target window |
 
+After saying hi max, you can also say **"Max, add a marker in Premiere"**,
+**"Max, cut at playhead in Premiere"**, **"Max, go to beginning of timeline
+in Premiere"**, or **"Max, what can you do in Premiere?"**. The exact shortcut
+appears in a local one-time approval card. Ctrl+K changes the open sequence
+and Ctrl+M only opens export settings; success depends on the active panel
+and your Premiere keymap.
+
+See the [OpenJarvis reference comparison](OPENJARVIS-REFERENCE.md) for
+local-first architecture patterns and an honest feature gap assessment.
+
 The reel's **actual phone call, complete autonomous Premiere editing/export,
 and confirmed online ordering** are not implemented. The existing private
 phone-browser companion is **not** a phone call. The assistant cannot claim
