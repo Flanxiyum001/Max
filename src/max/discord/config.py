@@ -16,7 +16,7 @@ from pathlib import Path
 from ..config import REPO_ROOT
 
 DM_MODES = ("off", "allowlist", "everyone")
-RESPONSE_MODES = ("all", "mention", "command")
+RESPONSE_MODES = ("all", "mention", "command", "wake")
 
 
 def _ids(raw: str) -> set[int]:
@@ -46,7 +46,7 @@ class DiscordConfig:
     dm_mode: str = "off"  # off | allowlist | everyone
     dm_users: set[int] = field(default_factory=set)
 
-    response_mode: str = "all"  # all | mention | command
+    response_mode: str = "all"  # all | mention | command | wake (hi max / bye max)
     cooldown_s: float = 2.0
     provider_error_cooldown_s: float = 30.0
     max_message_len: int = 1900
@@ -123,7 +123,10 @@ class DiscordConfig:
             allowed_channels=_ids(env("MAX_DISCORD_ALLOWED_CHANNELS")),
             ignored_channels=_ids(env("MAX_DISCORD_IGNORED_CHANNELS")),
             allowed_guilds=_ids(env("MAX_DISCORD_GUILD_IDS")),
-            admin_users=_ids(env("MAX_DISCORD_ADMINS")),
+            # Existing Railway installations stored the owner IDs under
+            # MAX_OWNER_DISCORD_IDS. Use them only when the new admin
+            # allowlist is absent; never make all guild members admins.
+            admin_users=_ids(env("MAX_DISCORD_ADMINS") or env("MAX_OWNER_DISCORD_IDS")),
             admin_roles=_ids(env("MAX_DISCORD_ADMIN_ROLES")),
             dm_mode=dm_mode,
             dm_users=_ids(env("MAX_DISCORD_DM_USERS")),
