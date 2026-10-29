@@ -6,15 +6,18 @@ Real AI is never simulated by the mock provider in the PC application.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import threading
 import urllib.error
 import urllib.request
 from dataclasses import replace
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from ..config import Config
 from ..core.factory import build_agent
+from ..providers.openai_compat import OpenAICompatProvider
 from .control import PCController, greeting
 from .voice import mic_wav, say, transcribe
 
@@ -60,8 +63,11 @@ class PCBridge:
             except Exception as exc:
                 self.model_error = "Model setup failed: " + type(exc).__name__
 
-    def _activate(self, config: Config) -> None:
-        agent = self._builder(config)
+    def _activate(self, config: Config, *, provider=None) -> None:
+        agent = (
+            self._builder(config, provider=provider)
+            if provider is not None else self._builder(config)
+        )
         self.controller.ask = lambda text, session: agent.ask(text, session_id=session)
         self.model_name = config.model
         self.model_error = ""
@@ -136,6 +142,62 @@ class PCBridge:
                 "text": "Microphone/STT unavailable (" + type(exc).__name__ +
                         "). Check voice dependencies and local Whisper model.",
             }
+        finally:
+            self._busy.release()
+
+    def connect_provider(self, base_url: str, model: str, api_key: str = "") -> dict:
+        """Connect an explicitly supplied model in memory; no secret persistence.
+
+        HTTPS is required for external providers; only 127.0.0.1 can use
+        HTTP. Never logs the key, and never guesses a provider endpoint.
+        """
+        if not self._busy.acquire(blocking=False):
+            return {"ok": False, "message": "MAX is busy.", "state": self.state()}
+        try:
+            url = base_url.strip().rstrip("/") if isinstance(base_url, str) else ""
+            model = model.strip() if isinstance(model, str) else ""
+            if (
+                len(url) > 250 or len(model) > 128 or not model
+                or not isinstance(api_key, str) or len(api_key) > 4096
+            ):
+                return {"ok": False, "message": "Enter a valid endpoint and model (limited length)."}
+            try:
+                parsed = urlsplit(url)
+                host = (parsed.hostname or "").lower()
+                local = parsed.scheme == "http" and host == "127.0.0.1"
+                remote = parsed.scheme == "https" and host and host not in {
+                    "localhost", "127.0.0.1", "0.0.0.0",
+                }
+                if not (local or remote) or parsed.username or parsed.password or parsed.fragment or parsed.query:
+                    raise ValueError("unsafe endpoint")
+                if remote:
+                    try:
+                        ip = ipaddress.ip_address(host)
+                        if not ip.is_global:
+                            raise ValueError("private HTTPS endpoint")
+                    except ValueError as exc:
+                        if str(exc) == "private HTTPS endpoint":
+                            raise
+                if not parsed.path.endswith("/v1"):
+                    raise ValueError("API base URL must end in /v1")
+            except (ValueError, TypeError):
+                return {"ok": False, "message": "Use a HTTPS OpenAI-compatible /v1 URL, or http://127.0.0.1:11434/v1 for Ollama."}
+            config = replace(self.config, provider="openai", base_url=url, model=model)
+            provider = OpenAICompatProvider(
+                base_url=url, model=model, api_key=api_key or None,
+                timeout=config.timeout_s, retries=config.retries,
+            )
+            self._activate(config, provider=provider)
+            self.config = config
+            return {
+                "ok": True,
+                "message": "Model connected for this session: " + model +
+                    ". The key stays in memory only. An actual model reply is the next verification step.",
+                "state": self.state(),
+            }
+        except Exception as exc:
+            return {"ok": False, "message": "Model setup failed: " + type(exc).__name__,
+                    "state": self.state()}
         finally:
             self._busy.release()
 
