@@ -28,7 +28,7 @@ jobs:
           python -c "import webview; print('pywebview imported')"
       - name: Headless PC unit tests
         shell: pwsh
-        run: python -m pytest tests/test_pc_control.py tests/test_pc_voice.py tests/test_pc_web_app.py -q
+        run: python -m pytest tests/test_pc_control.py tests/test_pc_voice.py tests/test_pc_web_app.py tests/test_pc_automation.py tests/test_pc_handsfree.py -q
       - name: Validate embedded cinematic UI JavaScript
         shell: pwsh
         run: |
