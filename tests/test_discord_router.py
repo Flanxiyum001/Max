@@ -403,3 +403,164 @@ def test_rejected_tool_in_reply_is_audited(tmp_path):
     router.handle(view())
     event = audit.events("discord_reply_sent")[-1]
     assert event.get("rejected_tools") == ["run_command"]
+
+def test_owner_gets_setup_hint_and_can_activate_channel(tmp_path):
+    cfg = DiscordConfig(
+        allowed_channels=set(),
+        admin_users={ADMIN},
+        allowlist_file=tmp_path / "allowlist.json",
+        cooldown_s=0.0,
+    )
+    router, audit, _, store = make_router(tmp_path, config=cfg)
+    owner_message = view(message_id=4001, author_id=ADMIN, content="hi")
+    hint = router.handle(owner_message)
+    assert hint.action == "reply" and hint.reason == "setup_required"
+    assert "!max allow" in hint.replies[0]
+    assert audit.events("discord_setup_required")
+
+    stranger = router.handle(view(message_id=4002, author_id=PLAIN_USER, content="hi"))
+    assert stranger.action == "suppressed"
+    assert stranger.reason == "channel_not_allowlisted"
+
+    activation = router.handle(view(message_id=4003, author_id=ADMIN, content="!max allow"))
+    assert activation.action == "command"
+    assert store.is_allowed(CHANNEL, GUILD)
+    assert router.handle(view(message_id=4004, author_id=PLAIN_USER, content="hi")).action == "reply"
+
+
+def test_owner_setup_hint_never_bypasses_ignored_channel(tmp_path):
+    cfg = DiscordConfig(
+        ignored_channels={CHANNEL},
+        admin_users={ADMIN},
+        allowlist_file=tmp_path / "allowlist.json",
+        cooldown_s=0.0,
+    )
+    router, _, _, _ = make_router(tmp_path, config=cfg)
+    result = router.handle(view(message_id=4010, author_id=ADMIN, content="hi"))
+    assert result.action == "suppressed" and not result.replies
+
+def test_real_guild_owner_can_bootstrap_without_max_admin_list(tmp_path):
+    cfg = DiscordConfig(
+        allowed_channels=set(),
+        admin_users=set(),
+        allowlist_file=tmp_path / "allowlist.json",
+        cooldown_s=0.0,
+    )
+    router, _, _, store = make_router(tmp_path, config=cfg)
+    owner_id = 8080
+    owner_msg = view(
+        message_id=6501, author_id=owner_id, guild_owner_id=owner_id, content="hi"
+    )
+    assert router.handle(owner_msg).reason == "setup_required"
+    result = router.handle(view(
+        message_id=6502, author_id=owner_id,
+        guild_owner_id=owner_id, content="!max allow"
+    ))
+    assert result.action == "command"
+    assert store.is_allowed(CHANNEL, GUILD)
+    stranger = view(
+        message_id=6503, author_id=6503, guild_owner_id=owner_id,
+        content="!max deny"
+    )
+    assert router.handle(stranger).error is True
+    assert store.is_allowed(CHANNEL, GUILD)
+
+
+def test_owner_id_from_other_guild_does_not_grant_admin(tmp_path):
+    router, _, _, _ = make_router(tmp_path)
+    result = router.handle(view(
+        message_id=6504, author_id=9, guild_owner_id=8080,
+        content="!max allow",
+    ))
+    assert result.error is True
+
+def test_empty_ai_response_surfaces_a_diagnostic_instead_of_silence(tmp_path):
+    router, audit, _, _ = make_router(
+        tmp_path,
+        ask=lambda text, session: reply(text=""),
+    )
+    result = router.handle(view(message_id=6520, content="hi"))
+    assert result.action == "reply"
+    assert result.error is True
+    assert len(result.replies) == 1
+    assert "empty AI response" in result.replies[0]
+    assert audit.events("discord_empty_provider_reply")
+
+def test_wake_mode_sleeps_until_hi_max_then_replies_to_any_topic(tmp_path):
+    calls = []
+    cfg = DiscordConfig(
+        allowed_channels={CHANNEL}, response_mode="wake",
+        allowlist_file=tmp_path / "allowlist.json", cooldown_s=0.0,
+    )
+    router, audit, _, store = make_router(
+        tmp_path, config=cfg,
+        ask=lambda text, session: (calls.append((text, session)) or reply("hello")),
+    )
+    assert router.handle(view(message_id=7101, content="what are we doing?")).reason == "sleeping"
+    assert calls == []
+    wake = router.handle(view(message_id=7102, content="Hi, Max!"))
+    assert wake.reason == "awakened" and wake.replies
+    assert store.is_awake(CHANNEL, GUILD)
+    assert not calls  # start/stop phrases do not call the model
+
+    # Completely ordinary messages from other people, without names, trigger replies.
+    normal = router.handle(view(message_id=7103, author_id=777, content="I love pizza"))
+    assert normal.action == "reply" and normal.replies == ["hello"]
+    assert len(calls) == 1
+
+    stop = router.handle(view(message_id=7104, author_id=777, content="BYE MAX."))
+    assert stop.reason == "fell_asleep"
+    assert not store.is_awake(CHANNEL, GUILD)
+    assert router.handle(view(message_id=7105, content="can you hear me")).reason == "sleeping"
+    assert len(calls) == 1
+    assert [e["action"] for e in audit.events("discord_wake_changed")] == ["wake", "sleep"]
+
+
+def test_wake_mode_never_crosses_channel_or_guild_boundaries(tmp_path):
+    cfg = DiscordConfig(
+        allowed_channels={CHANNEL, 99}, response_mode="wake",
+        allowed_guilds={GUILD}, allowlist_file=tmp_path / "allowlist.json",
+        cooldown_s=0.0,
+    )
+    router, _, _, store = make_router(tmp_path, config=cfg)
+    assert router.handle(view(message_id=7201, content="hi max")).reason == "awakened"
+    assert router.handle(view(message_id=7202, channel_id=99, content="hello")).reason == "sleeping"
+    assert router.handle(view(message_id=7203, guild_id=800, content="hi max")).reason == "channel_not_allowlisted"
+    assert not store.is_awake(99, GUILD)
+    assert not store.is_awake(CHANNEL, 800)
+
+
+def test_wake_mode_still_requires_approved_channels_and_blocks_dms(tmp_path):
+    cfg = DiscordConfig(
+        response_mode="wake", dm_mode="everyone",
+        allowlist_file=tmp_path / "allowlist.json",
+        cooldown_s=0.0,
+    )
+    router, _, _, _ = make_router(tmp_path, config=cfg)
+    assert router.handle(view(message_id=7301, content="hi max")).reason == "channel_not_allowlisted"
+    assert router.handle(view(message_id=7302, content="hi max", guild_id=None, is_dm=True)).reason == "wake_mode_dm_unsupported"
+
+
+def test_wake_commands_override_cooldown_and_model_backoff(tmp_path):
+    cfg = DiscordConfig(
+        allowed_channels={CHANNEL}, response_mode="wake",
+        allowlist_file=tmp_path / "allowlist.json", cooldown_s=60.0,
+        provider_error_cooldown_s=60.0,
+    )
+    router, _, _, _ = make_router(
+        tmp_path, config=cfg, ask=lambda text, session: reply("error", ok=False, error="model_offline")
+    )
+    assert router.handle(view(message_id=7401, content="hi max")).reason == "awakened"
+    assert router.handle(view(message_id=7402, content="something")).error
+    assert router.handle(view(message_id=7403, content="bye max")).reason == "fell_asleep"
+    assert router.handle(view(message_id=7404, content="hi max")).reason == "awakened"
+
+
+def test_wake_mode_legacy_prefix_commands_remain_available(tmp_path):
+    cfg = DiscordConfig(
+        allowed_channels={CHANNEL}, response_mode="wake",
+        allowlist_file=tmp_path / "allowlist.json",
+    )
+    router, _, _, _ = make_router(tmp_path, config=cfg)
+    assert router.handle(view(message_id=7450, content="!max status")).action == "command"
+    assert router.handle(view(message_id=7451, content="hello")).reason == "sleeping"
