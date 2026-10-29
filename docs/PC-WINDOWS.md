@@ -12,7 +12,7 @@ Open PowerShell in your cloned Max repository:
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[pc,stt,desktop]"
-Copy-Item .env.example .env
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 .\.venv\Scripts\python.exe -m max pc status --json
 .\.venv\Scripts\python.exe -m max pc smoke
 .\.venv\Scripts\python.exe -m max pc run
