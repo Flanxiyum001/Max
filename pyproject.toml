@@ -25,6 +25,11 @@ openhands = [
 mcp = [
     "mcp>=1.2",
 ]
+pc = [
+    # Local microphone and Windows SAPI voice. Tkinter ships with Python.
+    "sounddevice>=0.5",
+    "pyttsx3>=2.98",
+]
 desktop = [
     # local screen + mouse/keyboard driver for src/max/desktop/; optional so
     # a headless host (or a MAX without machine control) still installs and runs
