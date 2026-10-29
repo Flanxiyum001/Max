@@ -25,7 +25,7 @@ button,input{font:inherit}button{cursor:pointer}button:focus-visible,input:focus
 .orbtitle p{font:10px Consolas,monospace;letter-spacing:.14em;color:#906c4d;margin:13px 0}
 .coordinates{position:absolute;left:28px;top:24px;font:10px Consolas,monospace;line-height:2;color:#8258388f;letter-spacing:.14em}
 .visualstate{position:absolute;top:27px;right:30px;font:10px Consolas,monospace;color:#c6904a;letter-spacing:2px}
-.chatpanel{margin:19px 24px 19px 0;min-height:0;display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;position:relative;border:1px solid #76401e63;border-radius:13px;background:linear-gradient(145deg,#1b100bdf,#0b090ae9 55%,#100b08f4);box-shadow:0 5px 55px #0009,inset 0 0 30px #e9a02006;overflow:hidden}
+.chatpanel{margin:19px 24px 19px 0;min-height:0;display:grid;grid-template-rows:auto auto auto auto minmax(0,1fr) auto;position:relative;border:1px solid #76401e63;border-radius:13px;background:linear-gradient(145deg,#1b100bdf,#0b090ae9 55%,#100b08f4);box-shadow:0 5px 55px #0009,inset 0 0 30px #e9a02006;overflow:hidden}
 .phead{display:flex;justify-content:space-between;align-items:center;gap:8px;border-bottom:1px solid #6d45213b;padding:22px 23px 19px}
 .ptitle{font-size:13px;letter-spacing:.14em;font-weight:700}.psub{font:10px Consolas,monospace;color:#b1845d;margin-top:7px;letter-spacing:.06em}
 .tiny{border:1px solid #8b572d; background:#25170f;color:#ffc07e;padding:8px 10px;border-radius:6px;font:10px Consolas,monospace;letter-spacing:.06em;white-space:nowrap}
@@ -42,6 +42,15 @@ button,input{font:inherit}button{cursor:pointer}button:focus-visible,input:focus
 .actions{grid-column:1/3;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .control{border:1px solid #66462a;background:#20150f;color:#cca575;border-radius:5px;font:10px Consolas,monospace;letter-spacing:1px;padding:8px 10px}
 .control:hover{border-color:#ffa343;color:#ffd395}.control.selected{background:#5b3215;color:#ffd58b}
+.control.mic-live{border-color:#ff5d43;background:#512017;color:#ffbc9a;box-shadow:0 0 14px #ff593c50}
+.approval{display:none;margin:10px 17px 0;border:1px solid #d08a39;border-radius:9px;background:#38200e;padding:13px;line-height:1.5}
+.phone{display:none;background:#21150d;border:1px solid #774621;border-radius:7px;margin:11px 17px 0;padding:11px 12px;line-height:1.45}
+.phone.on{display:block}.phone p{margin:4px 0;color:#c69a73;font-size:11px}
+.phone input{width:100%;min-width:0;background:#110a05;border:1px solid #81512a;color:#ffd89e;border-radius:5px;font:11px Consolas,monospace;padding:8px}
+.approval.on{display:block}.approval strong{color:#ffd48d;font:11px Consolas,monospace;letter-spacing:1px}
+.approval pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px Consolas,monospace;color:#e8c19c;max-height:170px;overflow:auto}
+.approval .row{display:flex;gap:12px}.approval button{border-radius:5px;padding:9px 15px;border:1px solid #ab7943;background:#673816;color:#ffe0b2}
+.approval button.cancel{background:#20140e}
 .hint{flex:1;text-align:right;font:10px Consolas,monospace;color:#7d634c}
 .footer{border-top:1px solid #7c4c242b;display:flex;justify-content:space-between;padding:6px 22px;color:#785a42;font:10px Consolas,monospace;letter-spacing:1px}
 @media(max-width:860px){.shell{grid-template-rows:58px minmax(0,1fr) 24px}.top{padding:0 17px}.brandmark{font-size:20px}.brandline{display:none}.main{grid-template-columns:minmax(0,1fr)}.orbzone{min-height:175px;max-height:37vh}.orbtitle{bottom:8px}.orbtitle h1{font-size:23px}.orbtitle p,.coordinates,.visualstate{display:none}.chatpanel{margin:0 12px 9px;min-height:0}.phead{padding:12px 16px}.messages{padding:11px}.footer{padding:4px 12px}}
@@ -71,9 +80,20 @@ button,input{font:inherit}button{cursor:pointer}button:focus-visible,input:focus
       <small>The key stays in this app's memory, is not saved to disk, and is sent only to the endpoint you choose when requesting a response.</small>
     </div>
   </div>
+  <div class="phone" id="phone-panel" role="status">
+    <strong>PHONE COMPANION — LOCAL ONLY</strong>
+    <p>This URL works on this PC. To access from your phone, set up Tailscale Serve private HTTPS to local port 8765, then use its private address with the same #token.</p>
+    <input type="text" id="phone-link" readonly aria-label="Local companion pairing URL">
+    <p>Never use Tailscale Funnel or expose port 8765 to the public Internet. Stop sharing in Tailscale separately.</p>
+  </div>
+  <div class="approval" id="approval" role="alertdialog" aria-label="Desktop action approval" aria-modal="false">
+    <strong>WINDOWS ACTION — CONFIRM ON THIS PC</strong>
+    <pre id="approval-preview"></pre>
+    <div class="row"><button type="button" id="approve">CONFIRM & EXECUTE</button><button type="button" id="deny" class="cancel">CANCEL</button></div>
+  </div>
   <div class="messages" id="messages" role="log" aria-live="polite"></div>
   <form class="composer" id="form"><input id="prompt" type="text" maxlength="4000" autocomplete="off" spellcheck="true" aria-label="Message Max" placeholder="Enter a command, or say hi max..." /><button class="send" id="send" type="submit" title="Send message" aria-label="Send">➤</button>
-  <div class="actions"><button type="button" class="control" id="mic">◉ TALK</button><button type="button" class="control selected" id="voice">VOICE ON</button><button type="button" class="control" id="wake">WAKE MAX</button><span class="hint" id="hint">PUSH TO TALK • NO PASSIVE MIC</span></div></form>
+  <div class="actions"><button type="button" class="control" id="mic">◉ TALK</button><button type="button" class="control selected" id="voice">VOICE ON</button><button type="button" class="control" id="handsfree" aria-pressed="false">HANDS-FREE OFF</button><button type="button" class="control" id="phone">PHONE OFF</button><button type="button" class="control" id="wake">WAKE MAX</button><span class="hint" id="hint">MIC OFF UNTIL ENABLED • APPROVAL REQUIRED FOR PC INPUT</span></div></form>
 </section>
 </main>
 <footer class="footer"><span>MAX // LOCAL CONTROL • NO REMOTE UI SERVER</span><span>SECURE EXECUTION / APPROVAL REQUIRED</span></footer>
@@ -82,7 +102,7 @@ button,input{font:inherit}button{cursor:pointer}button:focus-visible,input:focus
 (function(){
 'use strict';
 const $=id=>document.getElementById(id);
-const ui={busy:false,recording:false,voice:true,awake:false,ready:false,mode:'STANDBY',bridge:false};
+const ui={busy:false,recording:false,voice:true,handsfree:false,remote:false,awake:false,ready:false,mode:'STANDBY',bridge:false,approval:null,polling:false};
 function addMessage(who,message,kind){
  const item=document.createElement('article'); item.className='msg '+kind;
  const by=document.createElement('div'); by.className='by'; by.textContent=who;
@@ -97,10 +117,20 @@ function updateState(state){
  if(state.model_error)$('setup-msg').textContent=state.model_error;
  else $('setup-msg').textContent='Text commands can work offline. Real AI replies require an installed Ollama model or a configured OpenAI-compatible provider in .env.';
  ui.voice=!!state.voice;
+ ui.handsfree=!!state.handsfree;
+ ui.remote=!!state.remote;
+ $('phone').textContent=ui.remote?'PHONE ON':'PHONE OFF';
+ $('phone').classList.toggle('selected',ui.remote);
+ if(!ui.remote)$('phone-panel').classList.remove('on');
+ $('handsfree').textContent=ui.handsfree?'● HANDS-FREE ON':'HANDS-FREE OFF';
+ $('handsfree').classList.toggle('mic-live',ui.handsfree);
+ $('handsfree').setAttribute('aria-pressed',String(ui.handsfree));
+ $('mic').disabled=ui.handsfree||ui.busy;
+ $('hint').textContent=ui.handsfree?'MIC ACTIVE • 3s CHUNKS • CLICK TO STOP':'MIC OFF UNTIL ENABLED • APPROVAL FOR PC INPUT';
  $('voice').textContent=ui.voice?'VOICE ON':'VOICE OFF';
  $('voice').classList.toggle('selected',ui.voice);
  $('wake').textContent=ui.awake?'SLEEP MAX':'WAKE MAX';
- if(!ui.busy&&!ui.recording)setMode(ui.awake?'ONLINE':'STANDBY');
+ if(!ui.busy&&!ui.recording)setMode(ui.handsfree?'LISTENING':(ui.awake?'ONLINE':'STANDBY'));
 }
 function setMode(mode){
  ui.mode=mode;
@@ -110,9 +140,9 @@ function setMode(mode){
  $('dot').classList.toggle('live',mode!=='STANDBY'&&mode!=='BOOTING');
 }
 function setBusy(busy){
- ui.busy=busy;$('send').disabled=busy;$('mic').disabled=busy;$('prompt').disabled=busy;
+ ui.busy=busy;$('send').disabled=busy;$('mic').disabled=busy||ui.handsfree;$('prompt').disabled=busy;
  if(busy)setMode('PROCESSING');
- else setMode(ui.awake?'ONLINE':'STANDBY');
+ else setMode(ui.handsfree?'LISTENING':(ui.awake?'ONLINE':'STANDBY'));
 }
 async function api(name,...args){
  if(!window.pywebview||!window.pywebview.api||typeof window.pywebview.api[name]!=='function')
@@ -125,10 +155,81 @@ async function submit(text){
  try{
    const reply=await api('submit',text);
    addMessage(reply.ok?'MAX':'MAX / NOTICE',reply.text,reply.ok?'max':'system');
+   if(reply.approval)showApproval(reply.approval);
    updateState(reply.state);
  }catch(err){addMessage('SYSTEM','Request failed: '+err.message,'system');}
  finally{setBusy(false);$('prompt').focus();}
 }
+function showApproval(p){
+ ui.approval=p;$('approval-preview').textContent=p.preview;
+ $('approval').classList.add('on');$('approve').disabled=false;
+}
+function clearApproval(){ui.approval=null;$('approval').classList.remove('on');}
+$('approve').addEventListener('click',async()=>{
+ if(!ui.approval)return;
+ const token=ui.approval.id;clearApproval();setBusy(true);
+ try{const result=await api('approve_action',token);
+ addMessage('MAX / DESKTOP',result.text,result.ok?'max':'system');
+ if(result.state)updateState(result.state);
+ }catch(err){addMessage('SYSTEM','Approval failed: '+err.message,'system');}
+ finally{setBusy(false);}
+});
+$('deny').addEventListener('click',async()=>{
+ clearApproval();try{const r=await api('deny_action');addMessage('SYSTEM',r.text,'system');}
+ catch(err){addMessage('SYSTEM','Cancellation error: '+err.message,'system');}
+});
+$('handsfree').addEventListener('click',async()=>{
+ const enabled=!ui.handsfree;
+ if(enabled&&!window.confirm('Turn on the microphone continuously while MAX is open? '
+   +'Only speech after “hi max” will be processed. Click again to stop.'))return;
+ try{const st=await api('set_handsfree',enabled);updateState(st);
+ addMessage('SYSTEM',enabled?
+  'Hands-free enabled. Say “hi max” to wake, then ask a question. Say “bye max” to sleep. Turn OFF to close the mic.':
+  'Hands-free disabled. The microphone is stopping.','system');
+ }catch(err){addMessage('SYSTEM','Hands-free unavailable: '+err.message,'system');}
+});
+$('phone').addEventListener('click',async()=>{
+ if(ui.remote){
+  try{const response=await api('remote_stop');updateState(response.state);
+   $('phone-panel').classList.remove('on');addMessage('SYSTEM',response.message,'system');
+  }catch(err){addMessage('SYSTEM','Could not stop companion: '+err.message,'system');}
+  return;
+ }
+ if(!window.confirm('Enable a private localhost Phone Companion now? '
+    +'It will require an unguessable token and Tailscale Serve for mobile access. '
+    +'Anyone holding that token on your Tailnet can send ordinary commands, '
+    +'but cannot approve Windows actions.'))return;
+ try{
+  const response=await api('remote_start');
+  if(response.state)updateState(response.state);
+  if(response.ok){
+   $('phone-panel').classList.add('on');
+   $('phone-link').value=response.url;
+  }else addMessage('SYSTEM',response.message,'system');
+ }catch(err){addMessage('SYSTEM','Phone companion unavailable: '+err.message,'system');}
+});
+async function processSpeechEvent(evt){
+ if(evt.type==='error'){addMessage('SYSTEM',evt.text,'system');return;}
+ if(evt.type==='microphone_off'){
+   try{updateState(await api('state'));}catch(_){}
+   return;
+ }
+ if((evt.type==='speech'||evt.type==='remote')&&evt.response){
+   addMessage(evt.type==='remote'?'YOU / PHONE':'YOU / VOICE',evt.heard,'user');
+   const response=evt.response;
+   addMessage(response.ok?'MAX':'MAX / NOTICE',response.text,response.ok?'max':'system');
+   if(response.approval)showApproval(response.approval);
+   updateState(response.state);
+ }
+}
+async function pollVoice(){
+ if(!ui.bridge||ui.polling)return;
+ ui.polling=true;
+ try{const events=await api('poll_events');for(const evt of events)await processSpeechEvent(evt);}
+ catch(err){/* The app can close while a poll is in flight. */}
+ finally{ui.polling=false;}
+}
+setInterval(pollVoice,750);
 $('form').addEventListener('submit',e=>{e.preventDefault();const value=$('prompt').value;$('prompt').value='';submit(value);});
 $('wake').addEventListener('click',()=>submit(ui.awake?'bye max':'hi max'));
 $('voice').addEventListener('click',async()=>{
@@ -136,13 +237,13 @@ $('voice').addEventListener('click',async()=>{
  catch(err){addMessage('SYSTEM',err.message,'system');}
 });
 $('mic').addEventListener('click',async()=>{
- if(ui.busy||ui.recording)return;
+ if(ui.busy||ui.recording||ui.handsfree)return;
  ui.recording=true;$('mic').textContent='● LISTENING';$('mic').disabled=true;setMode('LISTENING');
  try{const result=await api('record');
    if(result.ok)await submit(result.text);
    else addMessage('SYSTEM',result.text,'system');
  }catch(err){addMessage('SYSTEM','Audio failed: '+err.message,'system');}
- finally{ui.recording=false;$('mic').textContent='◉ TALK';$('mic').disabled=false;setMode(ui.awake?'ONLINE':'STANDBY');}
+ finally{ui.recording=false;$('mic').textContent='◉ TALK';$('mic').disabled=ui.handsfree;setMode(ui.awake?'ONLINE':'STANDBY');}
 });
 $('connect').addEventListener('click',()=>{$('setup').classList.toggle('on');});
 $('custom-connect').addEventListener('click',async()=>{

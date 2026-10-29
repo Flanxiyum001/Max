@@ -10,6 +10,7 @@ import io
 import os
 import re
 import wave
+from functools import lru_cache
 
 from ..speech import SttConfig, SttService
 
@@ -69,16 +70,29 @@ def mic_wav(*, seconds: float = 4.5, sample_rate: int = 16000, recorder=None) ->
     return out.getvalue()
 
 
-def transcribe(wav: bytes, *, service=None) -> str:
-    if service is None:
-        allow_download = os.environ.get("MAX_PC_STT_ALLOW_DOWNLOAD", "0") == "1"
-        cfg = SttConfig(
+@lru_cache(maxsize=4)
+def _cached_stt(model_size: str, device: str, compute_type: str,
+                allow_download: bool) -> SttService:
+    """Reuse the same loaded Whisper model across voice chunks on this PC."""
+    return SttService(
+        SttConfig(
             backend="faster-whisper",
-            model_size=os.environ.get("MAX_STT_MODEL_SIZE", "tiny"),
-            device=os.environ.get("MAX_STT_DEVICE", "cpu"),
-            compute_type=os.environ.get("MAX_STT_COMPUTE_TYPE", "int8"),
+            model_size=model_size,
+            device=device,
+            compute_type=compute_type,
             local_files_only=not allow_download,
             max_duration_s=12.0,
         )
-        service = SttService(cfg)
+    )
+
+
+def transcribe(wav: bytes, *, service=None) -> str:
+    if service is None:
+        allow_download = os.environ.get("MAX_PC_STT_ALLOW_DOWNLOAD", "0") == "1"
+        service = _cached_stt(
+            os.environ.get("MAX_STT_MODEL_SIZE", "tiny"),
+            os.environ.get("MAX_STT_DEVICE", "cpu"),
+            os.environ.get("MAX_STT_COMPUTE_TYPE", "int8"),
+            allow_download,
+        )
     return service.transcribe_bytes(wav).text.strip()
