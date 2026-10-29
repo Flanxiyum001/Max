@@ -71,6 +71,7 @@ class PCBridge:
         self.model_name = ""
         self.model_error = ""
         self._active_provider = None
+        self._model_verified = False
         if config.provider not in ("mock", "test") and config.model and config.base_url:
             try:
                 self._activate(config)
@@ -84,6 +85,7 @@ class PCBridge:
         )
         self.controller.ask = lambda text, session: agent.ask(text, session_id=session)
         self._active_provider = provider or getattr(agent, "provider", None)
+        self._model_verified = False
         self.model_name = config.model
         self.model_error = ""
 
@@ -92,7 +94,7 @@ class PCBridge:
             "awake": self.controller.awake,
             "ready": bool(self.controller.ask),
             "model": self.model_name or "NO MODEL CONNECTED",
-            "model_verified": False,  # Never infer live connectivity from constructing a client
+            "model_verified": self._model_verified,
             "model_error": self.model_error,
             "voice": self._voice_on,
             "handsfree": self._listening_active(),
@@ -134,6 +136,7 @@ class PCBridge:
                 return {"ok": False, "message": desc}
             if not str(getattr(response, "text", "")).strip():
                 return {"ok": False, "message": "Provider returned an empty response. Check model support and quota."}
+            self._model_verified = True
             return {"ok": True, "message": "AI test succeeded: provider returned actual text from " + self.model_name + "."}
         finally:
             self._busy.release()
