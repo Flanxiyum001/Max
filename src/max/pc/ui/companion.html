@@ -10,7 +10,7 @@ button:disabled{opacity:.45;cursor:not-allowed}button:focus-visible,input:focus-
 form{display:flex;gap:8px}input{width:100%;min-width:0;background:#23252c;border:1px solid #514a47;border-radius:7px;color:#fff;padding:11px}form button{background:#dda860;border:0;border-radius:7px;color:#201409;padding:0 17px;font-weight:800}
 .note{margin:7px 0 0;text-align:center;color:#88858a;font-size:10px}
 </style></head><body><div class="shell"><header><span class="mark">M</span><div class="head"><h1>MAX / Companion</h1><small id="model">Checking AI model…</small></div><span class="state" id="state">SLEEPING</span></header>
-<div class="tools"><button id="handsfree">MIC OFF</button><button id="talk">TALK</button><button id="wake">WAKE</button><button id="connect">CONNECT AI</button><button id="speech">SPEECH SETUP</button><select id="look-app" aria-label="Application to observe"><option value="premiere">Premiere</option><option value="notepad">Notepad</option><option value="vscode">VS Code</option></select><button id="look">LOOK</button></div>
+<div class="tools"><button id="handsfree">MIC OFF</button><button id="talk">TALK</button><button id="wake">WAKE</button><button id="connect">CONNECT AI</button><button id="speech">SPEECH SETUP</button></div>
 <div id="messages" class="messages" role="log" aria-live="polite"></div>
 <div class="bottom">
 <div class="panel" id="approval"><strong>PC ACTION NEEDS APPROVAL</strong><p id="preview"></p><button id="approve">CONFIRM ACTION</button><button id="deny">CANCEL</button></div>
@@ -23,7 +23,7 @@ form{display:flex;gap:8px}input{width:100%;min-width:0;background:#23252c;border
 <button id="api-connect">CONFIGURE PROVIDER</button><p>Configuration alone does not prove connectivity. TEST AI sends a small real request and may use provider credits.</p></div>
 <div class="panel" id="speech-panel"><strong>SPEECH RECOGNITION — ENGLISH</strong><p id="speech-status"></p><button id="install">INSTALL WHISPER MODEL</button></div>
 <form id="form"><input id="prompt" maxlength="4000" placeholder="Say hi max, or enter a command…" aria-label="Message Max"><button id="send">SEND</button></form>
-<div class="note">Works alongside your Windows apps · input actions require approval</div></div></div>
+<div class="note">Speak naturally: “Max, what’s wrong in Premiere?” · Say “Max confirm action” for changes</div></div></div>
 <script>
 (()=>{'use strict';const el=id=>document.getElementById(id),ui={awake:false,handsfree:false,busy:false,pending:null,initialized:false};
 function add(by,text,kind=''){let item=document.createElement('article');item.className='event '+kind;let a=document.createElement('div');a.className='who';a.textContent=by;let b=document.createElement('div');b.className='message';b.textContent=String(text||'');item.append(a,b);el('messages').appendChild(item);el('messages').scrollTop=el('messages').scrollHeight}
@@ -39,23 +39,6 @@ function showApproval(p){ui.pending=p;el('preview').textContent=p.preview;el('ap
 async function send(msg){if(!msg.trim()||ui.busy)return;add('YOU',msg);busy(true);try{let r=await api('submit',msg.trim());add(r.ok?'MAX':'SYSTEM',r.text,r.ok?'':'system');if(r.approval)showApproval(r.approval);state(r.state)}catch(e){add('SYSTEM',e.message,'system')}finally{busy(false)}}
 el('form').onsubmit=e=>{e.preventDefault();let v=el('prompt').value;el('prompt').value='';send(v)};el('wake').onclick=()=>send(ui.awake?'bye max':'hi max');
 el('handsfree').onclick=async()=>{let on=!ui.handsfree;if(on&&!confirm('Enable microphone input continuously until switched off?'))return;try{const st=await api('set_handsfree',on);state(st);add('SYSTEM',st.handsfree?'Microphone enabled; say hi max.':on?(st.voice_error||'Microphone could not start.'):'Microphone stopping.','system')}catch(e){add('SYSTEM',e.message,'system')}};
-el('look').onclick=async()=>{
- if(ui.busy)return;
- el('look').disabled=true;
- try{
-   const app=el('look-app').value;
-   const p=await api('prepare_observation',app);
-   if(!p.ok){add('SYSTEM',p.text,'system');return;}
-   const destination=p.local?'your local AI model':'your connected AI provider (possibly cloud-hosted)';
-   const consent=window.confirm('LOOK will capture the visible '+app+' window and send its pixels to '+destination+'. It may contain sensitive data. Switch to '+app+' within 3 seconds after confirming. One image, one request, no storage. Proceed?');
-   if(!consent){await api('cancel_observation');add('SYSTEM','LOOK cancelled. Nothing captured.','system');return;}
-   add('SYSTEM','Switch to '+app+' now — capture in 3 seconds.','system');busy(true);
-   const result=await api('observe_screen',p.token);
-   add(result.ok?'MAX / VISION':'SYSTEM',result.text,result.ok?'':'system');
-   if(result.state)state(result.state);
- }catch(e){add('SYSTEM','LOOK unavailable: '+e.message,'system')}
- finally{busy(false);el('look').disabled=false}
-};
 el('talk').onclick=async()=>{busy(true);try{let r=await api('record');if(r.ok){busy(false);await send(r.text)}else{add('SYSTEM',r.text,'system');el('speech-panel').classList.add('show')}}catch(e){add('SYSTEM',e.message,'system')}finally{busy(false)}};
 el('approve').onclick=async()=>{if(!ui.pending)return;let token=ui.pending.id;ui.pending=null;el('approval').classList.remove('show');try{let r=await api('approve_action',token);add('MAX / PC',r.text,r.ok?'':'system')}catch(e){add('SYSTEM',e.message,'system')}};
 el('deny').onclick=async()=>{ui.pending=null;el('approval').classList.remove('show');await api('deny_action');add('SYSTEM','Cancelled.','system')};
@@ -84,6 +67,6 @@ el('test-ai').onclick=async()=>{
 };el('ollama').onclick=async()=>{el('ollama').disabled=true;try{let r=await api('connect_ollama','');el('model-status').textContent=r.message;state(r.state);add('SYSTEM',r.message,'system')}catch(e){add('SYSTEM',e.message,'system')}finally{el('ollama').disabled=false}};
 el('speech').onclick=()=>el('speech-panel').classList.toggle('show');el('install').onclick=async()=>{if(!confirm('Download a local Faster Whisper speech model from Hugging Face?'))return;el('install').disabled=true;try{let r=await api('install_voice_model');add('SYSTEM',r.text,'system');state(r.state)}catch(e){add('SYSTEM',e.message,'system')}finally{el('install').disabled=false}};
 async function poll(){try{for(let ev of await api('poll_events')){if(ev.type==='error')add('SYSTEM',ev.text,'system');if(ev.type==='speech'||ev.type==='remote'){add(ev.type==='remote'?'PHONE':'VOICE',ev.heard);add('MAX',ev.response?.text||'');if(ev.response?.approval)showApproval(ev.response.approval);state(ev.response?.state)}}}catch(e){}}
-async function init(){if(ui.initialized)return;try{let s=await api('state');ui.initialized=true;state(s);add('MAX','Ready in the background. Enable the mic, say hi max, then speak normally.');setInterval(poll,800)}catch(e){add('SYSTEM','Desktop backend unavailable: '+e.message,'system')}}window.addEventListener('pywebviewready',init);setTimeout(init,2500);
+async function init(){if(ui.initialized)return;try{let s=await api('state');ui.initialized=true;state(s);add('MAX','Ready in the background. Say hi max and speak naturally when hands-free listening is enabled.');setInterval(poll,800)}catch(e){add('SYSTEM','Desktop backend unavailable: '+e.message,'system')}}window.addEventListener('pywebviewready',init);setTimeout(init,2500);
 })();
 </script></body></html>
