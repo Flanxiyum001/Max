@@ -5,7 +5,8 @@ full dashboard is available using `--dashboard`), with optional push-to-talk
 transcription, Windows voice output, safe app launching,
 browser searches, and persisted gaming settings profiles. The original
 Discord agent remains supported. For full capabilities and limitations,
-see [Windows PC setup](docs/PC-WINDOWS.md).
+see [Windows PC setup](docs/PC-WINDOWS.md) and the
+[OpenJarvis engineering reference comparison](docs/OPENJARVIS-REFERENCE.md).
 
 ## Windows PC quick start
 
