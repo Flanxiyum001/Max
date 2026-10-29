@@ -85,8 +85,8 @@ def parse_action(text: str) -> WindowsAction | None:
         if combo not in SHORTCUTS:
             return None
         return WindowsAction("shortcut", match.group(2).lower(), combo)
-    if re.fullmatch(r"(?:open|show)\\s+(?:the\\s+)?(?:export\\s+)?dialog\\s+in\\s+premiere", text, re.I) or re.fullmatch(
-        r"(?:export|render)\\s+(?:the\\s+)?(?:video|timeline|sequence)\\s+in\\s+premiere", text, re.I
+    if re.fullmatch(r"(?:open|show)\s+(?:the\s+)?(?:export\s+)?dialog\s+in\s+premiere", text, re.I) or re.fullmatch(
+        r"(?:export|render)\s+(?:the\s+)?(?:video|timeline|sequence)\s+in\s+premiere", text, re.I
     ):
         # Ctrl+M opens Premiere's export settings; it does NOT render, pick
         # an output destination, choose a preset or publish the result.
