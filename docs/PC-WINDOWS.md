@@ -1,49 +1,58 @@
 # MAX PC — Windows-first Jarvis milestone
 
-## MAX LOOK — first screen-aware desktop milestone
+## Voice-first MAX — no LOOK button
 
-**Status:** read-only local PC feature. From the compact companion (default)
-or full dashboard, choose **Premiere**, **Notepad**, or **VS Code** and click
-**LOOK**. MAX must be awake, and you must have connected a **vision-capable**
-model and passed **TEST AI RESPONSE** first.
+Start the Windows assistant with an explicit opt-in to hands-free listening:
 
-1. The app asks for **explicit per-image consent** and warns whether the
-   connected provider is local or external. **Cancel** means no screenshot.
-2. After confirming, switch to the selected Windows app within **3 seconds**.
-3. MAX verifies the actual foreground process executable and title, then
-   captures only the window region on the **primary monitor** (no video or
-   continuous monitoring). If the window is wrong, minimized, offscreen, or
-   changes during capture, it fails closed without uploading.
-4. The JPEG is compressed to at most 1280 × 900 pixels / 1.2 MB. It is kept
-   in memory, **not written to MAX's disk or chat history**, and passed to the
-   configured model as an image attachment. This is one model request in the
-   normal OpenAI-compatible client workflow; the provider adapter may retry
-   on transient errors and such retries can consume credits.
-5. MAX returns a **text-only observation**. It cannot yet click the elements
-   it sees, guarantee that a model correctly interpreted the image, or verify
-   a subsequent task has happened.
+```powershell
+python -m max pc run --handsfree
+```
 
-**Privacy matters.** Window pixels may show private documents, notification
-overlays or credentials. Use a disposable/safe window, close sensitive popups,
-and inspect what is visible *before* approving. A cloud model provider receives
-the image and applies its own data retention/processing policy; "not saved by
-MAX" does not mean the provider does not retain it. For local image processing
-use a vision-capable local Ollama model. Text-only models may reject image
-messages. There is no automatic, spoken, model-generated, or phone-triggered
-screen upload.
+The microphone is **not** enabled on a normal launch. With `--handsfree`,
+MAX begins capturing opt-in three-second audio chunks on startup, but ignores
+conversations until it hears **"hi max"**. It speaks replies using the
+configured OS voice. **"bye max"** puts the assistant to sleep.
+You can still use the normal app controls for setup or diagnostics; everyday
+tasks should not require a feature-selection button.
 
-**Windows setup:** Install the optional desktop packages via
-\`python -m pip install -e ".[pc,stt,desktop]"\`. This capability does not run
-on the deployed headless server and cannot be end-to-end proven in GitHub CI.
-If capture is denied, ensure the selected app is foreground on the primary
-monitor, not the MAX window. No executable data, window title or screenshot
-is written to the app logs.
+Examples after waking:
+- **"Max, look at Premiere and tell me what's wrong"** — inspect that visible
+  app, describe the image, and mention uncertainty; no automatic edits.
+- **"Max, what's on my screen?"** — inspect the *currently foreground*
+  supported app (Premiere, Notepad, or VS Code).
+- **"Max, play the timeline in Premiere"** — send a bounded playback shortcut
+  directly, after the exact active window is verified.
+- **"Max, cut at playhead in Premiere"** — announce the proposed edit;
+  **"Max confirm action"** authorizes it once, **"Max cancel"** discards it.
+- **"Max, switch to Premiere"** — focus that app by voice.
 
-**Next Jarvis milestone:** Read-only scene interpretation → proposed
-multi-step plan → explicit action approval → one action at a time → fresh
-observation and actual outcome verification. Real-time wake-word audio, VAD,
-streaming ASR, low-latency TTS, user memory and OS service integrations
-remain separate engineering work. This release does not claim autonomy.
+### Vision privacy
+A local request using a **local** configured vision model authorizes **one**
+ephemeral foreground-window capture. For an **external/cloud** provider, MAX
+asks for a second spoken confirmation: **"Max confirm screen share"** within
+25 seconds. An ordinary UI message, phone request, or generated model response
+cannot authorize cloud screen sharing. The image is held in local memory, never
+written to MAX's local screen-history files, and sent directly to the selected
+provider, which may retain it according to its own terms. Audio snippets are
+not logged. Prior setup must connect the model; a text-only AI model may reject
+the screenshot.
+
+Captures are limited to known active Windows applications on the primary
+monitor, checked against their process and title. No full-screen background
+capture, unauthorized clicks, or unattended control. A software-rendered
+screenshot may include notifications or other overlays inside the app region;
+close private content before requesting vision.
+
+### Still not Jarvis-grade
+Hands-free speech uses **3-second audio blocks**, not streaming low-latency
+automatic speech recognition; speech recognition has no speaker biometrics,
+so voice confirmations should only be used in a private, trusted environment.
+Shortcuts still depend on Premiere's focused panel and keymap and do not
+verify actual edit outcomes. Multi-step graphical workflows, visual action
+planning, interruption/barge-in, and telephone calls remain unimplemented.
+The screenshots and voice interactions here are unit-tested with fakes and
+Windows CI; end-to-end behavior requires a real Windows microphone, native
+app and vision-capable model.
 
 ## Reference reel: voice-first desktop (October 2026)
 
