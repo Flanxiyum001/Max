@@ -217,6 +217,9 @@ class PCBridge:
                 "action": result.action, "state": self.state(),
             }
             if self._voice_on and result.action not in {"sleeping", "busy", "setup", "approval"}:
+                # Block microphone capture before the speech thread starts,
+                # avoiding MAX transcribing its own synthesized reply.
+                self._speaking.set()
                 threading.Thread(
                     target=self._speak_safely,
                     args=(result.text,), daemon=True,
