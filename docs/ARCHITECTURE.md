@@ -28,6 +28,12 @@ src/max/
 │   └── factory.py      wire everything from configuration
 ├── skills/registry.py  Agent-Skills validation + staging/eval/promote/rollback
 ├── mcp/client.py       stdio MCP client (initialize/list/call) + tool bridging
+├── desktop/
+│   ├── policy.py       fixed 3-tier command classification (safe/approval/denied)
+│   ├── approvals.py    fingerprint-bound, one-shot console approval book
+│   ├── io.py           bounded screenshot + input adapters (lazy pyautogui)
+│   ├── server.py       stdio MCP server — the actual execution boundary
+│   └── provider.py     MAX-side adapter, native desktop_* tool registration
 ├── improve/
 │   ├── policy.py       integrity-pinned trusted policy (policy.sha256)
 │   ├── analysis.py     static rules + secret scan over diffs
@@ -138,6 +144,7 @@ export OPENCLAW_STATE_DIR=…/var/openclaw/state
 export OPENCLAW_CONFIG_PATH=…/var/openclaw/config/openclaw.json
 export OPENCLAW_WORKSPACE_DIR=…/var/openclaw/workspace
 export MAX_MOCK_PROVIDER_KEY=…      # random, var/openclaw/provider.key (0600)
+                                     # NOTE: an OpenClaw-tool variable — MAX never reads it
 export OPENCLAW_GATEWAY_TOKEN=…     # random, var/openclaw/gateway.token (0600)
 openclaw config patch --file var/openclaw/provider.patch.json   # custom model provider
 openclaw config set gateway.mode local && openclaw config validate
@@ -204,18 +211,20 @@ router.py ──► agent loop ──► PermissionPolicy (config-owned, model-b
                  ▼                    ▼
            ToolExecutor ───► audit.jsonl (actor, action, outcome)
                  │
-   ┌─────────────┼────────────────┬──────────────────┬──────────────┐
-   ▼             ▼                ▼                  ▼              ▼
- worker_*     list_symbols/    mcp_list_tools/    browser_*     speech_status
- (category     find_symbol/    mcp_status          (category net,  (category meta,
-  exec/write/  get_symbol_     (category mcp)       denied by      mock backend
-  read/meta)   source (read)                        default)       by default)
-   │             │                │                  │
-   ▼             ▼                ▼                  ▼
- CommandPolicy  codesearch     MCPServerManager   BrowserProvider ─► URL guard
- git worktree   tree-sitter    (filtered env,     (read-only)       (scheme/host/
- + task caps    or regex       per-tool allow,                      port/private/
-                                 approval gate)                      DNS checks)
+   ┌─────────────┼────────────────┬──────────────────┬──────────────┬───────────────┐
+   ▼             ▼                ▼                  ▼              ▼               ▼
+ worker_*     list_symbols/    mcp_list_tools/    browser_*     speech_status   desktop_*
+ (category     find_symbol/    mcp_status          (category net, (category meta, (category exec,
+  exec/write/  get_symbol_     (category mcp)       denied by      mock backend    allowed only
+  read/meta)   source (read)                        default)       by default)     by MAX_DESKTOP_
+   │             │                │                  │              │             ENABLE)
+   ▼             ▼                ▼                  ▼              ▼             ▼
+ CommandPolicy  codesearch     MCPServerManager   BrowserProvider ─► URL guard  max.desktop.server
+ git worktree   tree-sitter    (filtered env,     (read-only)       (scheme/host/ 3 fixed tiers:
+ + task caps    or regex       per-tool allow,                      port/private/  safe → run,
+                                 approval gate)                      DNS checks)    approval →
+                                                                                 console grant,
+                                                                                 denied → never
 ```
 
 Boundaries:
@@ -231,11 +240,17 @@ Boundaries:
 * **Worker is not a shell.** `worker_run` takes an argv array, never a string;
   `CommandPolicy` is deny-by-default and lives outside the agent loop.
 * **Approval is two-sided.** Tools may `request_approval`; only the human CLI
-  entry point grants it.
+  entry point grants it. Desktop control repeats the pattern independently:
+  the MCP server creates the request, `max desktop approve <id>` grants it,
+  and the grant is bound to the exact argv and spent on first use.
+* **Desktop control is a separate process, not a tool.** `max.desktop.server`
+  owns its own policy (safe / approval / denied), its own audit file and a
+  child environment containing nothing but `PATH` and `LANG`. Compromising the
+  model therefore does not hand it the Discord token or the provider key.
 * **Optional backends sit behind interfaces** — `CommandPolicy` (executor),
   `MCPServerManager` (MCP transport), `BrowserProvider` (navigation),
-  `SttService` (speech) — so implementations can change without touching the
-  agent loop.
+  `SttService` (speech), `DesktopProvider` (local machine control) — so
+  implementations can change without touching the agent loop.
 
 ## 8. Supervised multi-agent orchestration (current phase)
 
@@ -306,5 +321,33 @@ audit event with actor, task id and outcome.
 
 **Disable it:** `MAX_ORCH_ENABLE=0` removes the delegate hook and the task
 commands; text chat, coding questions and every other capability are
-unchanged (covered by the existing 251-test suite, which runs green with the
-layer enabled and with it disabled).
+unchanged (covered by the full test suite, which runs green with the layer
+enabled and with it disabled).
+
+## 9. Discord message path and observability (Phase A)
+
+```
+discord.py event
+    │  bot.py  — I/O only: build MessageView, typing indicator, send chunks
+    ▼
+router.handle(view)  ──►  _route() decides,  _trace() records the outcome
+    │                     audit: discord_message_outcome {action, reason,
+    │                             channel, guild, command, error} — never content
+    ▼
+RouteResult {action: reply | command | suppressed | ignored, replies[]}
+```
+
+Decision order is unchanged and fail-closed: self/other-bot/duplicate →
+empty content → commands (authorization at this layer) → channel allowlist →
+DM policy → response mode → cooldown → provider backoff → agent → chunked
+replies. What Phase A added is that **no branch returns silently**: pure
+ignores and suppressions are audited too (throttled to one entry per channel
+and reason per 60 s, never throttled when MAX is mentioned), empty-content
+messages are counted and diagnosed as a Message Content Intent problem in
+`!max status`, and `on_ready` logs and audits the effective configuration
+(`startup_summary`) including an explicit warning when the allowlist is empty.
+
+The startup banner and audit events carry the **provider name only** —
+never a base URL, model key or token (`_provider_label`, `startup_summary`
+and `discord_check_report` are pure functions with unit tests asserting the
+absence of secrets).

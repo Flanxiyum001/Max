@@ -31,6 +31,13 @@ def build_agent(
     _register_audit_sensitive_tools(config, registry, audit)
 
     policy = PermissionPolicy.from_config(config)
+    if config.desktop_enabled:
+        # Explicit operator opt-in: the three local-control tools leave the
+        # default-deny 'exec' category. MAX_TOOLS_DENY still wins (checked
+        # first), so `MAX_TOOLS_DENY=desktop_exec` revokes it immediately.
+        from ..desktop import DESKTOP_TOOLS
+
+        policy.allow.update(DESKTOP_TOOLS)
     memory = MemoryStore(config.data_dir / "MEMORY.md")
     sessions = SessionStore(config.data_dir)
 
@@ -78,6 +85,7 @@ def _register_optional_tools(config: Config, registry: ToolRegistry, audit=None)
     optional dependency degrades to an actionable error instead of a crash."""
     from ..browser import BrowserProvider, register_browser_tools
     from ..codesearch import register_symbol_tools
+    from ..desktop import DesktopProvider, desktop_server_config, register_desktop_tools
     from ..mcp.backend import MCPServerManager, parse_server_configs, register_mcp_manager_tools
     from ..worker import CommandPolicy, TaskManager
     from ..worker.tools import register_worker_tools
@@ -96,8 +104,18 @@ def _register_optional_tools(config: Config, registry: ToolRegistry, audit=None)
 
     if config.codesearch_enabled:
         register_symbol_tools(registry, config.workspace_dir)
-    mcp_manager = MCPServerManager(parse_server_configs(config.mcp_servers), audit=audit)
+    server_configs = parse_server_configs(config.mcp_servers)
+    if config.desktop_enabled:
+        # The built-in desktop server is registered from code so a single
+        # switch is enough; an operator-supplied entry with id "desktop"
+        # (already in MAX_MCP_SERVERS) wins instead.
+        if not any(c.id == "desktop" for c in server_configs):
+            server_configs = [*server_configs, desktop_server_config(config)]
+    mcp_manager = MCPServerManager(server_configs, audit=audit)
     register_mcp_manager_tools(registry, mcp_manager)
+
+    desktop = DesktopProvider(mcp_manager, enabled=config.desktop_enabled, audit=audit)
+    register_desktop_tools(registry, desktop)
 
     browser = BrowserProvider(
         mcp_manager,

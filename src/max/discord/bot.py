@@ -37,9 +37,31 @@ def required_permissions() -> list[str]:
         "Send Messages",
         "Send Messages in Threads",
         "Read Message History",
-        "Use Slash/Focus? (not required in Phase 1)",
     ]
 
+
+def startup_summary(
+    config: DiscordConfig,
+    store,
+    *,
+    provider_label: str = "unknown",
+    guild_count: int = 0,
+) -> dict:
+    """Effective, secret-free runtime configuration for the startup banner."""
+    return {
+        "prefix": config.command_prefix,
+        "response_mode": config.response_mode,
+        "dm_mode": config.dm_mode,
+        "allowlisted_channels": len(store.effective_allowlist()),
+        "configured_channels": len(config.allowed_channels),
+        "ignored_channels": len(config.ignored_channels),
+        "admin_users": len(config.admin_users),
+        "admin_roles": len(config.admin_roles),
+        "guild_allowlist": len(config.allowed_guilds),
+        "provider": provider_label,
+        "guilds": guild_count,
+        "intents": ["guilds", "message_content"],
+    }
 
 def _is_sendable(channel: Any) -> bool:
     if discord is None:
@@ -54,13 +76,14 @@ def _is_sendable(channel: Any) -> bool:
 class MaxDiscordBot(discord.Client if discord is not None else object):  # type: ignore[misc]
     """Text-only MAX bot: no voice or music dependencies are loaded."""
 
-    def __init__(self, config: DiscordConfig, router: DiscordRouter, audit: AuditLog):
+    def __init__(self, config: DiscordConfig, router: DiscordRouter, audit: AuditLog, provider_label: str = "unknown"):
         if discord is None:
             raise RuntimeError("discord.py is not installed; pip install discord.py>=2.3")
         super().__init__(intents=build_intents())
         self.config = config
         self.router = router
         self.audit = audit
+        self.provider_label = provider_label
         self.tree = discord.app_commands.CommandTree(self)
         self._synced_guilds: set[int] = set()
         self._last_route_log: dict[tuple[int, str], float] = {}
@@ -197,11 +220,22 @@ class MaxDiscordBot(discord.Client if discord is not None else object):  # type:
     async def on_ready(self) -> None:
         user_id = self.user.id if self.user else None
         guilds = len(getattr(self, "guilds", []) or [])
-        self.audit.record(
-            "discord_ready", user_id=user_id, guilds=guilds,
-            allowed_channels=len(self.config.allowed_channels),
+        summary = startup_summary(
+            self.config, self.router.store,
+            provider_label=self.provider_label, guild_count=guilds
         )
-        log.info("MAX discord ready as %s in %s guild(s)", user_id, guilds)
+        self.audit.record("discord_ready", user_id=user_id, **summary)
+        log.info(
+            "MAX discord ready as %s in %s guild(s) | response_mode=%s "
+            "| allowlist=%s | provider=%s",
+            user_id, guilds, summary["response_mode"],
+            summary["allowlisted_channels"], summary["provider"],
+        )
+        if not summary["allowlisted_channels"] and summary["dm_mode"] == "off":
+            log.warning(
+                "no channels are currently allowed and DMs are off; "
+                "server owner should run /max_enable in a selected channel"
+            )
         # A running container does not prove the Discord gateway connected.
         # Emit a non-secret readiness event to stdout for worker-only hosts.
         print(f"MAX_DISCORD_READY user_id={user_id} guilds={guilds}", flush=True)
@@ -262,6 +296,14 @@ class MaxDiscordBot(discord.Client if discord is not None else object):  # type:
                     break
                 if sent is not None:
                     self.router.remember_own_message(sent.id)
+
+    async def on_message_edit(self, before: Any, after: Any) -> None:
+        """Edits are traced but never answered — replying to edits loops."""
+        self.audit.record(
+            "discord_message_edited",
+            channel=getattr(after.channel, "id", None),
+            has_text=bool((getattr(after, "content", "") or "").strip()),
+        )
 
     async def on_error(self, event: str, *args: Any) -> None:
         self.audit.record("discord_event_error", event=event)

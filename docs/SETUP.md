@@ -154,6 +154,7 @@ for them and no credential can be committed by accident.
 | OpenClaw gateway | optional — off by default, no channels connected |
 | nanobot | optional — benchmark comparison only |
 | MCP servers (`max.mcp.MCPClient`) | optional — tests use the bundled mock server |
+| Desktop control (`max.desktop.server`) | optional — off by default; needs `MAX_DESKTOP_ENABLE=1` and, for screen/input only, the `[desktop]` extra |
 
 Nothing starts on boot, nothing binds beyond loopback, no sensitive
 integration (messaging accounts, tunnels, systemd services) was configured.
@@ -169,6 +170,7 @@ uv pip install --python .venv/bin/python -e '.[codesearch]'   # tree-sitter
 uv pip install --python .venv/bin/python -e '.[stt]'          # faster-whisper
 uv pip install --python .venv/bin/python -e '.[mcp]'          # official MCP SDK (not required)
 uv pip install --python .venv/bin/python -e '.[openhands]'    # optional OpenHands coding backend
+uv pip install --python .venv/bin/python -e '.[desktop]'     # pyautogui: local screen + input
 
 # verify each capability without touching production
 .venv/bin/python -m pytest -q                       # full suite
@@ -182,6 +184,7 @@ grep -c . .env                                     # copy .env.example first
 | `MAX_CODESEARCH_ENABLE` | `1` | tree-sitter symbol tools (regex fallback if not installed) |
 | `MAX_MCP_SERVERS` | empty | JSON array of MCP servers; each disabled unless `"enabled":true`, no tool auto-enabled |
 | `MAX_BROWSER_ENABLE` / `MAX_BROWSER_ALLOW_HOSTS` | `0` / — | guarded Playwright MCP research (read-only) |
+| `MAX_DESKTOP_ENABLE` (+ `MAX_DESKTOP_*`) | `0` | local desktop control via a stdio MCP child; state-changing commands still need `max desktop approve <id>` |
 | `MAX_STT_BACKEND` (+ `MAX_STT_*`) | `mock` | speech-to-text adapter; nothing downloaded at startup |
 | `MAX_ORCH_ENABLE` / `MAX_ORCH_AUTO` | `1` / `1` | supervised multi-agent layer + dynamic delegation decision |
 | `MAX_ORCH_MAX_WORKERS` / `MAX_ORCH_DEPTH` / `MAX_ORCH_TASK_TIMEOUT_S` | `2` / `1` / `180` | concurrency (hard cap 3), delegation depth, per-task wall clock |

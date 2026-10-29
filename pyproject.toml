@@ -25,6 +25,11 @@ openhands = [
 mcp = [
     "mcp>=1.2",
 ]
+desktop = [
+    # local screen + mouse/keyboard driver for src/max/desktop/; optional so
+    # a headless host (or a MAX without machine control) still installs and runs
+    "pyautogui>=0.9.54",
+]
 dev = [
     "pytest>=8.0",
     # test-only: exercises the tree-sitter backend in CI; the regex
