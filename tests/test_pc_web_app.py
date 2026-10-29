@@ -108,3 +108,40 @@ def test_app_html_is_packaged_and_has_responsive_controls():
     assert "window.pywebview.api" in html
     assert "textContent=" in html  # no untrusted model HTML injection
     assert "https://cdn." not in html
+
+
+def test_custom_provider_accepts_explicit_https_without_persisting_key(tmp_path):
+    received = []
+    def build(cfg, provider=None):
+        received.append((cfg.base_url, cfg.model, provider.api_key))
+        return SimpleNamespace(ask=lambda t, session_id: SimpleNamespace(text="AI says hello", ok=True))
+    bridge = make_bridge(tmp_path, builder=build)
+    result = bridge.connect_provider("https://api.example.com/v1", "test-model", "private-key")
+    assert result["ok"] is True
+    assert result["state"]["model"] == "test-model"
+    assert "private-key" not in str(result)
+    assert received == [("https://api.example.com/v1", "test-model", "private-key")]
+    assert not (tmp_path / ".env.local").exists()
+    bridge.submit("hi max")
+    assert bridge.submit("hello")["text"] == "AI says hello"
+
+
+def test_provider_rejects_insecure_nonlocal_endpoint(tmp_path):
+    bridge = make_bridge(tmp_path)
+    for url in (
+        "http://api.example.org/v1", "https://user:pass@api.example.org/v1",
+        "http://127.0.0.2:11434/v1", "file:///etc/passwd",
+        "https://api.example.org:443/v1?q=secret", "https://127.0.0.1/v1",
+        "https://api.example.org/other", "https://10.0.0.4/v1",
+    ):
+        result = bridge.connect_provider(url, "model", "secret")
+        assert result["ok"] is False, url
+    assert not bridge.state()["ready"]
+
+
+def test_model_connection_required_fields(tmp_path):
+    bridge = make_bridge(tmp_path)
+    assert not bridge.connect_provider("https://example.org/v1", "")["ok"]
+    assert not bridge.connect_provider("https://example.org/v1", "x" * 129)["ok"]
+    assert not bridge.connect_provider("https://example.org/v1", "ok", "secret" * 1000)["ok"]
+
