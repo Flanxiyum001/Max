@@ -633,7 +633,7 @@ def cmd_pc(args) -> int:
         )
     pc = PCController(c.data_dir)
     try:
-        run(pc, config=c)
+        run(pc, config=c, dashboard=getattr(args, 'dashboard', False))
     except Exception as exc:
         print(f"error: MAX PC UI failed: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
@@ -756,7 +756,13 @@ def main(argv: list[str] | None = None) -> int:
     pc_sub = p_pc.add_subparsers(dest="pc_cmd", required=True)
     pc_status = pc_sub.add_parser("status", help="check local PC dependencies")
     pc_status.add_argument("--json", action="store_true")
-    pc_run = pc_sub.add_parser("run", help="start animated Windows desktop UI")
+    pc_run = pc_sub.add_parser(
+        "run", help="start compact voice companion (use --dashboard for old full UI)"
+    )
+    pc_run.add_argument(
+        "--dashboard", action="store_true",
+        help="open the full holographic dashboard instead of the compact voice companion",
+    )
     pc_smoke = pc_sub.add_parser("smoke", help="run headless wake/chat/sleep smoke")
 
     p_bench = sub.add_parser("bench", help="resource and latency benchmarks")
