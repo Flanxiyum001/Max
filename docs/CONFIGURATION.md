@@ -21,6 +21,7 @@ part of `max health`, and `.dockerignore` excludes `.env` from the image.
 | `MAX_API_KEY` | unset | Optional direct key; prefer `MAX_API_KEY_ENV` + a secret store |
 | `MAX_TIMEOUT_S` / `MAX_RETRIES` | `60` / `1` | Provider request timeout and retry budget |
 | `MAX_MAX_ITERS` | `8` | Agent loop step ceiling |
+| `MAX_HISTORY_CHAR_BUDGET` | `24000` | Prior conversation character limit, full history still stored |
 | `MAX_TOOLS_ALLOW` / `MAX_TOOLS_DENY` | empty | Explicit tool allow/deny lists (`a,b,c`); empty = category policy |
 | `MAX_DATA_DIR` | `var` | Sessions, memory, audit log, task store (relative to repo root) |
 | `MAX_WORKSPACE` | `workspace` | Root every file tool may read/write |
@@ -41,7 +42,7 @@ part of `max health`, and `.dockerignore` excludes `.env` from the image.
 | `MAX_DISCORD_ADMINS` / `MAX_DISCORD_ADMIN_ROLES` | empty | Who may run `allow`/`deny`/`channels` |
 | `MAX_DISCORD_DM_MODE` | `off` | `off` \| `allowlist` \| `everyone` |
 | `MAX_DISCORD_DM_USERS` | empty | Used when `dm_mode=allowlist` |
-| `MAX_DISCORD_RESPONSE_MODE` | `all` | `all` \| `mention` \| `command` |
+| `MAX_DISCORD_RESPONSE_MODE` | `all` | `all` \| `mention` \| `command` \| `wake` |
 | `MAX_DISCORD_COMMAND_PREFIX` | `!max` | Command prefix |
 | `MAX_DISCORD_COOLDOWN_S` | `2` | Per-channel conversation cooldown |
 | `MAX_DISCORD_ERROR_COOLDOWN_S` | `30` | Provider-error backoff base |
