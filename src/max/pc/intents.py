@@ -71,6 +71,6 @@ def is_voice_action_confirmation(message: str) -> bool:
 
 def is_voice_cancel(message: str) -> bool:
     return bool(re.fullmatch(
-        r"(?:hey\s+)?max[,!:.]?\s+(?:cancel|abort|stop)\s+(?:that|action|screen\s+share)[.!]?",
+        r"(?:hey\s+)?max[,!:.]?\s+(?:cancel|abort|stop)(?:\s+(?:that|action|screen\s+share))?[.!]?",
         str(message).strip(), re.I,
     ))
