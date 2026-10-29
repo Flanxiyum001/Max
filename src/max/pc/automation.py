@@ -99,7 +99,11 @@ def parse_action(text: str) -> WindowsAction | None:
         combo = re.sub(r"\s+", "", match.group(1)).lower()
         if combo not in SHORTCUTS:
             return None
-        return WindowsAction("shortcut", _app_name(match.group(2)), combo)
+        app = _app_name(match.group(2))
+        # Premiere-specific timeline controls are not universal shortcuts.
+        if combo in {"ctrl+k", "home", "end", "m", "i", "o"} and app != "premiere":
+            return None
+        return WindowsAction("shortcut", app, combo)
     if re.fullmatch(
         r"(?:open|show)(?: the)?(?: export)? dialog in " + _PREMIERE_PATTERN + r"[.!?]?",
         text, re.I,
