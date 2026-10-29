@@ -233,4 +233,15 @@ warning: messages arrived without text — enable the Message Content Intent in 
 That is the classic symptom of the privileged Message Content Intent being
 disabled, which is why commands that only need the bot mentioned can appear
 to work while ordinary conversation stays silent.
-\n### Wake mode in every channel of one or more approved servers\n\nThe default is deliberately **deny-by-default**: MAX only listens in explicitly allowed channels. To make `hi max` activate normal chat and `bye max` put MAX to sleep in **any channel of specified servers**, configure all three variables in your deployment (replace the example ID with the real server ID):\n\n```ini\nMAX_DISCORD_RESPONSE_MODE=wake\nMAX_DISCORD_GUILD_IDS=123456789012345678\nMAX_DISCORD_ALLOW_ALL_GUILD_CHANNELS=1\n```\n\nThis does **not** enable all servers, channels on the ignored list, channels explicitly denied with `!max deny`, or DMs. Only one channel is awake at a time; activating MAX in one channel does not wake another. To return to explicit channel-only operation, set the new flag to `0`; your existing allowlist remains untouched. Ensure the Discord Message Content Intent is enabled in the bot's developer settings. No live service settings are changed by updating this documentation.\n
+
+### Wake mode in every channel of one or more approved servers
+
+The default is deliberately **deny-by-default**: MAX only listens in explicitly allowed channels. To make `hi max` activate normal chat and `bye max` put MAX to sleep in **any channel of specified servers**, configure all three variables in your deployment (replace the example ID with the real server ID):
+
+```ini
+MAX_DISCORD_RESPONSE_MODE=wake
+MAX_DISCORD_GUILD_IDS=123456789012345678
+MAX_DISCORD_ALLOW_ALL_GUILD_CHANNELS=1
+```
+
+This does **not** enable all servers, channels on the ignored list, channels explicitly denied with `!max deny`, or DMs. Only one channel is awake at a time; activating MAX in one channel does not wake another. To return to explicit channel-only operation, set the new flag to `0`; your existing allowlist remains untouched. Ensure the Discord Message Content Intent is enabled in the bot's developer settings. No live service settings are changed by updating this documentation.
