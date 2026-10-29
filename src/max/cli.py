@@ -5,6 +5,7 @@
     max skills list|show|stage|eval|promote|rollback
     max eval run               run the evaluation suite
     max improve scan|run|list|show|approve|rollback|trust-policy
+    max desktop status|approvals|approve|deny
     max bench                  resource + latency benchmarks
 """
 
@@ -12,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import sys
 import time
 from pathlib import Path
@@ -429,6 +431,106 @@ def _provider_label(config: Config) -> str:
     return name[:40] or "unknown"
 
 
+def cmd_desktop(args) -> int:
+    """Console human-in-the-loop gate for local desktop control."""
+    from .desktop import ApprovalBook, ApprovalError
+
+    config = Config.from_env()
+    config.ensure_dirs()
+    state = config.data_dir / "desktop"
+    book = ApprovalBook(
+        state,
+        ttl_s=config.desktop_approval_ttl_s,
+        gui_ttl_s=config.desktop_gui_ttl_s,
+        gui_max_actions=config.desktop_gui_actions,
+    )
+
+    if args.desktop_cmd == "status":
+        try:
+            import pyautogui  # noqa: F401
+
+            input_backend = "available"
+        except Exception:  # noqa: BLE001
+            input_backend = "not installed (pip install 'max-assistant[desktop]')"
+        _print(
+            {
+                "desktop_enabled": config.desktop_enabled,
+                "workspace": str(config.workspace_dir),
+                "state_dir": str(state),
+                "timeout_s": config.desktop_timeout_s,
+                "approval_ttl_s": config.desktop_approval_ttl_s,
+                "input_session_ttl_s": config.desktop_gui_ttl_s,
+                "input_events_per_grant": config.desktop_gui_actions,
+                "input_backend": input_backend,
+                "pending_approvals": len(book.pending()),
+            },
+            args.json,
+        )
+        return 0
+
+    if args.desktop_cmd == "approvals":
+        rows = book.pending()
+        if args.json:
+            _print({"pending": rows}, True)
+            return 0
+        if not rows:
+            print("no pending desktop approvals")
+            return 0
+        for row in rows:
+            left = max(0, int(row.get("expires_ts", 0) - time.time()))
+            argv = row.get("argv") or []
+            shown = " ".join(shlex.quote(a) for a in argv) or row.get("reason", "")
+            print(f"{row['id']}  {row.get('kind', '?')}  expires in {left}s")
+            print(f"    {row.get('reason') or '(no reason recorded)'}")
+            print(f"    {shown}")
+        return 0
+
+    # approve / deny ------------------------------------------------------
+    approval_id = str(args.id)
+    try:
+        record = book.get(approval_id)
+    except ApprovalError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    argv = record.get("argv") or []
+    shown = " ".join(shlex.quote(a) for a in argv) or record.get("kind", "?")
+    print(f"approval {approval_id} ({record.get('kind')}) — {record.get('status')}")
+    print(f"    requested: {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(record.get('created_ts', 0)))}")
+    print(f"    reason:    {record.get('reason') or '(none)'}")
+    print(f"    cwd:       {record.get('cwd') or '-'}")
+    print(f"    action:    {shown}")
+
+    verb = "approve" if args.desktop_cmd == "approve" else "deny"
+    if not args.yes:
+        if not sys.stdin.isatty():
+            print(
+                f"error: non-interactive terminal — review the action above and re-run with "
+                f"`max desktop {verb} {approval_id} --yes`",
+                file=sys.stderr,
+            )
+            return 2
+        answer = input(f"type 'yes' to {verb} {approval_id}: ").strip().lower()
+        if answer != "yes":
+            print("not changed — approval left pending")
+            return 1
+
+    try:
+        if args.desktop_cmd == "approve":
+            book.grant(approval_id, granted_by="console")
+        else:
+            book.deny(approval_id, denied_by="console")
+    except ApprovalError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    if args.desktop_cmd == "approve":
+        print(f"granted {approval_id} — MAX may now run that exact command once.")
+    else:
+        print(f"denied {approval_id} — MAX will not run that command.")
+    return 0
+
+
 def cmd_discord(args) -> int:
     from .discord import DiscordConfig
 
@@ -581,6 +683,22 @@ def main(argv: list[str] | None = None) -> int:
     d_check.set_defaults(func=cmd_discord)
     d_run = discord_sub.add_parser("run", help="start the bot (requires MAX_DISCORD_TOKEN)")
     d_run.set_defaults(func=cmd_discord)
+
+    p_desktop = sub.add_parser(
+        "desktop", help="local desktop control: console approval gate"
+    )
+    p_desktop.set_defaults(func=cmd_desktop)
+    desktop_sub = p_desktop.add_subparsers(dest="desktop_cmd", required=True)
+    dd_status = desktop_sub.add_parser("status", help="configuration and pending approvals")
+    dd_status.add_argument("--json", action="store_true")
+    dd_approvals = desktop_sub.add_parser("approvals", help="list pending approval requests")
+    dd_approvals.add_argument("--json", action="store_true")
+    dd_approve = desktop_sub.add_parser("approve", help="grant one pending approval")
+    dd_approve.add_argument("id")
+    dd_approve.add_argument("--yes", action="store_true", help="skip the interactive confirmation")
+    dd_deny = desktop_sub.add_parser("deny", help="refuse one pending approval")
+    dd_deny.add_argument("id")
+    dd_deny.add_argument("--yes", action="store_true", help="skip the interactive confirmation")
 
     p_bench = sub.add_parser("bench", help="resource and latency benchmarks")
     p_bench.add_argument("--configs", default="A,D")

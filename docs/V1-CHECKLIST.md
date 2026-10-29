@@ -118,11 +118,11 @@ freebuff/codebuff anywhere in tracked files.
 
 ### Test totals
 
-| | baseline | after Phase 1 | after advanced integration | after orchestration |
-|---|---|---|---|---|
-| pytest | 96 passed | 167 passed | 250 passed | **299 passed** |
-| eval suite | 14/14 | 14/14 | 14/14 | 14/14 |
-| improve scan | 0 findings | 0 findings | 0 findings | 0 findings |
+| | baseline | after Phase 1 | after advanced integration | after orchestration | after Phase A | after desktop control |
+|---|---|---|---|---|---|---|
+| pytest | 96 passed | 167 passed | 250 passed | 299 passed | 314 passed | **408 passed** |
+| eval suite | 14/14 | 14/14 | 14/14 | 14/14 | 14/14 | 14/14 |
+| improve scan | 0 findings | 0 findings | 0 findings | 0 findings | 0 findings | 0 findings |
 
 Local re-verification on `v2/capabilities` @ `9827173` (after merging
 `main`): all five gates exit 0 — pytest, health, eval, scan, skills.
@@ -138,6 +138,7 @@ Local re-verification on `v2/capabilities` @ `9827173` (after merging
 | **E. Promptfoo evaluation layer** | **dataset + offline gate implemented; runner deferred** | `eval/promptfoo/` (13 cases), `tests/test_adversarial_dataset.py` (10 tests); Promptfoo needs Node ≥22 — `docs/INTEGRATIONS.md` §4 |
 | **F. faster-whisper speech-to-text** | **adapter + mock tested; real benchmark blocked** | `src/max/speech/`, `tests/test_speech.py`: limits, temp-file deletion, no transcript logging, lazy availability; `[stt]` extra and model weights absent |
 | OpenHands SDK as worker runtime | **adapter built; backend optional (not installed)** | `src/max/orchestration/coding.py`, `[openhands]` extra, `MAX_ORCH_CODER_BACKEND`; falls back to the guarded MAX runner — `docs/INTEGRATIONS.md` §1 |
+| **G. Local desktop control (terminal / screen / input)** | **implemented + tested; live input blocked** | `src/max/desktop/`, `tests/test_desktop.py` (94 tests against a real MCP child): 3-tier command policy, one-shot argv-bound console approval, filtered child env, `max desktop approve`; `pyautogui` and a display are absent here — `docs/INTEGRATIONS.md` §7 |
 | Voice / shared music (Phase 6) | not started — not claimed | — |
 
 All new tools are registered through the single `ToolRegistry`/`ToolExecutor`
@@ -164,3 +165,22 @@ default), and the core starts with every optional dependency missing.
 Gate for this phase: **299 passed** (251 before + 48 new), health `ok`,
 eval **14/14**, improve scan **0 findings**, no secrets committed, nothing
 pushed or deployed.
+
+## Local desktop control — status
+
+| Requirement | Status | Evidence / blocker |
+|---|---|---|
+| Read-only commands run without ceremony | **implemented + tested** | exact-prefix allowlist, workspace-relative paths only (`test_read_only_commands_are_safe`) |
+| State-changing commands need a human | **implemented + tested** | pending record → `max desktop approve <id>` → one-shot consume bound to SHA-256(argv+cwd) (`test_state_change_requires_approval_then_runs`) |
+| Approval cannot be transferred or self-granted | **implemented + tested** | mismatch, kind-crossing and expiry all rejected; granting exists only in the CLI and refuses a non-TTY without `--yes` |
+| Fixed deny list beats approval | **implemented + tested** | escalation, host alteration, egress and inline-code programs are refused even when granted |
+| No credentials reach the child | **implemented + tested** | MCP manager passes `PATH`/`LANG`; server adds workspace `HOME`/`TMPDIR` (`test_sandbox_env_cannot_carry_secrets`) |
+| Bounded execution | **implemented + tested** | process-group timeout kill, 4 KB output clip, argv limits, approval-record prune ceiling |
+| GUI input and screenshots | **implemented, backend blocked** | `[desktop]` extra and a display absent; missing-backend error path asserted instead of a crash |
+| Discord routing of desktop requests | **no change needed, verified by design** | `desktop_*` tools live in the same registry the conversation path dispatches through; `!max health` now reports `desktop: on\|off` |
+| Reaches outside the workspace (e.g. `~/Desktop`) | **not supported by design** | absolute paths and `..` are always denied; widen `MAX_WORKSPACE` deliberately if this is wanted |
+
+Gate for this phase: **408 passed** (314 before this revision + 94 new),
+health `ok`, eval **14/14**, improve scan **0 findings**, `config/policy.yaml`
+untouched (still integrity-pinned), nothing pushed, deployed or otherwise
+changed outside this repository.

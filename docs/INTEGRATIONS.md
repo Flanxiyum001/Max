@@ -148,6 +148,66 @@ Blocked here: browser binaries are not installed in this environment, so the
 live research workflow is **not verified** — unit tests cover the guard, the
 gating and the failure paths instead.
 
+## 7. Desktop-control resources — evaluated 29 Oct 2026
+
+Five projects were suggested for giving MAX "arms and legs": local machine
+control, browser automation, a local model server and a grab-bag of MCP
+tools. All five were checked upstream before deciding. Upstream facts below
+were read from the repositories and package indexes on 29 Oct 2026.
+
+| Resource | Upstream (verified 29 Oct 2026) | Decision | Why |
+|---|---|---|---|
+| Open Interpreter | `openinterpreter/openinterpreter` (Rust) 0.0.56, **Apache-2.0**; legacy Python dist `open-interpreter` 0.4.3 (Oct 2024), classic line **AGPL-3.0-only** | **Pattern borrowed, dependency rejected** | It *is* a second agent loop that runs model-chosen code on the host — exactly what MAX's mission forbids; the Python line is AGPL, and the Rust line brings its own model client. MAX already has a bounded, audited runner. |
+| UI-TARS-desktop | `bytedance/UI-TARS-desktop` 0.3.1 (8 Oct 2026), **Apache-2.0**, TypeScript/Electron/Node ≥20, needs a vision-language model | **Deferred** | An always-running Electron app plus VLM weights on an 8 GB integrated-graphics laptop. MAX is text-first; the screenshot tool below is the seam if a multimodal provider is ever added. |
+| browser-use | `browser-use/browser-use` 0.13.14 (26 Oct 2026), **MIT**, Python ≥3.11; drives browsers over **CDP** (`cdp-use`), *not* Playwright | **Deferred (duplicate of an existing capability)** | MAX already ships a guarded Playwright MCP browser layer with an SSRF/private-range guard and read-only tool surface. Adding browser-use would be a second browser agent stack with its own LLM loop. Revisit only if the CDP-based controller proves strictly better than the existing guard. |
+| Ollama | `ollama/ollama` 0.40.13 (28 Oct 2026), **MIT**, Go | **Adopted as configuration — zero code, zero dependencies** | MAX's provider is already OpenAI-compatible, and Ollama serves an OpenAI-compatible subset including `/v1/chat/completions`. No account, no cost; only the model download touches the network. |
+| Goose MCP extensions | `aaif-goose/goose` (formerly `block/goose`) 1.57.0 (28 Oct 2026), **Apache-2.0**, Rust | **Pattern borrowed: usable as ordinary MAX MCP servers; none installed** | MAX's MCP manager already spawns any stdio MCP server from `MAX_MCP_SERVERS`, so a Goose extension is a config entry, not a dependency. Each extension drags its own runtime (`npx`, `uvx`, Java, Docker) and may download packages, so none are enabled by default. |
+
+### Ollama — how to actually wire it (no code changes)
+
+```bash
+# .env — see docs/CONFIGURATION.md §1
+MAX_PROVIDER=openai
+MAX_BASE_URL=http://127.0.0.1:11434/v1
+MAX_MODEL=qwen2.5-coder:7b
+MAX_API_KEY_ENV=OLLAMA_API_KEY
+OLLAMA_API_KEY=ollama        # the local server wants a key *value* present and ignores it
+```
+
+Verified against https://docs.ollama.com/api/openai-compatibility: the local
+server exposes an OpenAI-compatible subset at `/v1`, is free, and needs no
+account. Model weights are a separate license/cost question — check the model
+card before pulling one onto the laptop. Everything else about MAX
+(timeout, retries, health check, mock fallback) is unchanged.
+
+### Open Interpreter — what was borrowed instead
+
+The useful idea is a *local terminal harness with an approval boundary*. MAX
+implements that itself in `src/max/desktop/server.py` (new, this revision):
+argv-only execution, a fixed deny list, workspace-bounded paths, a filtered
+child environment, and a human approval that the model can request but never
+grant. That is the Open Interpreter shape without the AGPL dependency, the
+second agent loop, or unrestricted shell access.
+
+### Goose extensions — how to add one if you ever need it
+
+A Goose stdio extension is an MCP server. Add it to `MAX_MCP_SERVERS` with an
+explicit `tool_allow` and (for anything that writes) `approval_required`:
+
+```bash
+# `command` is whatever the extension's own docs say to run — e.g. a stdio
+# MCP server started with `npx -y <package>` or `uvx <package>`.
+MAX_MCP_SERVERS=[{"id":"myext","command":["npx","-y","<the-extension-package>"],"enabled":true,"tool_allow":["list_events"],"approval_required":["create_event","delete_event"],"env_allow":["MYEXT_CREDENTIALS_PATH"]}]
+```
+
+The package name above is a placeholder: no specific Goose extension was
+installed or verified in this repository, so none is named as an example that
+works.
+
+Rules that do not change: no tool is visible without `tool_allow`, credentials
+never travel through `env_allow` (secret-shaped names are stripped by
+`build_env`), and no server starts until a tool from it is actually called.
+
 ## Dependency and license summary
 
 | Package | Version constraint | License | Where |
@@ -156,6 +216,7 @@ gating and the failure paths instead.
 | tree-sitter-python | `>=0.23` | MIT | extra `[codesearch]`, dev |
 | faster-whisper | `>=1.2` | MIT | extra `[stt]` |
 | mcp | `>=1.2` | MIT | extra `[mcp]` (declared, unused by default) |
+| pyautogui | `>=0.9.54` | BSD-3-Clause | extra `[desktop]` (declared; not installed in CI) |
 | promptfoo | — | MIT | not installed (Node) |
 | playwright-mcp | — | Apache-2.0 | not installed (Node) |
 
@@ -170,4 +231,16 @@ Core installation remains `pyyaml` + `discord.py` only.
   gating are tested.
 * **faster-whisper real benchmark** — blocked (model weights not present;
   `[stt]` not installed in CI); adapter + mock benchmark are tested.
+* **Open Interpreter dependency** — rejected (AGPL on the Python line; a
+  second host-executing agent loop). Pattern borrowed into
+  `src/max/desktop/` instead.
+* **UI-TARS-desktop** — deferred (Electron + VLM on an 8 GB laptop);
+  screenshot seam exists at `desktop_screen`.
+* **browser-use** — deferred (MIT, but a duplicate of the guarded Playwright
+  browser layer already in `src/max/browser/`).
+* **Goose MCP extensions** — none installed (each drags `npx`/`uvx`/Docker
+  runtimes); the `MAX_MCP_SERVERS` path already supports them.
+* **Live desktop input/screenshot verification** — blocked (no `pyautogui`
+  and no display in this environment); the approval, policy and protocol paths
+  are tested, and the missing-backend error path is asserted.
 * **Discord voice/music (Phases 6)** — not started, not claimed.

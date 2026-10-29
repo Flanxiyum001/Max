@@ -59,6 +59,10 @@ part of `max health`, and `.dockerignore` excludes `.env` from the image.
 | `MAX_CODESEARCH_ENABLE` | `1` | Tree-sitter/regex repository intelligence |
 | `MAX_MCP_SERVERS` | empty | JSON array of MCP servers; no tool is auto-enabled |
 | `MAX_BROWSER_ENABLE` / `MAX_BROWSER_ALLOW_HOSTS` | `0` / empty | Playwright MCP research, read-only by default |
+| `MAX_DESKTOP_ENABLE` | `0` | Local desktop control (screen, mouse/keyboard, terminal) via `max.desktop.server` |
+| `MAX_DESKTOP_TIMEOUT_S` | `30` | Per-command wall clock in the desktop server (hard cap on every child) |
+| `MAX_DESKTOP_APPROVAL_TTL_S` | `600` | How long a terminal approval request stays grantable |
+| `MAX_DESKTOP_GUI_TTL_S` / `MAX_DESKTOP_GUI_ACTIONS` | `300` / `50` | One granted input session: lifetime and event count |
 | `MAX_STT_BACKEND` | `mock` | `mock` \| `faster-whisper` (`pip install -e '.[stt]'`) |
 | `MAX_STT_MODEL_SIZE` / `_COMPUTE_TYPE` / `_DEVICE` / `_LANGUAGE` | `tiny`/`int8`/`cpu`/auto | faster-whisper settings |
 | `MAX_STT_TIMEOUT_S` / `MAX_STT_MAX_DURATION_S` / `MAX_STT_MODEL_DIR` / `MAX_STT_LOCAL_FILES_ONLY` | `30`/`300`/empty/`1` | Limits; `local_files_only=1` downloads nothing at startup |
@@ -97,6 +101,15 @@ there as of this revision.
 - **`empty_message` is a diagnosis, not a shrug.** Counters feed
   `!max status`, which points at the Message Content Intent when messages
   arrive with no text.
+- **Desktop control is opt-in and never self-authorising.**
+  `MAX_DESKTOP_ENABLE=0` leaves the three `desktop_*` tools in the
+  default-deny `exec` category. Setting it to `1` registers the built-in MCP
+  server **and** puts those three names on the policy allowlist; a
+  `MAX_TOOLS_DENY` entry still wins because deny is checked first. Enabling it
+  does *not* authorise any command: read-only commands run, everything else
+  needs `max desktop approve <id>` at the console. The server process receives
+  only `PATH`/`LANG` from the MCP manager, so no token or key can reach it —
+  see `docs/SECURITY.md` §8.
 
 ## 6. Docker and Railway
 
@@ -119,5 +132,6 @@ configured there.
 ```bash
 .venv/bin/python -m max discord check        # config, intents, permissions, warnings; exit 1 if misconfigured
 .venv/bin/python -m max health --json        # status: ok, provider_check, skills, policy (no secrets)
+.venv/bin/python -m max desktop status       # desktop config, input backend, pending approvals
 .venv/bin/python -m max eval run             # 14/14 scenarios
 ```

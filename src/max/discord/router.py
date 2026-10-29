@@ -318,6 +318,15 @@ class DiscordRouter:
             skills = payload.get("skills") or {}
             if skills:
                 lines.append(f"skills: {skills.get('valid', 0)} valid, {skills.get('flagged', 0)} flagged")
+            desk = (payload.get("provider") or {}).get("desktop") or {}
+            lines.append(
+                "desktop: "
+                + (
+                    "on (state-changing commands need `max desktop approve <id>`)"
+                    if desk.get("enabled")
+                    else "off"
+                )
+            )
             return RouteResult("command", replies=lines)
         if name == "status":
             allowed = (

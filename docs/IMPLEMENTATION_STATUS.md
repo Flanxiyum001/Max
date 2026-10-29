@@ -124,6 +124,9 @@ inference is required.
 | Tree-sitter / regex repository intelligence | **[tested]** | `tests/test_codesearch.py`; grammar availability depends on install |
 | Speech-to-text (mock + faster-whisper adapter) | **[mock]** + **[blocked]** | adapter tested with mocks; real model download/inference not run here |
 | Browser research (URL guard + Playwright MCP) | **[tested]** guard / **[mock]** provider | SSRF and host-policy tests pass; no browser binary installed here |
+| Desktop control: 3-tier command policy, console approval gate, stdio MCP server | **[tested]** | `tests/test_desktop.py` (94 tests, against a real child process) |
+| Desktop mouse/keyboard/screenshot backend | **[blocked]** | `[desktop]` extra and a display are absent here; the missing-backend error path is asserted instead |
+| Local model server (Ollama) | **[documented]** config-only | OpenAI-compatible adapter already covers `/v1`; no code added and no endpoint in this environment to verify against |
 | Discord live connection, real model replies | **[blocked]** | no bot token, no provider credentials in this environment |
 | Voice receive (discord-ext-voice-recv) | **[not implemented]** | no voice modules exist; compatibility must be verified first |
 | TTS (Kokoro) | **[not implemented]** | no TTS module |
@@ -166,3 +169,53 @@ inference is required.
 tracing for reply/command/suppressed/ignored/error paths, throttling rules,
 mention exemption, empty-content intent diagnosis, startup summary secrecy,
 exact permission list, check-report exit semantics.
+
+---
+
+## 4. Desktop control (this revision)
+
+**Code**
+
+* `src/max/desktop/policy.py` — fixed three-tier classification
+  (`safe` / `approval` / `denied`): argv limits, shell-metacharacter and
+  path-traversal rejection, a deny list covering escalation, host alteration,
+  sandbox escape and egress, and an exact-prefix read-only allowlist. The tier
+  depends only on the argv, never on who asked.
+* `src/max/desktop/approvals.py` — fingerprint-bound approval book: pending →
+  granted/denied → one-shot consume, expiry, dedupe and a 64-record prune
+  ceiling. `term` grants are bound to SHA-256(argv + cwd); `gui` grants are
+  counted sessions.
+* `src/max/desktop/server.py` — stdio MCP server exposing
+  `execute_terminal_command`, `control_mouse_keyboard`, `read_active_screen`;
+  process-group timeout kill, 4 KB output clipping, `HOME`/`TMPDIR` pinned to
+  the workspace, `redact_argv` before anything is logged, own JSONL audit.
+* `src/max/desktop/io.py` — lazy, bounded screen/input adapters; action
+  allowlist, key-name and coordinate validation, screenshot pruning.
+* `src/max/desktop/provider.py` — `DesktopProvider` + native `desktop_*`
+  tools and the built-in `MCPServerConfig` (command-line arguments only, so
+  the child receives `PATH`/`LANG` and nothing else).
+* `src/max/core/factory.py` — registers the server only when
+  `MAX_DESKTOP_ENABLE=1` and adds the three names to the policy allowlist at
+  startup; `MAX_TOOLS_DENY` still wins.
+* `src/max/cli.py` — `max desktop status|approvals|approve|deny`, with a
+  console confirmation that refuses to prompt on a non-TTY unless `--yes`.
+* `src/max/discord/router.py` — `!max health` now reports `desktop: on|off`.
+
+**Configuration** — `MAX_DESKTOP_ENABLE`, `MAX_DESKTOP_TIMEOUT_S`,
+`MAX_DESKTOP_APPROVAL_TTL_S`, `MAX_DESKTOP_GUI_TTL_S`,
+`MAX_DESKTOP_GUI_ACTIONS`; `.env.example` gained a documented Ollama
+provider block. `config/policy.yaml` was **not** touched — it is the
+integrity-pinned *self-improvement* policy and was never the tool-permission
+policy; the permission change is the normal configuration path
+(`PermissionPolicy.allow`), which is where all other capability switches live.
+
+**Tests** — new `tests/test_desktop.py` (94 tests): tier classification,
+redaction, sandbox environment, approval lifecycle (expiry, one-shot,
+mismatch, kind crossing, counting), a real MCP subprocess (handshake, safe
+run, approval round-trip, denied command, cwd escape, missing program,
+audit trail, JSON-RPC error), CLI confirmation gating, and factory wiring
+including the disabled-by-default case.
+
+**Not verified here:** live mouse/keyboard/screenshot (no `pyautogui`, no
+display), any real local model endpoint, and any real Discord turn using a
+desktop tool. Nothing was deployed and no production resource was touched.

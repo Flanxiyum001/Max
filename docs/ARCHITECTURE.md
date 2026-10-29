@@ -28,6 +28,12 @@ src/max/
 │   └── factory.py      wire everything from configuration
 ├── skills/registry.py  Agent-Skills validation + staging/eval/promote/rollback
 ├── mcp/client.py       stdio MCP client (initialize/list/call) + tool bridging
+├── desktop/
+│   ├── policy.py       fixed 3-tier command classification (safe/approval/denied)
+│   ├── approvals.py    fingerprint-bound, one-shot console approval book
+│   ├── io.py           bounded screenshot + input adapters (lazy pyautogui)
+│   ├── server.py       stdio MCP server — the actual execution boundary
+│   └── provider.py     MAX-side adapter, native desktop_* tool registration
 ├── improve/
 │   ├── policy.py       integrity-pinned trusted policy (policy.sha256)
 │   ├── analysis.py     static rules + secret scan over diffs
@@ -205,18 +211,20 @@ router.py ──► agent loop ──► PermissionPolicy (config-owned, model-b
                  ▼                    ▼
            ToolExecutor ───► audit.jsonl (actor, action, outcome)
                  │
-   ┌─────────────┼────────────────┬──────────────────┬──────────────┐
-   ▼             ▼                ▼                  ▼              ▼
- worker_*     list_symbols/    mcp_list_tools/    browser_*     speech_status
- (category     find_symbol/    mcp_status          (category net,  (category meta,
-  exec/write/  get_symbol_     (category mcp)       denied by      mock backend
-  read/meta)   source (read)                        default)       by default)
-   │             │                │                  │
-   ▼             ▼                ▼                  ▼
- CommandPolicy  codesearch     MCPServerManager   BrowserProvider ─► URL guard
- git worktree   tree-sitter    (filtered env,     (read-only)       (scheme/host/
- + task caps    or regex       per-tool allow,                      port/private/
-                                 approval gate)                      DNS checks)
+   ┌─────────────┼────────────────┬──────────────────┬──────────────┬───────────────┐
+   ▼             ▼                ▼                  ▼              ▼               ▼
+ worker_*     list_symbols/    mcp_list_tools/    browser_*     speech_status   desktop_*
+ (category     find_symbol/    mcp_status          (category net, (category meta, (category exec,
+  exec/write/  get_symbol_     (category mcp)       denied by      mock backend    allowed only
+  read/meta)   source (read)                        default)       by default)     by MAX_DESKTOP_
+   │             │                │                  │              │             ENABLE)
+   ▼             ▼                ▼                  ▼              ▼             ▼
+ CommandPolicy  codesearch     MCPServerManager   BrowserProvider ─► URL guard  max.desktop.server
+ git worktree   tree-sitter    (filtered env,     (read-only)       (scheme/host/ 3 fixed tiers:
+ + task caps    or regex       per-tool allow,                      port/private/  safe → run,
+                                 approval gate)                      DNS checks)    approval →
+                                                                                 console grant,
+                                                                                 denied → never
 ```
 
 Boundaries:
@@ -232,11 +240,17 @@ Boundaries:
 * **Worker is not a shell.** `worker_run` takes an argv array, never a string;
   `CommandPolicy` is deny-by-default and lives outside the agent loop.
 * **Approval is two-sided.** Tools may `request_approval`; only the human CLI
-  entry point grants it.
+  entry point grants it. Desktop control repeats the pattern independently:
+  the MCP server creates the request, `max desktop approve <id>` grants it,
+  and the grant is bound to the exact argv and spent on first use.
+* **Desktop control is a separate process, not a tool.** `max.desktop.server`
+  owns its own policy (safe / approval / denied), its own audit file and a
+  child environment containing nothing but `PATH` and `LANG`. Compromising the
+  model therefore does not hand it the Discord token or the provider key.
 * **Optional backends sit behind interfaces** — `CommandPolicy` (executor),
   `MCPServerManager` (MCP transport), `BrowserProvider` (navigation),
-  `SttService` (speech) — so implementations can change without touching the
-  agent loop.
+  `SttService` (speech), `DesktopProvider` (local machine control) — so
+  implementations can change without touching the agent loop.
 
 ## 8. Supervised multi-agent orchestration (current phase)
 

@@ -93,6 +93,15 @@ class Config:
     browser_enabled: bool = False
     browser_allow_hosts: list[str] = field(default_factory=list)
 
+    # Local desktop control (screen, mouse/keyboard, terminal) through a
+    # dedicated stdio MCP server. Off by default; when on, state-changing
+    # commands still need a one-shot console approval.
+    desktop_enabled: bool = False
+    desktop_timeout_s: float = 30.0
+    desktop_approval_ttl_s: float = 600.0
+    desktop_gui_ttl_s: float = 300.0
+    desktop_gui_actions: int = 50
+
     # Speech-to-text (mock by default; faster-whisper is an optional extra).
     stt_backend: str = "mock"
     stt_model_size: str = "tiny"
@@ -172,6 +181,13 @@ class Config:
             "codesearch_enabled": self.codesearch_enabled,
             "mcp_servers_configured": bool(self.mcp_servers.strip()),
             "browser": {"enabled": self.browser_enabled, "allow_hosts": self.browser_allow_hosts},
+            "desktop": {
+                "enabled": self.desktop_enabled,
+                "timeout_s": self.desktop_timeout_s,
+                "approval_ttl_s": self.desktop_approval_ttl_s,
+                "input_session_ttl_s": self.desktop_gui_ttl_s,
+                "input_events_per_grant": self.desktop_gui_actions,
+            },
             "orchestration": {
                 "enabled": self.orch_enabled,
                 "auto_delegate": self.orch_auto,
@@ -255,6 +271,11 @@ class Config:
             mcp_servers=env("MAX_MCP_SERVERS"),
             browser_enabled=_bool(env("MAX_BROWSER_ENABLE"), False),
             browser_allow_hosts=_split(env("MAX_BROWSER_ALLOW_HOSTS")),
+            desktop_enabled=_bool(env("MAX_DESKTOP_ENABLE"), False),
+            desktop_timeout_s=max(1.0, float(env("MAX_DESKTOP_TIMEOUT_S", "30") or 30)),
+            desktop_approval_ttl_s=max(30.0, float(env("MAX_DESKTOP_APPROVAL_TTL_S", "600") or 600)),
+            desktop_gui_ttl_s=max(30.0, float(env("MAX_DESKTOP_GUI_TTL_S", "300") or 300)),
+            desktop_gui_actions=min(max(int(env("MAX_DESKTOP_GUI_ACTIONS", "50") or 50), 1), 500),
             stt_backend=env("MAX_STT_BACKEND", "mock").lower() or "mock",
             stt_model_size=env("MAX_STT_MODEL_SIZE", "tiny") or "tiny",
             stt_compute_type=env("MAX_STT_COMPUTE_TYPE", "int8") or "int8",

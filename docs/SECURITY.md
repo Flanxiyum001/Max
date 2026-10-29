@@ -145,6 +145,42 @@ unconditionally deleted in `finally`. Audit events record backend, size,
 duration and latency only — never transcript text and never audio. Model files
 are never downloaded during startup (`local_files_only=True`).
 
+### Desktop control (`src/max/desktop/`)
+
+The highest-privilege surface in MAX, so it gets the strictest boundary. The
+tools are a separate process reached over stdio MCP — MAX never runs a command
+itself.
+
+| Risk | Control | Test |
+|---|---|---|
+| Model runs arbitrary shell | argv only, never `shell=True`; shell metacharacters (`;&\|`$><\n\r\\`, `$(`) rejected outright; `sh`/`bash`/`zsh`/`xargs`/`env` are on the deny list | `test_paths_metachars_and_egress_are_denied`, `test_denied_regardless_of_approval` |
+| Escalation or host alteration | fixed `DENIED_PROGRAMS` (sudo/su/pkexec, chmod/chown/ln, systemctl, docker, crontab, kill, dd/mkfs, curl/wget/ssh/nc, pip/npm, firewall/user admin) — refused *even with an approval* | `test_denied_regardless_of_approval`, `test_denied_command_never_runs` |
+| Traversal out of the workspace | absolute paths, `~` and any `..` segment rejected in every argument including `--flag=/abs` values; `cwd` is resolved and re-checked against the root; symlink escapes are caught by `resolve()` | `test_paths_metachars_and_egress_are_denied`, `test_cwd_escape_is_rejected` |
+| Inline-code bypass | `python -c` and `python -m pip/ensurepip` are denied; a granted approval is bound to a SHA-256 of the exact argv + cwd and is **one-shot** | `test_approval_does_not_transfer_between_actions`, `test_granted_approval_cannot_run_a_different_command` |
+| Model self-authorises | the model can only create a *pending* record; granting exists solely in `max desktop approve`, a separate console process (and it refuses to prompt when stdin is not a TTY unless `--yes` is passed explicitly) | `test_cli_approve_gates_on_confirmation`, `tests/test_worker.py::test_model_cannot_grant_its_own_approval` |
+| Credential leakage into the child | the MCP manager builds the child environment with `PATH`/`LANG` only, and the desktop server adds `HOME=<workspace>` and `TMPDIR=<workspace>/.tmp` — no Discord token, API key or SSH agent can arrive | `test_sandbox_env_cannot_carry_secrets`, `test_desktop_server_config_leaks_no_environment` |
+| Secrets in audit logs | argv is written through `redact_argv`, which masks `--token=…`, `password=…` and similar shapes; log size is bounded | `test_redact_argv_masks_secret_values`, `test_server_writes_an_audit_trail` |
+| Runaway command | per-command wall clock (`MAX_DESKTOP_TIMEOUT_S`, default 30 s) enforced with a process-group kill; stdout/stderr clipped to 4 KB; ≤32 args × 500 chars | `test_command_timeout_kills_the_process_group`, `test_output_is_bounded` |
+| GUI input abuse | no approval ⇒ no event; one grant covers a bounded, counted session (`MAX_DESKTOP_GUI_ACTIONS`, default 50) over a short TTL, and pyautogui's corner failsafe is re-enabled on every load | `test_gui_grant_is_counted_and_bounded`, `test_gui_input_requires_a_session_approval` |
+| Unbounded approval spam | pending requests are deduplicated per action, expire, and are pruned above 64 records | `test_requests_for_same_action_share_one_record` |
+| Broken server kills the bot | `MCPServerManager` turns every server failure into a typed `ToolError`; the agent loop continues | `tests/test_mcp_backend.py` |
+
+Residual risks, stated plainly:
+
+1. **No kernel sandbox.** The child runs as MAX's OS user. This boundary is
+   safe against a misbehaving model, not against malicious native code — same
+   caveat as the coding worker. Container isolation remains the next step.
+2. **Approval is advisory, not cryptographic.** Whoever can reach the console
+   (or the repo's data directory) can grant. Approval separation is structural:
+   different entry point, different principal, audited — not a capability token.
+3. **`desktop_screen` captures the whole display** and writes it into the
+   workspace. That is by design (it is the only way a text model gets visual
+   context) but it means workspace contents must be treated as sensitive while
+   desktop control is on; `MAX_TOOLS_DENY=desktop_screen` revokes it.
+4. **GUI control can reach anything on screen.** Approving an input session is
+   approving *the desktop*, not one application. Grant it only for the duration
+   of a task you are watching.
+
 ## 7. Threat model — supervised multi-agent orchestration
 
 Adversary: a user who may talk to MAX, repository content, and a model that
