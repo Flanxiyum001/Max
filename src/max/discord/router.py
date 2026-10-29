@@ -14,6 +14,7 @@ Decision order (fail closed):
 
 from __future__ import annotations
 
+import re
 import time
 from collections import Counter, OrderedDict, deque
 from dataclasses import dataclass, field
@@ -42,6 +43,7 @@ class MessageView:
     bot_id: int | None = None
     reference_message_id: int | None = None
     author_roles: set[int] = field(default_factory=set)
+    guild_owner_id: int | None = None
 
 
 @dataclass
@@ -117,8 +119,6 @@ class DiscordRouter:
         self._own_messages: deque[int] = deque(maxlen=256)
         self._suppress_audited: dict[tuple[int, str], float] = {}
         self._traced: dict[tuple[int, str], float] = {}
-        # messages that arrived with no text at all — the classic symptom of
-        # the privileged Message Content Intent being off in the portal.
         self._empty_content = Counter()
         self._empty_content_total = 0
 
@@ -150,6 +150,18 @@ class DiscordRouter:
             guild=view.guild_id,
             reason=reason,
             author=view.author_id,
+        )
+
+    def is_setup_admin(self, view: MessageView) -> bool:
+        """Trusted MAX administrator or actual Discord guild owner.
+
+        Never infer ownership from a user-provided message, nickname or role
+        name; guild_owner_id comes from the Discord gateway's guild object.
+        """
+        return self.config.is_admin(view.author_id, view.author_roles) or (
+            view.guild_id is not None
+            and view.guild_owner_id is not None
+            and view.author_id == view.guild_owner_id
         )
 
     def session_id(self, view: MessageView) -> str:
@@ -207,7 +219,7 @@ class DiscordRouter:
 
     # ------------------------------------------------------------- routing
     def handle(self, view: MessageView) -> RouteResult:
-        """Route one message and guarantee an audited outcome."""
+        """Record a privacy-safe outcome for each routed message."""
         result = self._route(view)
         self._trace(view, result)
         return result
@@ -224,8 +236,6 @@ class DiscordRouter:
 
         content = (view.content or "").strip()
         if not content:
-            # Attachments, stickers and intent-less payloads land here. Count
-            # them per channel so `!max status` can point at the real cause.
             self._empty_content_total += 1
             if not view.is_dm:
                 self._empty_content[view.channel_id] += 1
@@ -278,7 +288,7 @@ class DiscordRouter:
 
         # ---- central authorization for privileged commands ----------------
         if name in ADMIN_COMMANDS:
-            is_admin = self.config.is_admin(view.author_id, view.author_roles)
+            is_admin = self.is_setup_admin(view)
             if not is_admin:
                 self.audit.record(
                     "discord_command_denied", command=name, actor=view.author_id,
@@ -318,15 +328,6 @@ class DiscordRouter:
             skills = payload.get("skills") or {}
             if skills:
                 lines.append(f"skills: {skills.get('valid', 0)} valid, {skills.get('flagged', 0)} flagged")
-            desk = (payload.get("provider") or {}).get("desktop") or {}
-            lines.append(
-                "desktop: "
-                + (
-                    "on (state-changing commands need `max desktop approve <id>`)"
-                    if desk.get("enabled")
-                    else "off"
-                )
-            )
             return RouteResult("command", replies=lines)
         if name == "status":
             allowed = (
@@ -340,18 +341,18 @@ class DiscordRouter:
                 f"this channel allowlisted: {allowed}",
                 f"dm_mode: {self.config.dm_mode}",
                 f"commands here: {'yes' if dm_ok else 'no (dm policy)'}",
-                f"caller admin: {self.config.is_admin(view.author_id, view.author_roles)}",
+                f"caller admin: {self.is_setup_admin(view)}",
                 f"provider backoff active: {self.backoff.suppressed()}",
+                f"wake mode listening: {self.store.is_awake(view.channel_id, view.guild_id) if self.config.response_mode == 'wake' and not view.is_dm else 'n/a'}",
             ]
-            diag = self.diagnostics()
-            lines.append(f"empty-content messages: {diag['empty_content_total']}")
-            if diag["message_content_intent_warning"]:
-                lines.append(f"warning: {diag['message_content_intent_warning']}")
+            lines.append(f"empty-content messages: {self._empty_content_total}")
+            if self._empty_content_total:
+                lines.append(self.diagnostics()["message_content_intent_warning"])
             return RouteResult("command", replies=lines)
         if name == "perms":
             lines = [
                 f"you: id={view.author_id} name={view.author_name}",
-                f"you are admin: {self.config.is_admin(view.author_id, view.author_roles)}",
+                f"you are admin: {self.is_setup_admin(view)}",
                 f"guild: {view.guild_id}",
                 f"channel: {view.channel_id} allowlisted="
                 f"{self.store.is_allowed(view.channel_id, view.guild_id) if not view.is_dm else 'dm'}",
@@ -470,6 +471,10 @@ class DiscordRouter:
 
     # --------------------------------------------------------- conversation
     def _handle_conversation(self, view: MessageView, content: str) -> RouteResult:
+        # Explicitly ignored channels always win over normal allowlists.
+        if not view.is_dm and view.channel_id in self.config.ignored_channels:
+            self._audit_suppressed(view, "ignored_channel")
+            return RouteResult("suppressed", reason="ignored_channel")
         # channel authorization (fail closed)
         if view.is_dm:
             if self.config.dm_mode == "off":
@@ -480,17 +485,87 @@ class DiscordRouter:
                 return RouteResult("suppressed", reason="dm_user_not_allowlisted")
             # dm_mode == "everyone" is an explicit operator opt-in
         else:
-            if view.channel_id in self.config.ignored_channels:
-                # explicit ignore list wins over any allowlist entry, and gets
-                # its own reason so silence in ignored channels is explainable
-                self._audit_suppressed(view, "ignored_channel")
-                return RouteResult("suppressed", reason="ignored_channel")
             if not self.store.is_allowed(view.channel_id, view.guild_id):
+                # A fresh installation has no allowed channels. Give only an
+                # explicitly configured administrator a setup hint;
+                # all other users still receive no reply until allowlisted.
+                if (
+                    not self.store.effective_allowlist()
+                    and view.channel_id not in self.config.ignored_channels
+                    and self.config.guild_allowed(view.guild_id)
+                    and self.is_setup_admin(view)
+                ):
+                    self.audit.record(
+                        "discord_setup_required",
+                        actor=view.author_id,
+                        channel=view.channel_id,
+                    )
+                    return RouteResult(
+                        "reply",
+                        replies=[
+                            "MAX is online, but no conversation channels are enabled. "
+                            "Send `!max allow` here to enable this channel, then say hi again."
+                        ],
+                        reason="setup_required",
+                    )
                 self._audit_suppressed(view, "channel_not_allowlisted")
                 return RouteResult("suppressed", reason="channel_not_allowlisted")
 
-        # response behaviour
+        # Explicit wake mode: no prefix or mention is needed once a human
+        # has activated this allowlisted channel. Triggers bypass provider
+        # backoff and chat cooldown so "bye max" can always turn MAX off.
         mode = self.config.response_mode
+        if mode == "wake":
+            if view.is_dm:
+                self._audit_suppressed(view, "wake_mode_dm_unsupported")
+                return RouteResult("suppressed", reason="wake_mode_dm_unsupported")
+
+            if re.fullmatch(r"hi[\s,]+max[.!?]*", content, flags=re.IGNORECASE):
+                if self.store.is_awake(view.channel_id, view.guild_id):
+                    return RouteResult(
+                        "reply", replies=["I'm already here!"], reason="already_awake"
+                    )
+                try:
+                    activated = self.store.set_awake(
+                        view.channel_id, view.guild_id, view.author_id, True
+                    )
+                except OSError as exc:
+                    self.audit.record("discord_wake_save_failed", error=type(exc).__name__)
+                    return RouteResult(
+                        "reply", replies=["I couldn't save my wake state. Check storage."],
+                        reason="wake_save_failed", error=True,
+                    )
+                if not activated:
+                    return RouteResult("suppressed", reason="wake_not_permitted")
+                return RouteResult(
+                    "reply", replies=["Hey! I'm here. Just chat normally. Say `bye max` when you're done."],
+                    reason="awakened",
+                )
+
+            if re.fullmatch(r"bye[\s,]+max[.!?]*", content, flags=re.IGNORECASE):
+                if not self.store.is_awake(view.channel_id, view.guild_id):
+                    return RouteResult("suppressed", reason="already_asleep")
+                try:
+                    deactivated = self.store.set_awake(
+                        view.channel_id, view.guild_id, view.author_id, False
+                    )
+                except OSError as exc:
+                    self.audit.record("discord_wake_save_failed", error=type(exc).__name__)
+                    return RouteResult(
+                        "reply", replies=["I couldn't save my sleep state. Check storage."],
+                        reason="wake_save_failed", error=True,
+                    )
+                if not deactivated:
+                    return RouteResult("suppressed", reason="wake_not_permitted")
+                return RouteResult(
+                    "reply", replies=["Bye! I'll stay quiet until you say `hi max`."],
+                    reason="fell_asleep",
+                )
+
+            if not self.store.is_awake(view.channel_id, view.guild_id):
+                return RouteResult("suppressed", reason="sleeping")
+
+        # response behaviour
         addressed = (
             view.bot_id in view.mentioned_ids
             if view.bot_id is not None
@@ -565,6 +640,25 @@ class DiscordRouter:
                 session_id=session,
                 error=True,
                 audit_event="discord_provider_error",
+            )
+        # Some OpenAI-compatible endpoints return HTTP 200 with an empty
+        # message. Sending zero Discord chunks looks exactly like a dead bot.
+        if not isinstance(text, str) or not text.strip():
+            self.audit.record(
+                "discord_empty_provider_reply",
+                channel=view.channel_id,
+                guild=view.guild_id,
+                session=session,
+            )
+            return RouteResult(
+                "reply",
+                replies=[
+                    "MAX received an empty AI response. Try again or run /max_status "
+                    "to check the model provider."
+                ],
+                session_id=session,
+                error=True,
+                audit_event="discord_empty_provider_reply",
             )
         self.backoff.note_success()
 
