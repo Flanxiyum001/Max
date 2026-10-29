@@ -38,7 +38,8 @@ cp .env.example .env   # then edit
 | `MAX_DISCORD_TOKEN` | bot token (env/secret store only) | empty |
 | `MAX_DISCORD_ALLOWED_CHANNELS` | comma-separated channel IDs that get no-prefix chat | empty = nowhere |
 | `MAX_DISCORD_IGNORED_CHANNELS` | never replied to (wins over everything) | empty |
-| `MAX_DISCORD_GUILD_IDS` | explicit server IDs; required for broad wake coverage | empty = any for listed channels |\n| `MAX_DISCORD_ALLOW_ALL_GUILD_CHANNELS` | opt-in wake mode for any channel in named guilds; ignored and denied channels stay blocked | `0` |
+| `MAX_DISCORD_GUILD_IDS` | explicit server IDs; required for broad wake coverage | empty = any for listed channels |
+| `MAX_DISCORD_ALLOW_ALL_GUILD_CHANNELS` | opt-in wake mode for any channel in named guilds; ignored and denied channels stay blocked | `0` |
 | `MAX_DISCORD_ADMINS` / `MAX_DISCORD_ADMIN_ROLES` | who may run `allow`/`deny`/`channels` | empty |
 | `MAX_DISCORD_DM_MODE` | `off` (default) \| `allowlist` \| `everyone` | `off` |
 | `MAX_DISCORD_DM_USERS` | DM allowlist when mode is `allowlist` | empty |
