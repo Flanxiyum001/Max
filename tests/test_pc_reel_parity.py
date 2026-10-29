@@ -76,7 +76,7 @@ def test_voice_companion_is_default_and_full_dashboard_is_retained(tmp_path, mon
 
 
 def test_companion_js_has_no_untrusted_html_or_external_code():
-    h = (Path(__file__).parents[1] / "src/max/pc/ui/companion.html").read_text()
+    h = (Path(__file__).parents[1] / "src/max/pc/ui/companion.html").read_text(encoding="utf-8")
     assert "textContent" in h
     assert "innerHTML" not in h
     assert "<script src=" not in h
