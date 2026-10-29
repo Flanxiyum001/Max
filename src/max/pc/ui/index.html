@@ -104,7 +104,7 @@ button,input{font:inherit}button{cursor:pointer}button:focus-visible,input:focus
   </div>
   <div class="messages" id="messages" role="log" aria-live="polite"></div>
   <form class="composer" id="form"><input id="prompt" type="text" maxlength="4000" autocomplete="off" spellcheck="true" aria-label="Message Max" placeholder="Enter a command, or say hi max..." /><button class="send" id="send" type="submit" title="Send message" aria-label="Send">➤</button>
-  <div class="actions"><button type="button" class="control" id="mic">◉ TALK</button><button type="button" class="control" id="speech-button">SPEECH SETUP</button><button type="button" class="control selected" id="voice">VOICE ON</button><button type="button" class="control" id="handsfree" aria-pressed="false">HANDS-FREE OFF</button><button type="button" class="control" id="phone">PHONE OFF</button><button type="button" class="control" id="wake">WAKE MAX</button><span class="hint" id="hint">MIC OFF UNTIL ENABLED • APPROVAL REQUIRED FOR PC INPUT</span></div></form>
+  <div class="actions"><button type="button" class="control" id="mic">◉ TALK</button><button type="button" class="control" id="speech-button">SPEECH SETUP</button><button type="button" class="control selected" id="voice">VOICE ON</button><button type="button" class="control" id="handsfree" aria-pressed="false">HANDS-FREE OFF</button><button type="button" class="control" id="phone">PHONE OFF</button><select class="control" id="look-app" aria-label="Application for visual observation"><option value="premiere">PREMIERE</option><option value="notepad">NOTEPAD</option><option value="vscode">VS CODE</option></select><button type="button" class="control" id="look">◉ LOOK</button><button type="button" class="control" id="wake">WAKE MAX</button><span class="hint" id="hint">MIC OFF UNTIL ENABLED • APPROVAL REQUIRED FOR PC INPUT</span></div></form>
 </section>
 </main>
 <footer class="footer"><span>MAX // LOCAL CONTROL • NO REMOTE UI SERVER</span><span>SECURE EXECUTION / APPROVAL REQUIRED</span></footer>
@@ -163,7 +163,7 @@ function setMode(mode){
  $('dot').classList.toggle('live',mode!=='STANDBY'&&mode!=='BOOTING');
 }
 function setBusy(busy){
- ui.busy=busy;$('send').disabled=busy;$('mic').disabled=busy||ui.handsfree;$('prompt').disabled=busy;
+ ui.busy=busy;$('send').disabled=busy;$('mic').disabled=busy||ui.handsfree;$('prompt').disabled=busy;$('look').disabled=busy;
  if(busy)setMode('PROCESSING');
  else setMode(ui.handsfree?'LISTENING':(ui.awake?'ONLINE':'STANDBY'));
 }
@@ -278,6 +278,26 @@ async function pollVoice(){
 setInterval(pollVoice,750);
 $('form').addEventListener('submit',e=>{e.preventDefault();const value=$('prompt').value;$('prompt').value='';submit(value);});
 $('wake').addEventListener('click',()=>submit(ui.awake?'bye max':'hi max'));
+$('look').addEventListener('click',async()=>{
+ if(ui.busy)return;
+ $('look').disabled=true;
+ try{
+  const app=$('look-app').value;
+  const p=await api('prepare_observation',app);
+  if(!p.ok){addMessage('SYSTEM',p.text,'system');return;}
+  const destination=p.local?'your local AI model':'your connected AI provider (possibly cloud-hosted)';
+  if(!window.confirm('LOOK will capture visible pixels of '+app+' and send them to '+destination+'. The image can contain sensitive information. Switch to '+app+' within 3 seconds after confirmation. No screenshot is saved. Continue?')){
+   await api('cancel_observation');
+   addMessage('SYSTEM','LOOK cancelled. No image captured.','system');return;
+  }
+  addMessage('SYSTEM','Switch to '+app+' now — capturing in 3 seconds.','system');
+  setBusy(true);
+  const reply=await api('observe_screen',p.token);
+  addMessage(reply.ok?'MAX / VISION':'SYSTEM',reply.text,reply.ok?'max':'system');
+  if(reply.state)updateState(reply.state);
+ }catch(err){addMessage('SYSTEM','LOOK failed: '+err.message,'system');}
+ finally{setBusy(false);$('look').disabled=false;}
+});
 $('voice').addEventListener('click',async()=>{
  try{updateState(await api('set_voice',!ui.voice));}
  catch(err){addMessage('SYSTEM',err.message,'system');}
