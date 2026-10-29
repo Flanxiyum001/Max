@@ -1,7 +1,7 @@
 name: Windows PC smoke
 on:
   push:
-    branches: ["main", "feat/windows-jarvis-desktop-mvp"]
+    branches: ["main", "fix/pc-cinematic-orb-real-model-setup"]
   pull_request:
     paths:
       - "src/max/pc/**"
@@ -24,10 +24,11 @@ jobs:
         run: python -m pip install -e ".[dev,pc]"
       - name: Verify native WebView dependency loads on Windows
         shell: pwsh
-        run: python -c "import webview; print('pywebview import: OK')"
+        run: |
+          python -c "import webview; print('pywebview imported')"
       - name: Headless PC unit tests
         shell: pwsh
-        run: python -m pytest tests/test_pc_control.py tests/test_pc_voice.py -q
+        run: python -m pytest tests/test_pc_control.py tests/test_pc_voice.py tests/test_pc_web_app.py -q
       - name: Validate embedded cinematic UI JavaScript
         shell: pwsh
         run: |
