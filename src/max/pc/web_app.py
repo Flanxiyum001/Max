@@ -62,6 +62,9 @@ class PCBridge:
         self._voice_on = True
         self._approvals = ApprovalQueue()
         self._listening_stop = threading.Event()
+        # A stop request does not end an in-flight sounddevice capture.
+        # Serialize lifecycle transitions so re-enable cannot spawn two mics.
+        self._listening_lifecycle_lock = threading.Lock()
         self._listening_thread = None
         self._events = deque(maxlen=32)
         self._events_lock = threading.Lock()
@@ -110,6 +113,9 @@ class PCBridge:
         if not self._busy.acquire(blocking=False):
             return {"ok": False, "message": "MAX is busy. Try again."}
         try:
+            # A previous successful probe is no longer evidence when a new
+            # explicit probe fails (401/429/network/model change).
+            self._model_verified = False
             provider = self._active_provider
             if provider is None:
                 return {"ok": False, "message": "No testable provider configured. Connect a model first."}
@@ -143,9 +149,9 @@ class PCBridge:
 
     def install_voice_model(self) -> dict:
         """Explicit one-click local model download; never triggered by listening."""
-        if self._listening_active():
+        if self._listening_thread and self._listening_thread.is_alive():
             return {
-                "ok": False, "text": "Turn HANDS-FREE OFF before installing speech.",
+                "ok": False, "text": "Wait for the microphone capture to finish before installing speech.",
                 "state": self.state(),
             }
         if not self._busy.acquire(blocking=False):
@@ -212,18 +218,29 @@ class PCBridge:
         return events
 
     def set_handsfree(self, enabled: bool) -> dict:
-        """User-initiated continuous short clips, never enabled at startup."""
-        if enabled is not True:
-            self._listening_stop.set()
-            return self.state()
-        if self._listening_active():
-            return self.state()
-        self._listening_stop.clear()
-        self._voice_error = ""
-        self._listening_thread = threading.Thread(
-            target=self._listen_loop, daemon=True, name="max-local-microphone"
-        )
-        self._listening_thread.start()
+        """Opt-in microphone with one capture worker and safe stop/restart."""
+        with self._listening_lifecycle_lock:
+            if enabled is not True:
+                self._listening_stop.set()
+            elif self._listening_thread and self._listening_thread.is_alive():
+                if self._listening_stop.is_set():
+                    # Do not clear the stop signal while the old recorder
+                    # still owns the microphone. Require another explicit
+                    # user enable after that capture thread exits.
+                    self._voice_error = (
+                        "Microphone is still stopping. Wait for capture to finish, then enable it again."
+                    )
+            elif self._busy.locked():
+                self._voice_error = (
+                    "MAX is busy with another task. Enable hands-free after it finishes."
+                )
+            else:
+                self._listening_stop.clear()
+                self._voice_error = ""
+                self._listening_thread = threading.Thread(
+                    target=self._listen_loop, daemon=True, name="max-local-microphone"
+                )
+                self._listening_thread.start()
         return self.state()
 
     def _listen_loop(self) -> None:
@@ -336,6 +353,8 @@ class PCBridge:
         if not self._busy.acquire(blocking=False):
             return {"ok": False, "text": "MAX is busy."}
         try:
+            if self._listening_thread and self._listening_thread.is_alive():
+                return {"ok": False, "text": "Hands-free microphone capture is still active or stopping. Turn it off and wait before using TALK."}
             wav = self._recorder(seconds=4.5)
             text = self._stt(wav)
             return {"ok": bool(text), "text": text or "No speech detected."}
