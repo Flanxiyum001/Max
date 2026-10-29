@@ -264,10 +264,10 @@ class PCController:
         url = re.fullmatch(r"(?:open|browse|visit)\s+(https://\S+)", text, re.I)
         if url:
             return self.launcher.open_url(url.group(1))
-        search = re.fullmatch(r"(?:search (?:the )?web for|google)\\s+(.+)", text, re.I)
+        search = re.fullmatch(r"(?:search (?:the )?web for|google)\s+(.+)", text, re.I)
         if search:
             return self.launcher.search_web(search.group(1))
-        volume = re.fullmatch(r"(?:volume\\s+(up|down)|mute(?:\\s+volume)?)", text, re.I)
+        volume = re.fullmatch(r"(?:volume\s+(up|down)|mute(?:\s+volume)?)", text, re.I)
         if volume:
             return self.launcher.volume(volume.group(1).lower() if volume.group(1) else "mute")
         if re.fullmatch(r"(?:what(?:'s| is) the time|what time is it)[?!.]?", text, re.I):
