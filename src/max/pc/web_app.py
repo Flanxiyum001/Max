@@ -64,6 +64,7 @@ class PCBridge:
         self._events_lock = threading.Lock()
         self._speaking = threading.Event()
         self._voice_error = ""
+        self._remote = None
         self.model_name = ""
         self.model_error = ""
         if config.provider not in ("mock", "test") and config.model and config.base_url:
@@ -90,6 +91,7 @@ class PCBridge:
             "voice": self._voice_on,
             "handsfree": self._listening_active(),
             "voice_error": self._voice_error,
+            "remote": bool(self._remote and self._remote.active),
             "greeting": greeting(),
             "version": "DESKTOP / V2",
         }
@@ -101,6 +103,35 @@ class PCBridge:
     def _emit(self, event: dict) -> None:
         with self._events_lock:
             self._events.append(event)
+
+    def submit_remote(self, text: str) -> dict:
+        # Remote commands travel through exactly the same wake/permission
+        # checks; approvals can only be clicked in the native PC window.
+        reply = self.submit(text)
+        if reply.get("action") != "busy":
+            self._emit({"type": "remote", "heard": text, "response": reply})
+        return reply
+
+    def remote_start(self) -> dict:
+        from .remote import PhoneCompanion
+        if self._remote and self._remote.active:
+            return {"ok": False, "message": "Phone Companion is already running."}
+        companion = PhoneCompanion(self)
+        try:
+            result = companion.start()
+        except OSError as exc:
+            return {"ok": False, "message": "Could not bind the local port (" +
+                    type(exc).__name__ + "). Nothing is exposed."}
+        self._remote = companion
+        result["state"] = self.state()
+        return result
+
+    def remote_stop(self) -> dict:
+        if self._remote:
+            self._remote.stop()
+            self._remote = None
+        return {"ok": True, "message": "Phone Companion stopped. Pairing token revoked.",
+                "state": self.state()}
 
     def poll_events(self) -> list[dict]:
         """The local UI polls events without exposing network/remote listeners."""
@@ -355,4 +386,5 @@ def run(controller: PCController, *, config: Config) -> None:
         webview.start(debug=False)
     finally:
         bridge.set_handsfree(False)
+        bridge.remote_stop()
         bridge.deny_action()
