@@ -166,9 +166,16 @@ class FakeGui:
     def getActiveWindow(self):
         return self.window
 
-    def screenshot(self):
+    def size(self):
+        return (1600, 1000)
+
+    def screenshot(self, region=None):
         self.calls += 1
-        return FakeImage()
+        assert region == (self.window.left, self.window.top, self.window.width, self.window.height)
+        image = FakeImage()
+        image.size = (region[2], region[3])
+        image.width, image.height = image.size
+        return image
 
 
 def test_foreground_capture_never_accepts_spoofed_app_title_or_wrong_program():
