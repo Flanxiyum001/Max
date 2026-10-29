@@ -116,3 +116,24 @@ def test_no_model_does_not_give_fake_success(tmp_path):
     r = pc.handle("write me an app")
     assert r.action == "chat" and not r.ok
     assert "No AI model" in r.text
+
+
+def test_browser_search_url_encodes_query_and_is_explicit(tmp_path):
+    pages = []
+    launcher = AppLauncher(platform="win32", opener=lambda url: pages.append(url) or True)
+    pc = PCController(tmp_path, launcher=launcher)
+    pc.handle("hi max")
+    result = pc.handle("search the web for best Valorant sensitivity")
+    assert result.action == "browser" and result.ok
+    assert pages == ["https://www.google.com/search?q=best+Valorant+sensitivity"]
+    assert not launcher.search_web(" " * 10).ok
+
+
+def test_volume_only_sends_whitelisted_media_key():
+    pressed = []
+    launcher = AppLauncher(platform="win32")
+    assert launcher.volume("up", press=pressed.append).ok
+    assert launcher.volume("mute", press=pressed.append).ok
+    assert pressed == ["volumeup", "volumemute"]
+    assert not launcher.volume("reformat", press=pressed.append).ok
+    assert pressed == ["volumeup", "volumemute"]
