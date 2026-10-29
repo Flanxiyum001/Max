@@ -127,17 +127,19 @@ def capture_foreground_window(application: str, *, gui=None, executable=None) ->
         raise VisionUnavailable("Move the app to the primary monitor before using LOOK.")
 
     try:
-        screenshot = gui.screenshot()
-        sw, sh = screenshot.size
+        sw, sh = gui.size()
         if left + width > sw or top + height > sh:
             raise VisionUnavailable("Move the entire app onto the primary monitor to capture it.")
-        # Recheck before allocating/encoding. If the active app changed during
-        # the snapshot, never upload pixels of that other window.
+        # Region capture limits what is even read into memory; a full
+        # desktop screenshot is never needed for this opt-in operation.
+        cropped = gui.screenshot(region=(left, top, width, height))
+        if cropped.size != (width, height):
+            raise VisionUnavailable("Window capture geometry changed. No image was sent.")
+        # Recheck before encoding. The foreground app might change mid-grab.
         current = active()
         same_hwnd = getattr(current, "_hWnd", None) == hwnd
         if not same_hwnd or str(getattr(current, "title", "") or "").casefold() != title:
             raise VisionUnavailable("The active app changed during LOOK. No image was sent.")
-        cropped = screenshot.crop((left, top, left + width, top + height))
         cropped.thumbnail((MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT))
         out = io.BytesIO()
         cropped.convert("RGB").save(out, format="JPEG", quality=65, optimize=True)
