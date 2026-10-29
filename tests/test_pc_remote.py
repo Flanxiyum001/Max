@@ -31,7 +31,11 @@ def test_phone_server_requires_token_and_cannot_confirm_pc_keyboard(tmp_path):
     cfg = Config(repo_root=tmp_path, data_dir=tmp_path)
     bridge = PCBridge(PCController(tmp_path), config=cfg, speaker=lambda _: False)
     bridge.set_voice(False)
-    remote = PhoneCompanion(bridge, port=0)
+    ticks = [0.0]
+    def next_time():
+        ticks[0] += 1.0
+        return ticks[0]
+    remote = PhoneCompanion(bridge, port=0, now=next_time)
     try:
         info = remote.start()
         assert info["ok"] and remote.active
