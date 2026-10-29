@@ -123,6 +123,15 @@ Do not enable unrestricted app/system permissions in a public Discord
 channel. Keep local and cloud agents separate. This app does not launch
 arbitrary program names or execute shell text supplied by chat.
 
+## Jarvis-like automation and phone companion
+
+See [hands-free speech, confirmed Windows actions, and private phone
+companion](PC-JARVIS-WORKFLOWS.md). The reference reel demonstrates voice
+interaction, cross-app computer tasks, and a phone-call interface. Max now
+supports opt-in local hands-free speech, reviewed window typing/shortcuts,
+and a private **phone browser** companion via Tailscale Serve. Actual
+cellular telephone calls require separate telephony integration.
+
 ## Windows test checklist
 
 1. `max pc status --json` reports Windows and optional dependencies.
