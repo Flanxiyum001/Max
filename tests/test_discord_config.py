@@ -72,3 +72,20 @@ def test_guild_allowlist(tmp_path, monkeypatch):
     assert cfg.guild_allowed(None) is False
     open_cfg = make(tmp_path, monkeypatch)
     assert open_cfg.guild_allowed(123) is True  # any guild, channels still gated
+
+def test_legacy_owner_ids_can_activate_channels(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAX_OWNER_DISCORD_IDS", "111,222")
+    cfg = make(tmp_path, monkeypatch)
+    assert cfg.is_admin(111)
+    assert cfg.is_admin(222)
+    assert not cfg.is_admin(333)
+
+    # Explicit modern admins override the legacy setting.
+    cfg = make(tmp_path, monkeypatch, MAX_DISCORD_ADMINS="333")
+    assert cfg.is_admin(333)
+    assert not cfg.is_admin(111)
+
+def test_wake_mode_env_selection(tmp_path, monkeypatch):
+    cfg = make(tmp_path, monkeypatch, MAX_DISCORD_RESPONSE_MODE="wake")
+    assert cfg.response_mode == "wake"
+    assert cfg.redacted()["token_set"] is False
