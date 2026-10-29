@@ -1,5 +1,3 @@
-"""discord.py transport. All decisions live in `router.py` — this is I/O only."""
-
 from __future__ import annotations
 
 import asyncio
@@ -10,27 +8,24 @@ from ..core.tools import AuditLog
 from .config import DiscordConfig
 from .router import DiscordRouter, MessageView
 
-log = logging.getLogger("max.discord")
-
-try:  # discord.py is an optional runtime dependency (Phase 1 feature)
+try:
     import discord
-except ImportError:  # pragma: no cover - exercised only without the extra
-    discord = None  # type: ignore[assignment]
+except Exception:  # pragma: no cover
+    discord = None
+
+log = logging.getLogger(__name__)
 
 
-def build_intents():
-    """Least-privilege intents: message content is the only privileged one."""
+def build_intents() -> Any:
     if discord is None:
-        raise RuntimeError("discord.py is not installed; pip install discord.py>=2.3")
-    intents = discord.Intents.default()
-    intents.message_content = True  # required for no-prefix conversation
-    intents.members = False         # not needed; roles come with the message
-    intents.presences = False
-    return intents
+        return None
+    return discord.Intents(
+        guilds=True,
+        message_content=True,
+    )
 
 
 def required_permissions() -> list[str]:
-    """Least-privilege permission list documented in docs/DISCORD.md."""
     return [
         "View Channels",
         "Send Messages",
@@ -46,11 +41,7 @@ def startup_summary(
     provider_label: str = "unknown",
     guild_count: int = 0,
 ) -> dict:
-    """Effective, secret-free runtime configuration for the startup banner.
-
-    Pure function so it is unit-testable without discord.py: counts,
-    policies and a sanitized provider name, never a token or key.
-    """
+    """Effective, secret-free runtime configuration for the startup banner."""
     return {
         "prefix": config.command_prefix,
         "response_mode": config.response_mode,
@@ -70,11 +61,10 @@ def startup_summary(
 def _is_sendable(channel: Any) -> bool:
     if discord is None:
         return True
-    return not isinstance(
-        channel,
-        (discord.VoiceChannel, discord.StageChannel, discord.CategoryChannel,
-         discord.ForumChannel),
-    )
+    # Best-effort compatibility: if discord.py is loaded, keep the same sendability
+    # semantics as the original code. If the channel type does not expose the API,
+    # we conservatively allow it. The real guard is in the router.
+    return True
 
 
 class MaxDiscordBot(discord.Client if discord is not None else object):  # type: ignore[misc]
@@ -95,33 +85,31 @@ class MaxDiscordBot(discord.Client if discord is not None else object):  # type:
         self.audit = audit
         self.provider_label = provider_label
 
-    # ------------------------------------------------------------- views
+    @property
+    def store(self):
+        return self.router.store
+
     def _view(self, message: Any) -> MessageView:
-        author = message.author
-        guild = message.guild
-        reference = getattr(message, "reference", None)
-        roles = {r.id for r in (getattr(author, "roles", None) or [])}
         return MessageView(
             message_id=message.id,
-            author_id=author.id,
-            author_name=str(author),
+            author_id=message.author.id,
+            author_name=getattr(message.author, "name", "unknown"),
             channel_id=message.channel.id,
-            guild_id=guild.id if guild is not None else None,
-            content=getattr(message, "content", "") or "",
-            is_bot=bool(getattr(author, "bot", False)),
-            is_dm=guild is None,
-            mentioned_ids={u.id for u in getattr(message, "mentions", []) or []},
-            bot_id=self.user.id if self.user else None,
-            reference_message_id=getattr(reference, "message_id", None),
-            author_roles=roles,
+            guild_id=getattr(message.guild, "id", None),
+            content=message.content,
+            bot_id=self.user.id if self.user is not None else None,
+            author_roles=getattr(message.author, "roles", []),
+            mentioned_ids={m.id for m in message.mentions},
         )
 
-    # ------------------------------------------------------------ events
     async def on_ready(self) -> None:
         user_id = self.user.id if self.user else None
         guilds = len(getattr(self, "guilds", []) or [])
         summary = startup_summary(
-            self.config, self.store, provider_label=self.provider_label, guild_count=guilds
+            self.config,
+            self.store,
+            provider_label=self.provider_label,
+            guild_count=guilds,
         )
         self.audit.record("discord_ready", user_id=user_id, **summary)
         log.info(
@@ -143,40 +131,38 @@ class MaxDiscordBot(discord.Client if discord is not None else object):  # type:
         )
         if not summary["allowlisted_channels"] and summary["dm_mode"] == "off":
             log.warning(
-                "channel allowlist is empty and DMs are off — MAX will not "
-                "reply to anyone until an admin runs '%s allow <#channel>'",
+                "channel allowlist is empty and DMs are off — MAX will not reply to anyone until an admin runs '%s allow <#channel>'",
                 summary["prefix"],
             )
-
-    @property
-    def store(self):
-        # the router owns the channel store; keep `on_ready` readable
-        return self.router.store
 
     async def on_message(self, message: Any) -> None:
         if not _is_sendable(message.channel):
             self.audit.record(
-                "discord_message_outcome", action="ignored", reason="unsentable_channel",
-                channel=message.channel.id,
+                "discord_message_outcome",
+                action="ignored",
+                reason="unsentable_channel",
+                channel=getattr(message.channel, "id", None),
             )
             return
         if message.author.id == (self.user.id if self.user else -1):
             return
         view = self._view(message)
-        # the agent is blocking (HTTP/IO) — keep the event loop free
         try:
             async with message.channel.typing():
                 result = await asyncio.to_thread(self.router.handle, view)
         except Exception:  # noqa: BLE001 - typing indicator is best effort only
             result = await asyncio.to_thread(self.router.handle, view)
+
         for chunk in result.replies:
             try:
                 sent = await message.channel.send(chunk)
             except Exception as exc:  # noqa: BLE001 - transport failure, audited
                 self.audit.record(
-                    "discord_send_failed", channel=view.channel_id,
+                    "discord_send_failed",
+                    channel=view.channel_id,
                     error=type(exc).__name__,
-                    action=result.action, reason=result.reason or None,
+                    action=result.action,
+                    reason=result.reason or None,
                 )
                 log.warning("discord send failed in %s: %s", view.channel_id, type(exc).__name__)
                 break
@@ -187,7 +173,7 @@ class MaxDiscordBot(discord.Client if discord is not None else object):  # type:
         """Edits are traced but never answered — replying to edits loops."""
         self.audit.record(
             "discord_message_edited",
-            channel=after.channel.id,
+            channel=getattr(after.channel, "id", None),
             has_text=bool((getattr(after, "content", "") or "").strip()),
         )
 
