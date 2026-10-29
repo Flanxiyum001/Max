@@ -569,7 +569,8 @@ class PCBridge:
             self._busy.release()
 
 
-def run(controller: PCController, *, config: Config, dashboard: bool = False) -> None:
+def run(controller: PCController, *, config: Config, dashboard: bool = False,
+        handsfree: bool = False) -> None:
     """Run a compact voice-first companion; legacy holographic UI is optional.
 
     The video reference shows normal Windows apps, not a large Jarvis UI.
@@ -599,7 +600,12 @@ def run(controller: PCController, *, config: Config, dashboard: bool = False) ->
             on_top=False,
         )
     try:
-        webview.start(debug=False)
+        # --handsfree is a deliberate local startup opt-in. No microphone
+        # capture occurs on an ordinary launch.
+        if handsfree:
+            webview.start(lambda: bridge.set_handsfree(True), debug=False)
+        else:
+            webview.start(debug=False)
     finally:
         bridge.set_handsfree(False)
         bridge.remote_stop()
