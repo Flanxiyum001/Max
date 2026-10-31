@@ -157,6 +157,48 @@ For fully local inference you can use an OpenAI-compatible local model server
 such as Ollama (`http://127.0.0.1:11434/v1`) **for the model only**.
 No agent code or credentials must be copied to an unreviewed external server.
 
+## Permanent MAX voice — ElevenLabs
+
+**Default ElevenLabs voice ID:** `b5RPB35vTODb3BEmR3Fc`
+([voice selection](https://elevenlabs.io/voices/b5RPB35vTODb3BEmR3Fc)).
+
+Max now selects this voice **permanently in source code** on every Windows
+desktop start, instead of trying to choose a Windows SAPI male voice.
+It uses the ElevenLabs API with low-latency `eleven_flash_v2_5` and
+16-bit PCM audio, played via native Windows audio. ElevenLabs generates
+audio in the cloud: **there are no downloadable voice model weights**.
+
+For audio to work, you must supply an ElevenLabs API key to your own PC.
+In the root of your local clone, create or edit the ignored `.env.local`
+file with:
+
+```dotenv
+ELEVENLABS_API_KEY=YOUR_ELEVENLABS_API_KEY
+```
+
+Then restart Max. Open **MAX VOICE → TEST SELECTED VOICE**. This sends
+one short text-to-speech request (uses ElevenLabs credits), plays the audio,
+and reports whether playback succeeded. API authentication/voice restrictions,
+quota errors, and Windows playback failures are shown in the app, not swallowed.
+Never paste the API key into Discord, chat, PR comments or committed files.
+
+**Voice-library access is account-dependent.** Some shared voices require
+adding the voice via its ElevenLabs page / My Voices first and may require
+a paid tier. If your account cannot access the voice, Max will display a
+clear error rather than pretending a different voice is the requested one.
+
+The ElevenLabs voice selection survives restarting Max and new installations
+of the repository. Your private key stays in `.env.local` (gitignored)
+or your own environment and is **not** committed to GitHub, stored in Max's
+voice configuration, or added to Railway. The existing free LLM / Ollama
+provider remains entirely separate from the paid ElevenLabs TTS service.
+It also does not change your Whisper microphone transcription settings.
+
+To explicitly opt back into the former Windows system voice instead, set
+`MAX_PC_TTS_BACKEND=windows` in `.env.local` and restart. By default,
+no fallback voice is silently substituted when ElevenLabs credentials,
+access, connection or credits are missing.
+
 ## Voice quality and API reliability
 
 The ChatGPT Live conversation interface uses dedicated streaming audio
