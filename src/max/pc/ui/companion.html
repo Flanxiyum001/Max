@@ -10,7 +10,7 @@ button:disabled{opacity:.45;cursor:not-allowed}button:focus-visible,input:focus-
 form{display:flex;gap:8px}input{width:100%;min-width:0;background:#23252c;border:1px solid #514a47;border-radius:7px;color:#fff;padding:11px}form button{background:#dda860;border:0;border-radius:7px;color:#201409;padding:0 17px;font-weight:800}
 .note{margin:7px 0 0;text-align:center;color:#88858a;font-size:10px}
 </style></head><body><div class="shell"><header><span class="mark">M</span><div class="head"><h1>MAX / Companion</h1><small id="model">Checking AI model…</small></div><span class="state" id="state">SLEEPING</span></header>
-<div class="tools"><button id="handsfree">MIC OFF</button><button id="talk">TALK</button><button id="wake">WAKE</button><button id="connect">CONNECT AI</button><button id="speech">SPEECH SETUP</button></div>
+<div class="tools"><button id="handsfree">MIC OFF</button><button id="talk">TALK</button><button id="wake">WAKE</button><button id="connect">CONNECT AI</button><button id="speech">SPEECH SETUP</button><button id="tts-open">MAX VOICE</button></div>
 <div id="messages" class="messages" role="log" aria-live="polite"></div>
 <div class="bottom">
 <div class="panel" id="approval"><strong>PC ACTION NEEDS APPROVAL</strong><p id="preview"></p><button id="approve">CONFIRM ACTION</button><button id="deny">CANCEL</button></div>
@@ -21,6 +21,11 @@ form{display:flex;gap:8px}input{width:100%;min-width:0;background:#23252c;border
 <input id="api-model" type="text" maxlength="128" autocomplete="off" placeholder="Exact model ID" aria-label="Model ID">
 <input id="api-key" type="password" maxlength="4096" autocomplete="off" placeholder="API key (not stored)" aria-label="API key">
 <button id="api-connect">CONFIGURE PROVIDER</button><p>Configuration alone does not prove connectivity. TEST AI sends a small real request and may use provider credits.</p></div>
+<div class="panel" id="tts-panel"><strong>MAX'S PERMANENT ELEVENLABS VOICE</strong>
+<p id="tts-status">Checking permanent ElevenLabs voice configuration...</p>
+<button type="button" id="test-voice">TEST SELECTED VOICE</button>
+<p>Voice ID: b5RPB35vTODb3BEmR3Fc. ElevenLabs TTS requires a separate API key and may use paid voice credits. Put ELEVENLABS_API_KEY in this PC's private .env.local, then restart Max. No Windows voice is silently substituted.</p>
+</div>
 <div class="panel" id="speech-panel"><strong>SPEECH RECOGNITION — ENGLISH</strong><p id="speech-status"></p><button id="install">INSTALL WHISPER MODEL</button></div>
 <form id="form"><input id="prompt" maxlength="4000" placeholder="Say hi max, or enter a command…" aria-label="Message Max"><button id="send">SEND</button></form>
 <div class="note">Speak naturally: “Max, what’s wrong in Premiere?” · Say “Max confirm action” for changes</div></div></div>
@@ -28,7 +33,15 @@ form{display:flex;gap:8px}input{width:100%;min-width:0;background:#23252c;border
 (()=>{'use strict';const el=id=>document.getElementById(id),ui={awake:false,handsfree:false,busy:false,pending:null,initialized:false};
 function add(by,text,kind=''){let item=document.createElement('article');item.className='event '+kind;let a=document.createElement('div');a.className='who';a.textContent=by;let b=document.createElement('div');b.className='message';b.textContent=String(text||'');item.append(a,b);el('messages').appendChild(item);el('messages').scrollTop=el('messages').scrollHeight}
 async function api(name,...args){if(!window.pywebview?.api?.[name])throw Error('Native MAX bridge unavailable');return await window.pywebview.api[name](...args)}
-function state(s){if(!s)return;ui.awake=!!s.awake;ui.handsfree=!!s.handsfree;el('model').textContent=s.ready?'AI: '+s.model+(s.model_verified?' ✓ verified':' · test needed'):'AI disconnected · connect model';el('state').textContent=ui.handsfree?'● LISTENING':ui.awake?'● READY':'SLEEPING';el('handsfree').textContent=ui.handsfree?'● MIC ON':'MIC OFF';el('handsfree').classList.toggle('on',ui.handsfree);el('talk').disabled=ui.handsfree||ui.busy;el('wake').textContent=ui.awake?'SLEEP':'WAKE';if(s.speech){el('speech-status').textContent=s.speech.backend==='cloud'?
+function state(s){if(!s)return;ui.awake=!!s.awake;ui.handsfree=!!s.handsfree;
+if(s.tts){
+ el('tts-status').textContent=s.tts.backend==='elevenlabs'?
+   ('Selected permanently: ElevenLabs voice '+s.tts.voice_id+
+   (s.tts.key_configured?' · key configured. Test voice to verify account access.':
+     ' · API key missing. Add ELEVENLABS_API_KEY to .env.local and restart.')+
+   (s.tts_error?' · ERROR: '+s.tts_error:'')):
+   'Windows voice explicitly selected (MAX_PC_TTS_BACKEND=windows).';
+}el('model').textContent=s.ready?'AI: '+s.model+(s.model_verified?' ✓ verified':' · test needed'):'AI disconnected · connect model';el('state').textContent=ui.handsfree?'● LISTENING':ui.awake?'● READY':'SLEEPING';el('handsfree').textContent=ui.handsfree?'● MIC ON':'MIC OFF';el('handsfree').classList.toggle('on',ui.handsfree);el('talk').disabled=ui.handsfree||ui.busy;el('wake').textContent=ui.awake?'SLEEP':'WAKE';if(s.speech){el('speech-status').textContent=s.speech.backend==='cloud'?
   (s.speech.backend_installed?'Cloud gpt-transcribe selected; audio goes to OpenAI when you use voice.':'Cloud speech selected, OPENAI_API_KEY missing.'):
   s.speech.cached?'Local Whisper '+s.speech.model+' ready; language '+s.speech.language:
   s.speech.backend_installed?'Whisper '+s.speech.model+' not cached. Install below; English locked by default.':
@@ -42,6 +55,18 @@ el('handsfree').onclick=async()=>{let on=!ui.handsfree;if(on&&!confirm('Enable m
 el('talk').onclick=async()=>{busy(true);try{let r=await api('record');if(r.ok){busy(false);await send(r.text)}else{add('SYSTEM',r.text,'system');el('speech-panel').classList.add('show')}}catch(e){add('SYSTEM',e.message,'system')}finally{busy(false)}};
 el('approve').onclick=async()=>{if(!ui.pending)return;let token=ui.pending.id;ui.pending=null;el('approval').classList.remove('show');try{let r=await api('approve_action',token);add('MAX / PC',r.text,r.ok?'':'system')}catch(e){add('SYSTEM',e.message,'system')}};
 el('deny').onclick=async()=>{ui.pending=null;el('approval').classList.remove('show');await api('deny_action');add('SYSTEM','Cancelled.','system')};
+el('tts-open').onclick=()=>el('tts-panel').classList.toggle('show');
+el('test-voice').onclick=async()=>{
+ if(!window.confirm('Play a short test with the selected ElevenLabs voice? This may use ElevenLabs credits.'))return;
+ el('test-voice').disabled=true;
+ try{
+  const result=await api('test_voice');
+  state(result.state);
+  add('SYSTEM',result.message,'system');
+  el('tts-status').textContent=result.message;
+ }catch(e){add('SYSTEM','Voice test unavailable: '+e.message,'system')}
+ finally{el('test-voice').disabled=false}
+};
 el('connect').onclick=()=>el('model-panel').classList.toggle('show');
 el('api-connect').onclick=async()=>{
   let url=el('api-url').value.trim(),model=el('api-model').value.trim(),key=el('api-key').value;
@@ -66,7 +91,7 @@ el('test-ai').onclick=async()=>{
   finally{el('test-ai').disabled=false}
 };el('ollama').onclick=async()=>{el('ollama').disabled=true;try{let r=await api('connect_ollama','');el('model-status').textContent=r.message;state(r.state);add('SYSTEM',r.message,'system')}catch(e){add('SYSTEM',e.message,'system')}finally{el('ollama').disabled=false}};
 el('speech').onclick=()=>el('speech-panel').classList.toggle('show');el('install').onclick=async()=>{if(!confirm('Download a local Faster Whisper speech model from Hugging Face?'))return;el('install').disabled=true;try{let r=await api('install_voice_model');add('SYSTEM',r.text,'system');state(r.state)}catch(e){add('SYSTEM',e.message,'system')}finally{el('install').disabled=false}};
-async function poll(){try{for(let ev of await api('poll_events')){if(ev.type==='error')add('SYSTEM',ev.text,'system');if(ev.type==='speech'||ev.type==='remote'){add(ev.type==='remote'?'PHONE':'VOICE',ev.heard);add('MAX',ev.response?.text||'');if(ev.response?.approval)showApproval(ev.response.approval);state(ev.response?.state)}}}catch(e){}}
+async function poll(){try{for(let ev of await api('poll_events')){if(ev.type==='error'){add('SYSTEM',ev.text,'system');if(ev.text.includes('ElevenLabs')||ev.text.includes('Voice playback')){el('tts-panel').classList.add('show');el('tts-status').textContent=ev.text;}}if(ev.type==='speech'||ev.type==='remote'){add(ev.type==='remote'?'PHONE':'VOICE',ev.heard);add('MAX',ev.response?.text||'');if(ev.response?.approval)showApproval(ev.response.approval);state(ev.response?.state)}}}catch(e){}}
 async function init(){if(ui.initialized)return;try{let s=await api('state');ui.initialized=true;state(s);add('MAX','Ready in the background. Say hi max and speak naturally when hands-free listening is enabled.');setInterval(poll,800)}catch(e){add('SYSTEM','Desktop backend unavailable: '+e.message,'system')}}window.addEventListener('pywebviewready',init);setTimeout(init,2500);
 })();
 </script></body></html>
