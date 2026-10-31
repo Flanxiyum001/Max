@@ -35,6 +35,7 @@ function add(by,text,kind=''){let item=document.createElement('article');item.cl
 async function api(name,...args){if(!window.pywebview?.api?.[name])throw Error('Native MAX bridge unavailable');return await window.pywebview.api[name](...args)}
 function state(s){if(!s)return;ui.awake=!!s.awake;ui.handsfree=!!s.handsfree;
 if(s.tts){
+ if(s.tts.backend==='elevenlabs'&&!s.tts.key_configured)el('tts-panel').classList.add('show');
  el('tts-status').textContent=s.tts.backend==='elevenlabs'?
    ('Selected permanently: ElevenLabs voice '+s.tts.voice_id+
    (s.tts.key_configured?' · key configured. Test voice to verify account access.':
