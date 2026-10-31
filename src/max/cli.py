@@ -596,11 +596,13 @@ def cmd_pc(args) -> int:
     import platform
     from .pc import PCController
     if args.pc_cmd == "status":
+        from .pc.elevenlabs_tts import status as voice_status
         c = Config.from_env()
         _print({
             "platform": platform.system(),
             "windows_ready": sys.platform == "win32",
             "voice_tts_installed": importlib.util.find_spec("pyttsx3") is not None,
+            "tts": voice_status(),
             "microphone_installed": importlib.util.find_spec("sounddevice") is not None,
             "stt_installed": importlib.util.find_spec("faster_whisper") is not None,
             "provider": c.provider,

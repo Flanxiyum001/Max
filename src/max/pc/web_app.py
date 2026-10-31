@@ -27,7 +27,8 @@ from .control import PCController, greeting, _WAKE_RE
 from .automation import ApprovalQueue, parse_action
 from .vision import WINDOW_TITLES, VisionUnavailable, capture_foreground_window
 from .voice_agent import VoiceAgent
-from .voice import mic_wav, say, transcribe, install_speech_model, speech_model_status, speech_failure
+from .voice import mic_wav, speak_max, transcribe, install_speech_model, speech_model_status, speech_failure
+from .elevenlabs_tts import status as tts_status, ElevenLabsSpeechError
 
 _OLLAMA = "http://127.0.0.1:11434"
 
@@ -53,7 +54,7 @@ def detect_ollama(*, opener=None) -> list[str]:
 
 class PCBridge:
     def __init__(self, controller: PCController, *, config: Config, builder=build_agent,
-                 scanner=detect_ollama, speaker=say, recorder=mic_wav, stt=transcribe,
+                 scanner=detect_ollama, speaker=speak_max, recorder=mic_wav, stt=transcribe,
                  speech_installer=install_speech_model, speech_inspector=speech_model_status,
                  vision_capture=capture_foreground_window, vision_wait=time.sleep):
         self.controller = controller
@@ -61,6 +62,9 @@ class PCBridge:
         self._builder = builder
         self._scanner = scanner
         self._speaker = speaker
+        self._speaker_custom = speaker is not speak_max
+        self._tts_error = ""
+        self._tts_lock = threading.Lock()
         self._recorder = recorder
         self._stt = stt
         self._speech_installer = speech_installer
@@ -116,6 +120,8 @@ class PCBridge:
             "model_error": self.model_error,
             "vision_local": urlsplit(self.config.base_url).hostname in {"127.0.0.1", "localhost"},
             "voice": self._voice_on,
+            "tts": tts_status(),
+            "tts_error": self._tts_error,
             "handsfree": self._listening_active(),
             "voice_error": self._voice_error,
             "speech": self._speech_inspector(),
@@ -390,7 +396,7 @@ class PCBridge:
             intent = self._voice_agent.handle(stripped, source=source)
             if intent is not None:
                 response = {**intent, "state": self.state()}
-                if self._voice_on and source != "remote":
+                if self._can_speak() and source != "remote":
                     self._speaking.set()
                     threading.Thread(
                         target=self._speak_safely,
@@ -416,7 +422,7 @@ class PCBridge:
                 "text": result.text, "ok": result.ok,
                 "action": result.action, "state": self.state(),
             }
-            if self._voice_on and result.action not in {"sleeping", "busy", "setup", "approval"}:
+            if self._can_speak() and result.action not in {"sleeping", "busy", "setup", "approval"}:
                 # Block microphone capture before the speech thread starts,
                 # avoiding MAX transcribing its own synthesized reply.
                 self._speaking.set()
@@ -433,14 +439,60 @@ class PCBridge:
         finally:
             self._busy.release()
 
-    def _speak_safely(self, text: str) -> None:
-        self._speaking.set()
+    def _can_speak(self) -> bool:
+        if not self._voice_on or self._tts_error:
+            return False
+        if self._speaker_custom:
+            return True
+        chosen = tts_status()
+        # Missing key must remain visible, never impersonate the requested
+        # ElevenLabs voice with a fallback or spawn expensive failed requests.
+        return chosen["backend"] == "windows" or chosen["key_configured"]
+
+    def test_voice(self) -> dict:
+        """Human-initiated test of the selected permanent voice.
+
+        This may consume ElevenLabs credits; the desktop UI must ask consent.
+        """
+        if not self._tts_lock.acquire(blocking=False):
+            return {"ok": False, "message": "MAX is already speaking.", "state": self.state()}
         try:
-            self._speaker(text)
-        except Exception:
-            pass
+            self._speaking.set()
+            self._tts_error = ""
+            if not self._speaker_custom and not tts_status()["key_configured"]:
+                raise ElevenLabsSpeechError(
+                    "ElevenLabs is selected permanently, but ELEVENLABS_API_KEY "
+                    "is missing from this PC's private environment."
+                )
+            result = self._speaker("Hello. I'm Max, your personal assistant.")
+            if not result:
+                raise ElevenLabsSpeechError("No test audio was produced.")
+            return {"ok": True, "message": "Voice playback completed using the selected speech provider.",
+                    "state": self.state()}
+        except ElevenLabsSpeechError as exc:
+            self._tts_error = str(exc)
+            return {"ok": False, "message": self._tts_error, "state": self.state()}
+        except Exception as exc:
+            self._tts_error = "Voice test failed (" + type(exc).__name__ + ")."
+            return {"ok": False, "message": self._tts_error, "state": self.state()}
         finally:
             self._speaking.clear()
+            self._tts_lock.release()
+
+    def _speak_safely(self, text: str) -> None:
+        with self._tts_lock:
+            self._speaking.set()
+            try:
+                self._speaker(text)
+                self._tts_error = ""
+            except ElevenLabsSpeechError as exc:
+                self._tts_error = str(exc)
+                self._emit({"type": "error", "text": self._tts_error})
+            except Exception as exc:
+                self._tts_error = "Voice playback failed (" + type(exc).__name__ + ")."
+                self._emit({"type": "error", "text": self._tts_error})
+            finally:
+                self._speaking.clear()
 
     def approve_action(self, token: str) -> dict:
         if not self._busy.acquire(blocking=False):
