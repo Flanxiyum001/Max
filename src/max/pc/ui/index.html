@@ -135,6 +135,7 @@ function updateState(state){
  else $('setup-msg').textContent='Text commands can work offline. Real AI replies require an installed Ollama model or a configured OpenAI-compatible provider in .env.';
  ui.voice=!!state.voice;
  if(state.tts){
+   if(state.tts.backend==='elevenlabs'&&!state.tts.key_configured)$('tts-panel').classList.add('on');
    $('tts-status').textContent=state.tts.backend==='elevenlabs'?
      'Permanent voice '+state.tts.voice_id+
        (state.tts.key_configured?' — API key configured; test voice to verify access.':
