@@ -44,6 +44,22 @@ def say(text: str, *, engine_factory=None) -> bool:
         engine.stop()
 
 
+def speak_max(text: str) -> bool:
+    """Permanent ElevenLabs voice by default; Windows TTS only by opt-in.
+
+    Never silently substitute Windows voices when ElevenLabs is unavailable.
+    ElevenLabs is a cloud TTS API and uses its own account credits.
+    """
+    from .elevenlabs_tts import ElevenLabsSpeechError, speak, status
+
+    backend = status()["backend"]
+    if backend == "windows":
+        if say(text):
+            return True
+        raise ElevenLabsSpeechError("Windows TTS unavailable. Check voice installation.")
+    return speak(text)
+
+
 def mic_wav(*, seconds: float = 4.5, sample_rate: int = 16000, recorder=None) -> bytes:
     """Capture only on explicit user interaction; 10-second hard upper bound."""
     if not 0.1 <= seconds <= 10:
