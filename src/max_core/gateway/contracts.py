@@ -8,17 +8,17 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
 
-class Dialect(str, Enum):
+class Dialect(StrEnum):
     OPENAI_CHAT = "openai_chat"
     ANTHROPIC_MESSAGES = "anthropic_messages"
 
 
-class Privacy(str, Enum):
+class Privacy(StrEnum):
     PUBLIC = "public"
     INTERNAL = "internal"
     CONFIDENTIAL = "confidential"
