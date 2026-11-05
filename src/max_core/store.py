@@ -303,9 +303,7 @@ class TaskStore:
                 _event(session, task, "task.needs_reconciliation")
             return len(tasks)
 
-    def acknowledge_stopped_cancel(
-        self, owner_id: str, task_id: str, worker_id: str
-    ) -> TaskView:
+    def acknowledge_stopped_cancel(self, owner_id: str, task_id: str, worker_id: str) -> TaskView:
         """Trusted worker only: finish cancellation AFTER its local work has stopped.
 
         A client/model cannot call this method through the HTTP API. Expired or
@@ -326,9 +324,7 @@ class TaskStore:
             session.flush()
             return TaskView.from_record(task)
 
-    def quarantine_claim(
-        self, owner_id: str, task_id: str, worker_id: str
-    ) -> TaskView:
+    def quarantine_claim(self, owner_id: str, task_id: str, worker_id: str) -> TaskView:
         """Trusted worker: uncertain execution => reconciliation, NEVER replay.
 
         Only the current unexpired lease owner may quarantine running/cancelling
