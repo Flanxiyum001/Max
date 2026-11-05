@@ -25,3 +25,9 @@ Never store OTPs, UPI PINs, card CVVs, passwords or tokens in assistant memory. 
 
 ## Operational gates
 Mandatory tests: permission denial, replay, prompt injection, secret redaction, isolated execution, task cancellation, recovery budgets, backup restore, and safe rollback. No claim of production readiness before evidence exists.
+
+## Expanded Phase 0B threat review
+
+[THREAT_MODEL.md](THREAT_MODEL.md) records additional spoofing, replay, browser SSRF, memory poisoning, device enrollment, supply chain, backup and privacy scenarios. [DATA_AND_STORAGE.md](DATA_AND_STORAGE.md) defines owner-controlled retention, encrypted vault separation and backup/restore gates. [TELEPHONY_ARCHITECTURE.md](TELEPHONY_ARCHITECTURE.md) covers signed webhooks, caller spoofing and India regional restrictions. These are proposed controls and future acceptance tests, **not** evidence of security test execution.
+
+The approval decision is cryptographically bound to owner session, task, typed parameters/destination, action digest, expiry and single-use nonce; model or voice text alone cannot mint approval. Independent policy must be tested on **every** MCP/native/browser/node adapter. Manual owner review and merge for executable/security policy changes remain mandatory.
