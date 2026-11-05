@@ -21,3 +21,9 @@ The following exact paths were probed on `max` and returned NOT_FOUND: `pyprojec
 3. Confirm whether any MAX runtime from older branches belongs to this repository or another. Avoid overwriting it.
 4. Resolve FreeLLMAPI description conflict between owner assignment and existing requirements.
 5. Keep changes documentation-only; no Discord bot, database, deployment, or account changes.
+
+## Current MAX tree — additive post-PR #7 audit (2026-11-05)
+
+**Do not use the 0B historical missing-code probes above as present-tense facts.** The GitHub recursive tree of default branch `max` at commit `72f67b1ec6a737c813f4ca633457a9ca39223b94` returned **79 tracked blobs**, not a candidate-path search. Current tracked runtime includes `pyproject.toml`, `src/max_core/` with API/auth/gateway/task store/Trust/verifier, two Alembic revisions, `.github/workflows/core-ci.yml`, and nine test modules. Local untracked/staged state is **not visible through GitHub**. This audit does not prove a running app, deployed database, owner PC/device test, real provider, or production service.
+
+[Current implementation and blockers](PHASE0_AUDIT.md); [owner requirement matrix](REQUIREMENT_TRACEABILITY.md). The original snapshot above remains useful only as historical baseline evidence.

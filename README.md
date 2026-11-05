@@ -6,7 +6,7 @@ MAX is my long-term project to build a personal, voice-first AI assistant that w
 
 I'm designing MAX as **my own assistant and software stack**: its identity, experience, orchestration, memory, permissions, task execution, and skill system are defined by this project. I may use established libraries or external integrations where they are genuinely necessary, but they are implementation details—not MAX's identity.
 
-> **Status:** Foundation and architecture in progress. The features below are goals, not claims of a finished application.
+> **Status (2026-11-05):** Foundation and architecture documents are merged, along with **four local-development implementation milestones** (Core, durable tasks, dual-format Gateway, and limited Trust/verification). MAX is **not yet an autonomous assistant, connected AI model, desktop/mobile client or production service**. Features below remain goals unless explicitly marked implemented.
 
 ## What I want MAX to do
 
@@ -43,17 +43,20 @@ I want MAX to be dependable before it becomes complicated. My development approa
 
 MAX will never be allowed to grant itself permissions, treat external content as trusted instructions, or report an action as complete without evidence. Sensitive operations require explicit confirmation. Payment authentication secrets do not belong in assistant memory.
 
-## Current implementation milestone — local MAX Core bootstrap
+## Current implementation — merged milestones #1–#4
 
-I now have a **small local development API** under `src/max_core/`, with fail-closed configuration, a temporary owner bearer token, minimal health routes, allowlisted JSON request logs, and tests. I can run it locally following [my setup guide](docs/CORE_BOOTSTRAP.md). This is **not** yet a working autonomous assistant, remote web service, memory system, or model gateway.
+I have an **internal local-development Python/FastAPI Core**, not a publicly hosted assistant. The local CLI binds to `127.0.0.1` and uses a strong but **temporary single-owner bootstrap token**, which is **not adequate for remote or high-risk authorization**.
 
-I deliberately keep this development listener bound to `127.0.0.1`. I won't deploy it publicly or connect personal accounts until a stronger authentication and security milestone has been reviewed.
+| Completed review milestone | What is actually in the repository | What is **not** yet delivered |
+| --- | --- | --- |
+| **1 — Core bootstrap** | Local auth/config/health API, redacted access logs and CI | Production accounts, multi-device sessions or app UI |
+| **2 — Durable tasks** | PostgreSQL/Alembic task store, idempotency, cancellation, checkpoint/lease and internal outbox methods | Actual task worker, external effect dispatcher or backup proof |
+| **3 — Model Gateway** | Mock-tested OpenAI Chat Completions and Anthropic Messages text adapters, streaming, privacy and admission cost checks | Connected FreeLLMAPI/provider account, exact billing/quotas, real model output |
+| **4 — MAX Trust** | Only one allowed read-only `task.status` capability, task/actor/session/device-bound owner approvals, single-use ledger and fixture-based independent verification | Real external observer, MFA, production authorization or consequential tools |
 
-**MAX Trust (milestone 4):** The new **local-only, deny-by-default** approval boundary permits one explicitly owner-approved task-status read, with single-use transactionally consumed grants and metadata-only audit. The separate result verifier requires a trusted independent evidence observation before marking tasks complete. No real worker, privileged tools, or production identity integration exists yet. See [trust implementation and caveats](docs/TRUST_IMPLEMENTATION.md).
+Historically verified CI for merged PR #7 reported **125 passing tests on Python 3.11 and 125 on 3.13**, with an ephemeral PostgreSQL database. This **does not verify any live provider, actual device or real-world action**. My setup and boundaries are in [Core setup](docs/CORE_BOOTSTRAP.md), [task persistence](docs/TASK_PERSISTENCE.md), [gateway implementation](docs/GATEWAY_IMPLEMENTATION.md) and [Trust implementation](docs/TRUST_IMPLEMENTATION.md).
 
-**Model Gateway (milestone 3):** I now have an **internal, testable** OpenAI Chat Completions/Anthropic Messages adapter library with privacy-aware routing, text streaming, inert tool proposals and bounded per-request cost admission. No model account is connected, and MAX has no public chat endpoint yet. See [gateway implementation](docs/GATEWAY_IMPLEMENTATION.md).
-
-**Durable tasks (milestone 2):** MAX now has a proposed PostgreSQL-backed task API with idempotent creation, checkpoints, cancellation, and internal outbox events. I still need an authorized worker and independent verification before tasks can actually be executed. See [my durable-task setup and limits](docs/TASK_PERSISTENCE.md).
+The [Phase 0 current-state audit](docs/PHASE0_AUDIT.md), [53-row requirements matrix](docs/REQUIREMENT_TRACEABILITY.md) and [architecture exit criteria](docs/PHASE0_EXIT_CRITERIA.md) explain what is complete, partial or unverified. My next recommended, **not yet started**, milestone is a **local read-only task status timeline and terminal client**. Payments, deployment, shell actions, document sharing and remote computer control remain unavailable.
 
 ## Planned platforms
 
@@ -75,7 +78,9 @@ Platform-specific behavior will be validated on real devices. In particular, Way
 - [Implementation plan](docs/IMPLEMENTATION_PLAN.md)
 - [Research and technology evaluation](docs/RESEARCH_FINDINGS.md)
 - [Architecture diagrams](docs/ARCHITECTURE_DIAGRAMS.md)
-- [Phase 0 requirements and verification](docs/REQUIREMENT_TRACEABILITY.md)
+- [Phase 0 current-state audit](docs/PHASE0_AUDIT.md)
+- [Requirement-to-code traceability](docs/REQUIREMENT_TRACEABILITY.md)
+- [Architecture exit criteria](docs/PHASE0_EXIT_CRITERIA.md)
 
 The [MAX identity](MAX.md), [personality](SOUL.md), and [operating model](CORE.md) describe how I want the assistant to behave. [AGENTS.md](AGENTS.md) contains separate instructions for coding workers; the future runtime must enforce security in code rather than relying on Markdown alone.
 
