@@ -165,7 +165,7 @@ def main(argv: list[str] | None = None) -> int:
             "This verifies calculation correctness, NOT proof the worker ran."
         )
         return 0 if recorded.conclusion == "supported" and fresh.state == "completed" else 3
-    except (ConfigurationError, StoreError, SQLAlchemyError, OSError, ValueError):
+    except (ConfigurationError, StoreError, SQLAlchemyError, OSError, ValueError, RuntimeError):
         print(
             "MAX observer: denied, conflicted, stale or unavailable; no verification success claimed.",
             file=sys.stderr,
