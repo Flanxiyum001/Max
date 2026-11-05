@@ -22,13 +22,18 @@ def waiting(store: TaskStore, a: int = 4, b: int = 6) -> str:
     objective = json.dumps({"op": "dev.add", "params": {"a": a, "b": b}})
     output = json.dumps(
         {"operation": "dev.add", "result": a + b},
-        sort_keys=True, separators=(",", ":"),
+        sort_keys=True,
+        separators=(",", ":"),
     ).encode("ascii")
     task, _ = store.create("owner", objective, "pg-evidence-" + uuid4().hex)
     store.claim("owner", task.id, "pg-worker")
     store.checkpoint(
-        "owner", task.id, "pg-worker", "dev-operation-v1", "dev.add",
-        hashlib.sha256(objective.encode("utf-8")).hexdigest()
+        "owner",
+        task.id,
+        "pg-worker",
+        "dev-operation-v1",
+        "dev.add",
+        hashlib.sha256(objective.encode("utf-8")).hexdigest(),
     )
     store.record_outcome("owner", task.id, "pg-worker", hashlib.sha256(output).hexdigest())
     return task.id
@@ -36,9 +41,11 @@ def waiting(store: TaskStore, a: int = 4, b: int = 6) -> str:
 
 def checks(store: TaskStore, task_id: str) -> list[VerificationCheck]:
     with Session(store.engine) as session:
-        return list(session.scalars(
-            select(VerificationCheck).where(VerificationCheck.task_id == task_id)
-        ).all())
+        return list(
+            session.scalars(
+                select(VerificationCheck).where(VerificationCheck.task_id == task_id)
+            ).all()
+        )
 
 
 def test_postgres_identical_concurrent_requests_are_one_decision(postgres_store: TaskStore) -> None:
@@ -57,12 +64,8 @@ def test_postgres_identical_concurrent_requests_are_one_decision(postgres_store:
     assert all(x.conclusion == "supported" and x.task_state == "completed" for x in all_results)
     assert len(checks(postgres_store, task_id)) == 1
     with Session(postgres_store.engine) as session:
-        events = session.scalars(
-            select(OutboxEvent).where(OutboxEvent.task_id == task_id)
-        ).all()
-        audits = session.scalars(
-            select(TrustAudit).where(TrustAudit.task_id == task_id)
-        ).all()
+        events = session.scalars(select(OutboxEvent).where(OutboxEvent.task_id == task_id)).all()
+        audits = session.scalars(select(TrustAudit).where(TrustAudit.task_id == task_id)).all()
         assert sum(e.kind == "task.verified" for e in events) == 1
         assert sum(a.reason == "verified" for a in audits) == 1
 
@@ -94,9 +97,7 @@ def test_postgres_distinct_concurrent_requests_only_one_completion(
         assert kinds.count("task.verified") == 1
 
 
-def test_postgres_request_id_is_owner_global_even_between_tasks(
-    postgres_store: TaskStore
-) -> None:
+def test_postgres_request_id_is_owner_global_even_between_tasks(postgres_store: TaskStore) -> None:
     first = waiting(postgres_store)
     second = waiting(postgres_store)
     gate = Barrier(2)
@@ -104,9 +105,12 @@ def test_postgres_request_id_is_owner_global_even_between_tasks(
     def observe(task_id: str) -> str:
         gate.wait()
         try:
-            return IndependentVerifier(postgres_store.engine).verify_dev_add(
-                "owner", task_id, "pg-shared-request-001"
-            ).conclusion or "unknown"
+            return (
+                IndependentVerifier(postgres_store.engine)
+                .verify_dev_add("owner", task_id, "pg-shared-request-001")
+                .conclusion
+                or "unknown"
+            )
         except StoreError:
             return "conflict"
 
@@ -139,7 +143,9 @@ def test_postgres_modified_checkpoint_during_observer_is_stale(
     with ThreadPoolExecutor(max_workers=2) as pool:
         future = pool.submit(
             IndependentVerifier(postgres_store.engine).verify_dev_add,
-            "owner", task_id, "pg-stale-attempt-001"
+            "owner",
+            task_id,
+            "pg-stale-attempt-001"
         )
         assert entered.wait(5)
         with Session(postgres_store.engine) as session, session.begin():
@@ -153,19 +159,25 @@ def test_postgres_modified_checkpoint_during_observer_is_stale(
     assert checks(postgres_store, task_id) == []
 
 
-def test_postgres_readiness_and_historical_legacy_rows_preserved(
-    postgres_store: TaskStore
-) -> None:
+def test_postgres_readiness_and_historical_legacy_rows_preserved(postgres_store: TaskStore) -> None:
     assert postgres_store.ready()
     with postgres_store.engine.connect() as connection:
         assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
             "0003_independent_observer"
         )
-    columns = {item["name"] for item in inspect(postgres_store.engine).get_columns(
-        "max_verification_checks"
-    )}
-    for name in ("request_id", "request_fingerprint", "checkpoint_id", "observer_version",
-                 "result_state", "result_revision", "reason_code"):
+    columns = {
+        item["name"]
+        for item in inspect(postgres_store.engine).get_columns("max_verification_checks")
+    }
+    for name in (
+        "request_id",
+        "request_fingerprint",
+        "checkpoint_id",
+        "observer_version",
+        "result_state",
+        "result_revision",
+        "reason_code",
+    ):
         assert name in columns
     # Existing fixture reader still writes the legacy format with nullable new fields.
     task, _ = postgres_store.create(
