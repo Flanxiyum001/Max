@@ -151,9 +151,7 @@ class IndependentVerifier:
         # Only new observer decisions have a request ID; legacy fixture-reader
         # checks are unaffected.
         task = session.scalar(
-            select(Task)
-            .where(Task.id == task_id, Task.owner_id == owner_id)
-            .with_for_update()
+            select(Task).where(Task.id == task_id, Task.owner_id == owner_id).with_for_update()
         )
         checkpoint = (
             session.scalar(
