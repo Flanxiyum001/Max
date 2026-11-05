@@ -25,11 +25,23 @@ class Privacy(StrEnum):
     RESTRICTED = "restricted"
 
 
+class InferenceDestination(StrEnum):
+    """Owner-verified inference egress, never inferred from the HTTP host.
+
+    VERIFIED_LOCAL is a trusted configuration assertion, NOT runtime attestation.
+    UNKNOWN is the default and is never eligible for a gateway request.
+    """
+
+    VERIFIED_LOCAL = "verified_local"
+    CLOUD = "cloud"
+    UNKNOWN = "unknown"
+
+
 Role = Literal["system", "user", "assistant"]
 StreamKind = Literal["start", "content_delta", "tool_proposal", "usage", "complete"]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, repr=False)
 class ChatMessage:
     role: Role
     content: str
@@ -49,6 +61,7 @@ class ModelSpec:
     endpoint: str
     is_local: bool
     context_tokens: int
+    inference_destination: InferenceDestination = InferenceDestination.UNKNOWN
     capabilities: frozenset[str] = frozenset({"text"})
     region: str = "unspecified"
     priority: int = 100
@@ -63,6 +76,12 @@ class ModelSpec:
             raise ValueError("Invalid model identifier")
         if not isinstance(self.dialect, Dialect) or self.context_tokens < 1:
             raise ValueError("Invalid model dialect or context window")
+        if type(self.is_local) is not bool:
+            raise ValueError("Endpoint locality must be a boolean")
+        if not isinstance(self.inference_destination, InferenceDestination):
+            raise ValueError("Invalid inference destination classification")
+        if self.inference_destination == InferenceDestination.VERIFIED_LOCAL and not self.is_local:
+            raise ValueError("Verified local inference requires an explicit loopback endpoint")
         if not self.capabilities or not self.capabilities <= {"text", "tools"}:
             raise ValueError("Only text and inert tool proposals are supported in milestone 3")
         if self.api_key is not None and (
@@ -95,7 +114,7 @@ class ModelSpec:
                 raise ValueError("Invalid model token pricing")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, repr=False)
 class GatewayRequest:
     request_id: str
     messages: tuple[ChatMessage, ...]
@@ -119,6 +138,11 @@ class GatewayRequest:
             raise ValueError("At least one and at most 48 messages are required")
         if not isinstance(self.privacy, Privacy):
             raise ValueError("Unknown data privacy classification")
+        if any(
+            type(value) is not bool
+            for value in (self.cloud_allowed, self.local_only, self.allow_fallback)
+        ):
+            raise ValueError("Gateway authorization flags must be booleans")
         if (
             not 1 <= self.max_input_tokens <= 1_000_000
             or not 1 <= self.max_output_tokens <= 1_000_000
@@ -155,7 +179,7 @@ class TokenUsage:
     output_tokens: int | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, repr=False)
 class ToolProposal:
     call_id: str
     name: str
@@ -163,7 +187,7 @@ class ToolProposal:
     # Not a tool execution result, approval, or a permission grant.
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, repr=False)
 class GatewayResponse:
     request_id: str
     provider_id: str
@@ -175,7 +199,7 @@ class GatewayResponse:
     estimated_cost_usd: Decimal | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, repr=False)
 class StreamEvent:
     sequence: int
     request_id: str

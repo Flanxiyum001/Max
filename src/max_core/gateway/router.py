@@ -10,6 +10,7 @@ from max_core.gateway.contracts import (
     GatewayError,
     GatewayRequest,
     GatewayResponse,
+    InferenceDestination,
     ModelSpec,
     Privacy,
     StreamEvent,
@@ -49,21 +50,26 @@ class Gateway:
                 continue
             if request.max_input_tokens + request.max_output_tokens > spec.context_tokens:
                 continue
-            if not spec.is_local:
-                # Explicit cloud opt-in; restricted/confidential are ALWAYS local-only.
+            # A loopback HTTP endpoint may forward prompts to cloud models.
+            # UNKNOWN inference egress is always ineligible, regardless of host.
+            if spec.inference_destination == InferenceDestination.UNKNOWN:
+                continue
+            if spec.inference_destination == InferenceDestination.CLOUD:
                 if (
                     not request.cloud_allowed
                     or request.local_only
                     or request.privacy in {Privacy.CONFIDENTIAL, Privacy.RESTRICTED}
+                    or request.max_cost_usd is None
                 ):
                     continue
-                # No request budget or unknown prices: never permit metered remote use.
-                if request.max_cost_usd is None:
-                    continue
             cost = _worst_case_cost(spec, request)
-            if request.max_cost_usd is not None:
-                if cost is None or cost > request.max_cost_usd:
+            if spec.inference_destination == InferenceDestination.CLOUD:
+                # Cloud always requires known pricing and a quoted request budget,
+                # even when its proxy is on loopback.
+                if cost is None or request.max_cost_usd is None or cost > request.max_cost_usd:
                     continue
+            elif request.max_cost_usd is not None and (cost is None or cost > request.max_cost_usd):
+                continue
             result.append(spec)
         return tuple(sorted(result, key=lambda x: (x.priority, x.provider_id, x.model_id)))
 
@@ -87,6 +93,10 @@ class Gateway:
     async def complete(self, request: GatewayRequest) -> GatewayResponse:
         options = self._candidates(request)
         for index, spec in enumerate(options):
+            # Repeat admission at every fallback boundary rather than trusting
+            # an earlier candidate list for a different inference destination.
+            if spec not in self.eligible(request):
+                raise GatewayError("no_eligible_provider")
             try:
                 result = await self.adapter.complete(spec, request)
                 return self._postflight(result, request)
