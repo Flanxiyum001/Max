@@ -107,7 +107,8 @@ def _advance(task: Task, state: str) -> None:
 def _is_expired(lease_until: datetime | None) -> bool:
     if lease_until is None:
         return True
-    return lease_until.replace(tzinfo=UTC) <= utc_now()
+    instant = lease_until if lease_until.tzinfo is not None else lease_until.replace(tzinfo=UTC)
+    return instant.astimezone(UTC) <= utc_now()
 
 
 class TaskStore:
@@ -225,6 +226,8 @@ class TaskStore:
             raise StoreError("Invalid step name", 422)
         with self.sessions.begin() as session:
             task = _locked(session, task_id, owner_id)
+            if task.lease_owner != worker_id:
+                raise StoreError("Worker has no active lease")
             previous = session.scalar(
                 select(TaskCheckpoint).where(
                     TaskCheckpoint.task_id == task_id,
