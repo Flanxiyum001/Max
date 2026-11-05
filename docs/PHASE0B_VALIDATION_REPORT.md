@@ -6,13 +6,13 @@
 
 | Check | Result | Evidence/limitations |
 | --- | --- | --- |
-| Milestone branch ancestry | PASS | GitHub compare returned `ahead`, behind 0 from `max`, 24 commits and 22 changed paths at time of test |
-| Changed file scope | PASS | All 22 changed files were Markdown documents (root README/ARCHITECTURE or under `docs/`). No application/runtime, identity file, deployment or secrets file changed |
+| Milestone branch ancestry | PASS | GitHub compare returned `ahead`, behind 0 from `max`, 26 commits and 23 changed paths at the final pre-PR compare (before this validation-report edit) |
+| Changed file scope | PASS | All 23 changed files were Markdown documents (root README/ARCHITECTURE or under `docs/`). No application/runtime, identity file, deployment or secrets file changed |
 | Required Phase 0 deliverables | PASS | All 19 required file paths fetched from the head branch; each returned non-empty UTF-8 content |
-| Changed document fetchability | PASS | All 22 paths fetched successfully in three batches; none empty |
-| Internal relative links (changed docs) | PASS with method limitation | Parsed Markdown `[label](path)` local links and normalized `../` paths; no references to an unknown document in the verified known-path inventory across all 22 changed files. Did not verify every external URL or all anchor fragments |
+| Changed document fetchability | PASS | The first 22 paths fetched successfully in three batches; this validation report and the updated traceability file were fetched separately; none empty |
+| Internal relative links (changed docs) | PASS with method limitation | Parsed local Markdown link destinations and normalized `../` paths; no references to an unknown document in the verified known-path inventory across the first 22 changed files; the added validation report's only real internal link and the traceability update were checked separately. Did not verify every external URL or all anchor fragments |
 | Eight architecture diagrams present | PASS (presence) | Exactly eight `mermaid` fenced blocks in `docs/ARCHITECTURE_DIAGRAMS.md`; **rendering and semantic validation not run** |
-| Obvious secret pattern in changed docs | PASS with method limitation | Basic heuristic for conventional `sk-`, `ghp_` and private key headers found no matches in all 22 changed files; **not** a complete secret scan |
+| Obvious secret pattern in changed docs | PASS with method limitation | Basic heuristic for conventional `sk-`, `ghp_` and private key headers found no matches in the first 22 changed files and the two final touched documents; **not** a complete secret scan |
 | Default branch correctness | PASS | GitHub repo reports `max`; corrected the old `main` reference in development workflow |
 | OpenClaw, telecom, Drive and provider statements | DOCUMENTED | Checked public primary-source pages and recorded URLs and limitations; no live provider, regional number or account tests |
 | Runtime tests, lint, build and CI | NOT RUN | Architecture-only work; no runtime scaffold or GH Actions checks configured/verified in this review |
