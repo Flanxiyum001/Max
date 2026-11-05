@@ -103,3 +103,7 @@ A durable PostgreSQL repository with explicit Alembic migration, idempotent crea
 ## Milestone 3 implementation slice
 
 The owner-controlled MAX Gateway is now a **Python library**, not a publicly reachable service. Its explicit adapters handle OpenAI-compatible Chat Completions and Anthropic Messages with normalized text/stream/tool proposals, privacy routing and per-request budget admission. No selected FreeLLMAPI endpoint or real provider credentials have been configured. Model text cannot trigger tool execution. See [GATEWAY_IMPLEMENTATION.md](GATEWAY_IMPLEMENTATION.md). The next owner-reviewed milestone handles MAX Trust and independent verification.
+
+## Milestone 4 implementation slice
+
+MAX Trust now has an isolated approval ledger and a strictly scoped `task.status` capability, with owner-authenticated local decision endpoints. Independent completion verification relies on **host-injected evidence observations**, not self-attested model/worker claims. A new additive schema migration supports durable approval, audit and verification records. This is **not** an unrestricted tool executor or a production-grade user identity. See [TRUST_IMPLEMENTATION.md](TRUST_IMPLEMENTATION.md). All real side-effectful capabilities remain explicitly blocked pending a separate owner review.
