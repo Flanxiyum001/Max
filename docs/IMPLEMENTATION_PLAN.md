@@ -96,3 +96,11 @@ The sections titled "this PR" above were written **during historical milestone d
 **Acceptance:** auth 401/404/503; tampered/misbound/rotated cursor 422; pagination tie-break and stable snapshot during PostgreSQL concurrent writes; no claim/lease/event ack; sanitized CLI; full prior pytest/strict typing/Ruff/audit matrix green. **Review CI results on this PR before marking accepted.**
 
 **Rollback:** close/revert this standalone PR; no migration/data changes. **Excluded:** live FreeLLMAPI model, orchestration, agents, desktop/browser/mobile UI, voice, email/phone, shell, payments, vault, deployments and production authentication. See [TASK_TIMELINE.md](TASK_TIMELINE.md).
+
+## Milestone 6 — local task lifecycle interaction (review-only)
+
+**Outcome:** local authenticated terminal commands to create a non-sensitive test task, read status, inspect the existing timeline, and request cancellation while reporting a fresh Core status. Reuses `POST /v1/tasks`, `GET /v1/tasks/{uuid}`, `POST /v1/tasks/{uuid}/cancel`, and Milestone 5 `GET /v1/tasks/{uuid}/events`; no new API, worker or database schema. User input is hidden from terminal echo/shell history but is **plaintext in PostgreSQL**, so it is only for non-sensitive demonstrations.
+
+**Acceptance:** idempotent duplicate task creation, authentication/foreign owner 401/404/503, invalid IDs/keys/description, queued→cancelled fresh-read confirmation, running→cancelling **not** terminal, completed/reconciliation 409 rejection, concurrent PostgreSQL claim/cancel and duplicate cancel serialization, no objective/token/error-body printing, timeline remains read-only, and strict loopback HTTP. Full Python 3.11/3.13 CI with PostgreSQL, Ruff, mypy, pip-audit and pytest is required; report actual run results. [CLI commands and failure semantics](TASK_LIFECYCLE.md).
+
+**Rollback/exclusions:** revert or close this independent PR. No migrations, added dependencies, deployments, accounts, FreeLLMAPI, autonomous agents/tools, files, communications, payments or external side effects. The owner is sole merge authority.
