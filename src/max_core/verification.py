@@ -146,9 +146,7 @@ class IndependentVerifier:
             return None
         if prior.task_id != task_id or prior.request_fingerprint != fingerprint:
             raise StoreError("Observer request idempotency conflict", 409)
-        task = session.scalar(
-            select(Task).where(Task.id == task_id, Task.owner_id == owner_id)
-        )
+        task = session.scalar(select(Task).where(Task.id == task_id, Task.owner_id == owner_id))
         if (
             task is None
             or prior.input_digest is None
@@ -182,9 +180,7 @@ class IndependentVerifier:
     def _snapshot(
         session: Any, owner_id: str, task_id: str
     ) -> evidence_observer.ObservationSnapshot:
-        task = session.scalar(
-            select(Task).where(Task.id == task_id, Task.owner_id == owner_id)
-        )
+        task = session.scalar(select(Task).where(Task.id == task_id, Task.owner_id == owner_id))
         if task is None or task.state != "awaiting_verification":
             raise StoreError("Task unavailable for observation", 404)
         if (
@@ -226,9 +222,9 @@ class IndependentVerifier:
     @staticmethod
     def _still_bound(session: Any, snapshot: evidence_observer.ObservationSnapshot) -> bool:
         task = session.scalar(
-            select(Task).where(
-                Task.id == snapshot.task_id, Task.owner_id == snapshot.owner_id
-            ).with_for_update()
+            select(Task)
+            .where(Task.id == snapshot.task_id, Task.owner_id == snapshot.owner_id)
+            .with_for_update()
         )
         if (
             task is None
@@ -247,13 +243,10 @@ class IndependentVerifier:
             and checkpoint.operation_key == snapshot.checkpoint_operation_key
             and checkpoint.step_name == snapshot.checkpoint_step_name
             and checkpoint.payload_digest == snapshot.checkpoint_digest
-            and snapshot.input_digest
-            == hashlib.sha256(task.objective.encode("utf-8")).hexdigest()
+            and snapshot.input_digest == hashlib.sha256(task.objective.encode("utf-8")).hexdigest()
         )
 
-    def verify_dev_add(
-        self, owner_id: str, task_id: str, request_id: str
-    ) -> VerificationResult:
+    def verify_dev_add(self, owner_id: str, task_id: str, request_id: str) -> VerificationResult:
         """The sole new deterministic observer path; no public or model API.
 
         A request key is owner-global. Duplicate replay returns the *recorded*
@@ -302,9 +295,9 @@ class IndependentVerifier:
             with self.sessions.begin() as session:
                 # The task row is the contention lock for concurrent observers.
                 task = session.scalar(
-                    select(Task).where(
-                        Task.id == task_id, Task.owner_id == owner_id
-                    ).with_for_update()
+                    select(Task)
+                    .where(Task.id == task_id, Task.owner_id == owner_id)
+                    .with_for_update()
                 )
                 if task is None:
                     raise StoreError("Task unavailable for observation", 404)
@@ -365,4 +358,3 @@ class IndependentVerifier:
                 if prior is not None:
                     return prior
             raise StoreError("Observer request idempotency conflict", 409) from None
-
