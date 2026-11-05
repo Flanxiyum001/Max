@@ -145,7 +145,7 @@ def test_postgres_modified_checkpoint_during_observer_is_stale(
             IndependentVerifier(postgres_store.engine).verify_dev_add,
             "owner",
             task_id,
-            "pg-stale-attempt-001"
+            "pg-stale-attempt-001",
         )
         assert entered.wait(5)
         with Session(postgres_store.engine) as session, session.begin():
