@@ -161,7 +161,7 @@ class TaskStore:
                 if existing is None:
                     raise StoreError("Persistence conflict") from None
                 if existing.objective_hash != fingerprint:
-                    raise StoreError("Idempotency key already used for another objective")
+                    raise StoreError("Idempotency key already used for another objective") from None
                 return TaskView.from_record(existing), False
 
     def get(self, owner_id: str, task_id: str) -> TaskView:
