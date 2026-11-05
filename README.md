@@ -49,6 +49,8 @@ I now have a **small local development API** under `src/max_core/`, with fail-cl
 
 I deliberately keep this development listener bound to `127.0.0.1`. I won't deploy it publicly or connect personal accounts until a stronger authentication and security milestone has been reviewed.
 
+**Durable tasks (milestone 2):** MAX now has a proposed PostgreSQL-backed task API with idempotent creation, checkpoints, cancellation, and internal outbox events. I still need an authorized worker and independent verification before tasks can actually be executed. See [my durable-task setup and limits](docs/TASK_PERSISTENCE.md).
+
 ## Planned platforms
 
 | Platform | Experience |
