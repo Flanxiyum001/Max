@@ -107,3 +107,12 @@ The owner-controlled MAX Gateway is now a **Python library**, not a publicly rea
 ## Milestone 4 implementation slice
 
 MAX Trust now has an isolated approval ledger and a strictly scoped `task.status` capability, with owner-authenticated local decision endpoints. Independent completion verification relies on **host-injected evidence observations**, not self-attested model/worker claims. A new additive schema migration supports durable approval, audit and verification records. This is **not** an unrestricted tool executor or a production-grade user identity. See [TRUST_IMPLEMENTATION.md](TRUST_IMPLEMENTATION.md). All real side-effectful capabilities remain explicitly blocked pending a separate owner review.
+
+
+## Current merged implementation and next gate — audit 2026-11-05
+
+This roadmap's Phase 0 and Phase 1 PR table above is **historical planned ordering**, not the present branch state. Against `max` commit `72f67b1ec6a737c813f4ca633457a9ca39223b94`, the owner already merged the local Core, durable task persistence, dual-protocol mock Gateway and limited read-only Trust/verifier PRs (#4–#7). **No model account, worker, browser/mobile/desktop client, node or deployment exists in this tree.**
+
+**Recommended next reviewable implementation PR (not started):** [local owner-only read-only task timeline + terminal client](PHASE0_AUDIT.md#recommended-milestone-5--do-not-begin-in-this-pr). After that: independently review provider identity/FreeLLMAPI sandbox contract, stronger authentication, source-specific read-only evidence, then bounded agent/workers; introduce desktop/voice only once focus/device constraints can be physically tested. Side-effectful integrations remain separate high-risk milestones.
+
+**Blocking dependencies:** Do not treat a green mock CI suite as live FreeLLMAPI, India PSTN, OS compatibility, key-recovery or backup proof. Use [Phase 0 exit criteria](PHASE0_EXIT_CRITERIA.md) and [current requirement matrix](REQUIREMENT_TRACEABILITY.md) for gate-specific release decisions. The owner personally reviews and merges each PR; no auto-merge or deployment.
