@@ -62,3 +62,8 @@ Milestone 2: PostgreSQL task state, migrations, checkpoints, cancellations, tran
 ## Rollback
 
 Revert this PR; no migrations, data, hosted services or persistent side effects exist. Stop any manually launched local development process before reverting.
+
+
+### Optional local PostgreSQL task mode (milestone 2)
+
+Task persistence is optional during local bootstrap but required to use `/v1/tasks`. Follow [TASK_PERSISTENCE.md](TASK_PERSISTENCE.md) to create your own **local** PostgreSQL database, set `MAX_DATABASE_URL` privately and run Alembic migrations. Do not expose the token-authenticated local server to the network. `/health/ready` will return 503 rather than claim durable readiness if the schema or DB is unavailable.
