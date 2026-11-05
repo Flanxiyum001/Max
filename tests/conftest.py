@@ -20,6 +20,7 @@ TEST_TOKEN = "test-token-" + "0123456789abcdef" * 3
 def client() -> TestClient:
     return TestClient(create_app(Settings(bearer_token=TEST_TOKEN)), base_url="http://localhost")
 
+
 @pytest.fixture
 def store(tmp_path: Path) -> TaskStore:
     """Shared isolated SQLite test schema; API production runtime still requires PostgreSQL."""
