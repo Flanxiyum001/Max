@@ -84,3 +84,15 @@ An additive `0002_trust_verification` migration, deny-by-default approved action
 The sections titled "this PR" above were written **during historical milestone development**. They are retained as implementation records, not instructions to reopen or redo merged PRs. As of `max` commit `72f67b1ec6a737c813f4ca633457a9ca39223b94`, foundation PRs #1–#3 and local Core/DB/Gateway/Trust PRs #4–#7 are **merged**. No actual connected provider, autonomous worker, device/voice/web client, Drive/vault/telephony or production server is implemented.
 
 **Phase 0 closure:** architecture/design coverage exists, but still requires explicit [exit-criteria review](PHASE0_EXIT_CRITERIA.md) and [owner-requirement gap audit](PHASE0_AUDIT.md). Only a **local read-only owner task timeline** is recommended as the next small implementation; that work needs its own owner-reviewed PR. Never infer provider/account compatibility from OpenAI/Anthropic mock fixtures or authorization for external effects from the single approved task-status read.
+
+## Milestone 5 — local task event timeline (review-only PR)
+
+**Owner-visible outcome:** in a terminal, the owner can inspect a local test task's current state and a bounded, ordered, read-only history of queued/running/checkpointed/cancelled/awaiting_verification/verified metadata events. **No event type is proof of an external effect** without the existing trusted verifier.
+
+**Files:** `src/max_core/timeline.py`, `src/max_core/timeline_cli.py`, one owner-scoped `GET /v1/tasks/{task_id}/events` handler in `src/max_core/api.py`, `tests/test_timeline.py`, `tests/test_postgres_timeline.py`, and documentation. No schema migration, extra dependency, remote service, external tool or account integration.
+
+**Dependencies:** owner-merged #8 requirements audit, existing local Core and PostgreSQL migrations. **Security:** existing owner bootstrap authentication, strict local CLI origin, fixed response fields excluding objectives/claims, authenticated tenant isolation, signed cursor bound to owner/task and snapshot revision, request/page caps, read-only DB queries. Scope remains development-only; no remote session security.
+
+**Acceptance:** auth 401/404/503; tampered/misbound/rotated cursor 422; pagination tie-break and stable snapshot during PostgreSQL concurrent writes; no claim/lease/event ack; sanitized CLI; full prior pytest/strict typing/Ruff/audit matrix green. **Review CI results on this PR before marking accepted.**
+
+**Rollback:** close/revert this standalone PR; no migration/data changes. **Excluded:** live FreeLLMAPI model, orchestration, agents, desktop/browser/mobile UI, voice, email/phone, shell, payments, vault, deployments and production authentication. See [TASK_TIMELINE.md](TASK_TIMELINE.md).

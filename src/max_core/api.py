@@ -6,7 +6,7 @@ from secrets import token_hex
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi import status as http_status
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from starlette.middleware.base import RequestResponseEndpoint
@@ -17,6 +17,7 @@ from max_core.config import Settings
 from max_core.observability import configure_access_logger
 from max_core.security import BootstrapBearerAuth
 from max_core.store import StoreError, TaskStore, TaskView, create_store
+from max_core.timeline import TaskTimeline, TimelinePage
 from max_core.trust import GrantView, TrustError, TrustService
 
 
@@ -57,6 +58,16 @@ def require_trust(request: Request) -> TrustService:
     return service
 
 
+def require_timeline(request: Request) -> TaskTimeline:
+    timeline: TaskTimeline | None = request.app.state.task_timeline
+    if timeline is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Task persistence is not configured",
+        )
+    return timeline
+
+
 def create_app(settings: Settings | None = None, store: TaskStore | None = None) -> FastAPI:
     """Fail configuration validation before constructing a service."""
     config = settings if settings is not None else Settings.from_env()
@@ -80,6 +91,9 @@ def create_app(settings: Settings | None = None, store: TaskStore | None = None)
         else (create_store(config.database_url) if config.database_url is not None else None)
     )
     app.state.task_store = task_store
+    app.state.task_timeline = (
+        TaskTimeline(task_store, config.bearer_token) if task_store is not None else None
+    )
     app.state.trust_service = TrustService(task_store.engine) if task_store is not None else None
 
     @app.middleware("http")
@@ -160,6 +174,19 @@ def create_app(settings: Settings | None = None, store: TaskStore | None = None)
     def get_task(task_id: UUID, storage: Annotated[TaskStore, Depends(require_store)]) -> TaskView:
         try:
             return storage.get("owner", str(task_id))
+        except StoreError as exc:
+            raise _error(exc) from None
+
+    @app.get("/v1/tasks/{task_id}/events", dependencies=[Depends(auth)])
+    def task_events(
+        task_id: UUID,
+        timeline: Annotated[TaskTimeline, Depends(require_timeline)],
+        limit: Annotated[int, Query(ge=1, le=100)] = 20,
+        cursor: Annotated[str | None, Query(min_length=3, max_length=512)] = None,
+    ) -> TimelinePage:
+        """Read only owner-scoped historical metadata; does not mark work complete."""
+        try:
+            return timeline.page("owner", str(task_id), limit=limit, cursor=cursor)
         except StoreError as exc:
             raise _error(exc) from None
 
