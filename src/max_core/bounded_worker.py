@@ -10,8 +10,8 @@ import argparse
 import hashlib
 import json
 import sys
-from time import monotonic
 from dataclasses import dataclass
+from time import monotonic
 from types import MappingProxyType
 from typing import Any
 from uuid import UUID, uuid4
@@ -115,7 +115,9 @@ def parse_operation(objective: str) -> ValidatedOperation:
     if name == "dev.add":
         if set(params) != {"a", "b"}:
             raise WorkerError("invalid_operation_input")
-        if not all(type(params[k]) is int and -1_000_000 <= params[k] <= 1_000_000 for k in ("a", "b")):
+        if not all(
+            type(params[k]) is int and -1_000_000 <= params[k] <= 1_000_000 for k in ("a", "b")
+        ):
             raise WorkerError("invalid_operation_input")
         return ValidatedOperation(name, {"a": params["a"], "b": params["b"]})
     raise WorkerError("unknown_or_invalid_operation")
@@ -210,7 +212,10 @@ class BoundedWorker:
             start = monotonic()
             result = execute_operation(operation)
             duration = monotonic() - start
-            if not isinstance(result, bytes) or len(result) > OPERATIONS[operation.operation_id].max_output_bytes:
+            if (
+                not isinstance(result, bytes)
+                or len(result) > OPERATIONS[operation.operation_id].max_output_bytes
+            ):
                 return self._recover_or_quarantine(canonical_id)
             if duration > min(_OPERATION_SECONDS, OPERATIONS[operation.operation_id].max_seconds):
                 return self._recover_or_quarantine(canonical_id)
@@ -219,9 +224,7 @@ class BoundedWorker:
                 return self._stopped(canonical_id)
             digest = hashlib.sha256(result).hexdigest()
             try:
-                saved = self.store.record_outcome(
-                    _OWNER, canonical_id, self.worker_id, digest
-                )
+                saved = self.store.record_outcome(_OWNER, canonical_id, self.worker_id, digest)
             except StoreError:
                 # Concurrent cancel/lease expiry may have won. Do not assert success.
                 return self._recover_or_quarantine(canonical_id)
