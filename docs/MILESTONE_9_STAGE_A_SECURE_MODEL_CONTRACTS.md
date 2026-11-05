@@ -69,3 +69,23 @@ while normal completions suppressed their transport exception context. Stage A
 aligns streaming timeout handling with the existing non-streaming redaction
 policy and adds a mock-only traceback regression test. No fallback or transport
 retry rule changes.
+
+## Stage A approval-boundary correction
+
+`Gateway.selection_metadata()` returns **only** routes with
+`ApprovalState.APPROVED` and a classified (non-`UNKNOWN`) inference
+destination. Unreviewed, disabled and unknown-destination routes are excluded
+from the candidate tuple, even when the discovery catalogue reports
+`AvailabilityState.READY`. An empty tuple `()` means that there are no
+approved selection candidates; it is **not** a gateway execution failure.
+`Gateway.complete()` and `Gateway.stream()` retain their existing
+`GatewayError("no_eligible_provider")` admission error semantics.
+
+All provided route bindings are validated for identity uniqueness and
+trusted-policy/configuration destination agreement *before* filtering.
+The route ID remains unique within each gateway, regardless of upstream
+provider, model or protocol dialect, in both snapshots and gateway bindings.
+A direct attempt to construct `SelectionMetadata` for an unapproved or
+`UNKNOWN` route is rejected. These are metadata guardrails only:
+`Gateway.eligible()` remains the mandatory execution-time privacy, capability,
+region and cost gate. Catalogue `READY` is never approval.

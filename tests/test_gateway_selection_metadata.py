@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from decimal import Decimal
 
 import httpx
@@ -20,6 +20,9 @@ from max_core.gateway import (
 )
 from max_core.gateway.catalogue import (
     ApprovalState,
+    AvailabilityObservation,
+    AvailabilityState,
+    DiscoveredRoute,
     EvidenceSource,
     ModelIdentity,
     RouteIdentity,
@@ -125,4 +128,102 @@ def test_unknown_destination_still_fails_central_gateway_admission() -> None:
         [(identity, TrustedRoutePolicy(identity))],
         catalogue_revision="cat-1",
     )
-    assert result[0].inference_destination == InferenceDestination.UNKNOWN
+    assert result == ()
+
+
+def test_unreviewed_route_is_excluded_without_execution_error() -> None:
+    gateway = Gateway(
+        [spec("provider-A", InferenceDestination.VERIFIED_LOCAL)],
+        HTTPAdapter(httpx.AsyncClient()),
+    )
+    identity, policy = binding("provider-A", "route-A")
+    unreviewed = replace(policy, approval=ApprovalState.UNREVIEWED)
+    assert gateway.selection_metadata(
+        [(identity, unreviewed)], catalogue_revision="cat-1"
+    ) == ()
+
+
+def test_disabled_route_is_excluded_without_execution_error() -> None:
+    gateway = Gateway(
+        [spec("provider-A", InferenceDestination.VERIFIED_LOCAL)],
+        HTTPAdapter(httpx.AsyncClient()),
+    )
+    identity, policy = binding("provider-A", "route-A")
+    disabled = replace(policy, approval=ApprovalState.DISABLED)
+    assert gateway.selection_metadata(
+        [(identity, disabled)], catalogue_revision="cat-1"
+    ) == ()
+
+
+def test_approved_local_route_remains_candidate() -> None:
+    gateway = Gateway(
+        [spec("provider-A", InferenceDestination.VERIFIED_LOCAL)],
+        HTTPAdapter(httpx.AsyncClient()),
+    )
+    candidate = gateway.selection_metadata(
+        [binding("provider-A", "route-A")], catalogue_revision="cat-1"
+    )
+    assert len(candidate) == 1
+    assert candidate[0].approval == ApprovalState.APPROVED
+    assert candidate[0].inference_destination == InferenceDestination.VERIFIED_LOCAL
+
+
+def test_approved_cloud_route_is_metadata_not_cloud_execution_permission() -> None:
+    gateway = Gateway(
+        [spec("provider-A", InferenceDestination.CLOUD)],
+        HTTPAdapter(httpx.AsyncClient()),
+    )
+    identity, policy = binding("provider-A", "route-A")
+    policy = replace(policy, inference_destination=InferenceDestination.CLOUD)
+    candidate = gateway.selection_metadata(
+        [(identity, policy)], catalogue_revision="cat-1"
+    )
+    assert len(candidate) == 1
+    assert candidate[0].inference_destination == InferenceDestination.CLOUD
+    # An approved selection candidate must still satisfy the original
+    # Gateway.eligible() privacy, cloud-opt-in and request-budget checks.
+    req = GatewayRequest(
+        request_id="no-cloud-approval",
+        messages=(ChatMessage("user", "hi"),),
+        privacy=Privacy.PUBLIC,
+        max_input_tokens=200,
+        max_output_tokens=50,
+    )
+    assert gateway.eligible(req) == ()
+
+
+def test_gateway_ready_discovery_does_not_approve_candidate() -> None:
+    gateway = Gateway(
+        [spec("provider-A", InferenceDestination.VERIFIED_LOCAL)],
+        HTTPAdapter(httpx.AsyncClient()),
+    )
+    identity, policy = binding("provider-A", "route-A")
+    discovered = DiscoveredRoute(
+        identity,
+        availability=AvailabilityObservation(state=AvailabilityState.READY),
+    )
+    assert discovered.availability.state == AvailabilityState.READY
+    policy = replace(policy, approval=ApprovalState.UNREVIEWED)
+    assert gateway.selection_metadata(
+        [(identity, policy)], catalogue_revision="cat-1"
+    ) == ()
+
+
+def test_policy_destination_mismatch_rejected_even_when_unreviewed() -> None:
+    gateway = Gateway(
+        [spec("provider-A", InferenceDestination.VERIFIED_LOCAL)],
+        HTTPAdapter(httpx.AsyncClient()),
+    )
+    identity, policy = binding("provider-A", "route-A")
+    mismatch = replace(
+        policy,
+        approval=ApprovalState.UNREVIEWED,
+        inference_destination=InferenceDestination.CLOUD,
+    )
+    with pytest.raises(ValueError, match="destination"):
+        gateway.selection_metadata([(identity, mismatch)], catalogue_revision="cat-1")
+
+
+def test_empty_gateway_returns_empty_candidates_not_gateway_error() -> None:
+    gateway = Gateway([], HTTPAdapter(httpx.AsyncClient()))
+    assert gateway.selection_metadata([], catalogue_revision="cat-1") == ()

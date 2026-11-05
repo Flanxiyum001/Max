@@ -328,6 +328,11 @@ class SelectionMetadata:
             raise ValueError("Invalid selection priority")
         if self.region is not None:
             _id(self.region, "region", r"[A-Za-z0-9_.:-]{1,100}")
+        if (
+            self.approval != ApprovalState.APPROVED
+            or self.inference_destination == InferenceDestination.UNKNOWN
+        ):
+            raise ValueError("Selection candidates require an approved, classified route")
 
 
 def project_model_spec(
@@ -352,6 +357,11 @@ def project_model_spec(
         raise ValueError("Route identity does not match execution configuration")
     if policy.inference_destination != spec.inference_destination:
         raise ValueError("Trusted route destination does not match execution configuration")
+    if (
+        policy.approval != ApprovalState.APPROVED
+        or policy.inference_destination == InferenceDestination.UNKNOWN
+    ):
+        raise ValueError("Unapproved or unknown route cannot produce selection metadata")
     # Legacy ModelSpec capability labels are not independently verified evidence.
     evidence = capabilities if capabilities is not None else CapabilityMetadata()
     if not isinstance(evidence, CapabilityMetadata):

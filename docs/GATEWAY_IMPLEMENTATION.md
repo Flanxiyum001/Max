@@ -134,3 +134,14 @@ enforcement, schema/credential storage, or live compatibility verification.
 Stage B may add fixture-only parsing and versioned snapshot merge, without
 automatic policy elevation. See
 [MILESTONE_9_STAGE_A_SECURE_MODEL_CONTRACTS.md](MILESTONE_9_STAGE_A_SECURE_MODEL_CONTRACTS.md).
+
+### Stage A approval-filtering correction
+
+`Gateway.selection_metadata()` now emits only owner-approved, non-`UNKNOWN`
+metadata views. Unreviewed/disabled routes (including those advertised
+`READY` by discovery) and unknown destinations yield no selection candidate.
+An empty tuple means no approved metadata candidates, distinct from the
+`GatewayError("no_eligible_provider")` raised on execution admission.
+Every explicit binding is checked for route uniqueness and trusted policy
+destination/identity consistency even when it will be excluded. The
+`Gateway.eligible()` path, cloud preflight and fallback rules are unchanged.

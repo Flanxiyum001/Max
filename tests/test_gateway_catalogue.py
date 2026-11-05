@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from decimal import Decimal
 
 import pytest
@@ -22,6 +22,7 @@ from max_core.gateway.catalogue import (
     PricingProvenance,
     ProviderMetadata,
     RouteIdentity,
+    SelectionMetadata,
     TrustedRoutePolicy,
     project_model_spec,
 )
@@ -230,3 +231,47 @@ def test_revision_and_immutable_collections_are_validated() -> None:
         CatalogueSnapshot("gateway-dev", "unsafe revision with spaces")
     with pytest.raises(ValueError, match="schema version"):
         CatalogueSnapshot("gateway-dev", "rev-1", schema_version=3)
+
+
+def test_snapshot_route_id_unique_across_provider_and_dialect() -> None:
+    providers = (
+        ProviderMetadata("gateway-dev", "vendor-a"),
+        ProviderMetadata("gateway-dev", "vendor-b"),
+    )
+    models = (
+        ModelMetadata(ModelIdentity("gateway-dev", "vendor-a", "chat-one")),
+        ModelMetadata(ModelIdentity("gateway-dev", "vendor-b", "chat-two")),
+    )
+    first = RouteIdentity(models[0].identity, "shared-route", Dialect.OPENAI_CHAT)
+    second = RouteIdentity(models[1].identity, "shared-route", Dialect.ANTHROPIC_MESSAGES)
+    with pytest.raises(ValueError, match="Duplicate or ambiguous"):
+        CatalogueSnapshot(
+            "gateway-dev", "rev-1", providers, models,
+            (DiscoveredRoute(first), DiscoveredRoute(second)),
+        )
+
+
+@pytest.mark.parametrize("state", [ApprovalState.UNREVIEWED, ApprovalState.DISABLED])
+def test_unapproved_projection_cannot_create_selection_candidate(state: ApprovalState) -> None:
+    policy = replace(approved(), approval=state)
+    with pytest.raises(ValueError, match="Unapproved"):
+        project_model_spec(model(), route(), policy, "rev-1")
+    with pytest.raises(ValueError, match="approved, classified"):
+        SelectionMetadata(
+            identity=route(),
+            catalogue_revision="rev-1",
+            capabilities=CapabilityMetadata(),
+            approval=state,
+            inference_destination=InferenceDestination.VERIFIED_LOCAL,
+        )
+
+
+def test_unknown_inference_destination_cannot_be_selection_candidate() -> None:
+    with pytest.raises(ValueError, match="approved, classified"):
+        SelectionMetadata(
+            identity=route(),
+            catalogue_revision="rev-1",
+            capabilities=CapabilityMetadata(),
+            approval=ApprovalState.APPROVED,
+            inference_destination=InferenceDestination.UNKNOWN,
+        )

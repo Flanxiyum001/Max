@@ -7,6 +7,7 @@ from decimal import Decimal
 
 from max_core.gateway.adapters import HTTPAdapter
 from max_core.gateway.catalogue import (
+    ApprovalState,
     CapabilityMetadata,
     RouteIdentity,
     SelectionMetadata,
@@ -53,8 +54,10 @@ class Gateway:
     ) -> tuple[SelectionMetadata, ...]:
         """Return a secret-free model view from trusted route bindings.
 
-        This does NOT authorize execution. Only eligible() controls request
-        admission and fallback; unknown destinations remain ineligible.
+        Only approved, classified routes appear in the returned candidate tuple.
+        A result of () means no approved selection candidates, NOT an execution
+        error. This does NOT authorize execution: only eligible() controls
+        request admission and fallback, including cost/privacy checks.
         """
         if len(bindings) != len(self._models):
             raise ValueError("All configured models require explicit route bindings")
@@ -73,13 +76,24 @@ class Gateway:
             spec = configured.get((identity.model.provider_id, identity.model.model_id))
             if spec is None:
                 raise ValueError("Route binding has no matching configured model")
+            if policy.identity != identity:
+                raise ValueError("Trusted route identity does not match route binding")
+            if policy.inference_destination != spec.inference_destination:
+                raise ValueError("Trusted route destination does not match execution configuration")
+            # Validate *all* bindings, including excluded ones, before selecting.
+            # Unreviewed, disabled and unknown-destination routes never become candidates.
+            if (
+                policy.approval != ApprovalState.APPROVED
+                or spec.inference_destination == InferenceDestination.UNKNOWN
+            ):
+                continue
             evidence = (
                 verified_capabilities.get(identity)
                 if verified_capabilities is not None
                 else None
             )
             views.append(project_model_spec(spec, identity, policy, catalogue_revision, evidence))
-        if len(gateways) != 1:
+        if len(gateways) > 1:
             raise ValueError("A selection view must belong to one gateway instance")
         if verified_capabilities is not None and set(verified_capabilities) - seen:
             raise ValueError("Capability evidence references an unknown route")
