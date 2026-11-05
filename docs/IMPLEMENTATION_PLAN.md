@@ -57,3 +57,10 @@ A new first-party Python/FastAPI package adds: strong explicit environment confi
 **Acceptance:** missing/weak token fails before serving, non-loopback bind rejected, duplicate/malformed auth denied, spoofed Host rejected, no secret in logs/repr, unexpected 500 sanitized, pytest locally passing, CI results actually verified on PR. Do not present this single-token bootstrap as secure remote authentication. No DB or provider changes. No deployment.
 
 **Next review gate:** after owner manually merges the milestone-1 PR, milestone 2 creates *durable* PostgreSQL task state, checkpoints and transactional outbox on a new branch. It must not reuse the bootstrap token as public production auth.
+
+
+## Milestone 2 — durable task state (this PR)
+
+PostgreSQL and Alembic migration establish versioned task state, owner-scoped idempotent creation, worker leases and checkpoints, cancellable workflow transitions, restart/lease recovery quarantine and a transactional **metadata-only** outbox. Exposed HTTP routes only allow owner task create, list, get and cancel; worker claiming and event delivery remain internal, with **no external effects**. A worker's claimed result remains **awaiting_verification**, not completed. Setup and safeguards: [TASK_PERSISTENCE.md](TASK_PERSISTENCE.md).
+
+Acceptance gates: local unit tests, GitHub Actions PostgreSQL migrations and real concurrent worker tests, owner review of backwards-compatible bootstrap API, no database provisioning or deployment. Next: model gateway and independent verifier as small owner-reviewed PRs.
