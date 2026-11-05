@@ -8,7 +8,7 @@ from uuid import UUID
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi import status as http_status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from starlette.middleware.base import RequestResponseEndpoint
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import JSONResponse, Response
@@ -17,6 +17,14 @@ from max_core.config import Settings
 from max_core.observability import configure_access_logger
 from max_core.security import BootstrapBearerAuth
 from max_core.store import StoreError, TaskStore, TaskView, create_store
+from max_core.trust import GrantView, TrustError, TrustService
+
+
+class OwnerApprovalDecision(BaseModel):
+    """Owner-only; the temporary bearer token is NOT a production step-up factor."""
+
+    model_config = ConfigDict(extra="forbid")
+    approve: StrictBool
 
 
 class NewTask(BaseModel):
@@ -37,6 +45,16 @@ def require_store(request: Request) -> TaskStore:
             detail="Task persistence is not configured",
         )
     return storage
+
+
+def require_trust(request: Request) -> TrustService:
+    service: TrustService | None = request.app.state.trust_service
+    if service is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Trust storage is not configured",
+        )
+    return service
 
 
 def create_app(settings: Settings | None = None, store: TaskStore | None = None) -> FastAPI:
@@ -62,6 +80,7 @@ def create_app(settings: Settings | None = None, store: TaskStore | None = None)
         else (create_store(config.database_url) if config.database_url is not None else None)
     )
     app.state.task_store = task_store
+    app.state.trust_service = TrustService(task_store.engine) if task_store is not None else None
 
     @app.middleware("http")
     async def safe_access_log(request: Request, call_next: RequestResponseEndpoint) -> Response:
@@ -152,5 +171,22 @@ def create_app(settings: Settings | None = None, store: TaskStore | None = None)
             return storage.cancel("owner", str(task_id))
         except StoreError as exc:
             raise _error(exc) from None
+
+    @app.get("/v1/approvals", dependencies=[Depends(auth)])
+    def pending_approvals(
+        trust: Annotated[TrustService, Depends(require_trust)],
+    ) -> list[GrantView]:
+        return trust.list_pending("owner")
+
+    @app.post("/v1/approvals/{approval_id}/decision", dependencies=[Depends(auth)])
+    def decide_approval(
+        approval_id: UUID,
+        decision: OwnerApprovalDecision,
+        trust: Annotated[TrustService, Depends(require_trust)],
+    ) -> GrantView:
+        try:
+            return trust.decide("owner", str(approval_id), decision.approve)
+        except TrustError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.code) from None
 
     return app
