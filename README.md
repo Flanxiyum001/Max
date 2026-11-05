@@ -61,6 +61,9 @@ Platform-specific behavior will be validated on real devices. In particular, Way
 - [Security architecture](docs/SECURITY_ARCHITECTURE.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Implementation plan](docs/IMPLEMENTATION_PLAN.md)
+- [Research and technology evaluation](docs/RESEARCH_FINDINGS.md)
+- [Architecture diagrams](docs/ARCHITECTURE_DIAGRAMS.md)
+- [Phase 0 requirements and verification](docs/REQUIREMENT_TRACEABILITY.md)
 
 The [MAX identity](MAX.md), [personality](SOUL.md), and [operating model](CORE.md) describe how I want the assistant to behave. [AGENTS.md](AGENTS.md) contains separate instructions for coding workers; the future runtime must enforce security in code rather than relying on Markdown alone.
 
