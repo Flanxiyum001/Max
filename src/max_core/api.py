@@ -56,8 +56,10 @@ def create_app(settings: Settings | None = None, store: TaskStore | None = None)
         allowed_hosts=["127.0.0.1", "localhost"],
     )
     auth = BootstrapBearerAuth(config.bearer_token)
-    task_store = store if store is not None else (
-        create_store(config.database_url) if config.database_url is not None else None
+    task_store = (
+        store
+        if store is not None
+        else (create_store(config.database_url) if config.database_url is not None else None)
     )
     app.state.task_store = task_store
 
@@ -143,11 +145,12 @@ def create_app(settings: Settings | None = None, store: TaskStore | None = None)
             raise _error(exc) from None
 
     @app.post("/v1/tasks/{task_id}/cancel", dependencies=[Depends(auth)])
-    def cancel_task(task_id: UUID, storage: Annotated[TaskStore, Depends(require_store)]) -> TaskView:
+    def cancel_task(
+        task_id: UUID, storage: Annotated[TaskStore, Depends(require_store)]
+    ) -> TaskView:
         try:
             return storage.cancel("owner", str(task_id))
         except StoreError as exc:
             raise _error(exc) from None
 
     return app
-
