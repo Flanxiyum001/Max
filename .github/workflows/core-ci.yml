@@ -50,6 +50,9 @@ jobs:
         run: python -m ruff check src tests
       - name: Format check
         run: python -m ruff format --check src tests
+      - name: Show format corrections on failure
+        if: failure()
+        run: python -m ruff format --diff src tests
       - name: Static typing
         run: python -m mypy src/max_core
       - name: Apply PostgreSQL migrations
