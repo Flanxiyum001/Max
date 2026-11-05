@@ -50,8 +50,8 @@ def _tool(call_id: Any, name: Any, arguments: Any) -> ToolProposal:
             raise GatewayError("invalid_tool_proposal")
         try:
             arguments = json.loads(arguments)
-        except (json.JSONDecodeError, ValueError) as exc:
-            raise GatewayError("invalid_tool_proposal") from exc
+        except (json.JSONDecodeError, ValueError):
+            raise GatewayError("invalid_tool_proposal") from None
     if not isinstance(arguments, dict) or len(json.dumps(arguments)) > MAX_ARGS:
         raise GatewayError("invalid_tool_proposal")
     return ToolProposal(call_id=call_id, name=name, arguments=arguments)
