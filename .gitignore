@@ -1,0 +1,25 @@
+# Python caches, tooling, and temporary build artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Local credentials, environment overrides and personal data
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.sqlite3
+*.db
+private/
+secrets/
