@@ -10,7 +10,7 @@ import argparse
 import hashlib
 import json
 import sys
-import time
+from time import monotonic
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
@@ -205,9 +205,9 @@ class BoundedWorker:
 
             # Only a fixed-cost, no-I/O operation runs here. Clock checks are an
             # additional overrun guard, NOT a general-code hard-kill sandbox.
-            start = time.monotonic()
+            start = monotonic()
             result = execute_operation(operation)
-            duration = time.monotonic() - start
+            duration = monotonic() - start
             if not isinstance(result, bytes) or len(result) > OPERATIONS[operation.operation_id].max_output_bytes:
                 return self._recover_or_quarantine(canonical_id)
             if duration > min(_OPERATION_SECONDS, OPERATIONS[operation.operation_id].max_seconds):
