@@ -64,3 +64,9 @@ A new first-party Python/FastAPI package adds: strong explicit environment confi
 PostgreSQL and Alembic migration establish versioned task state, owner-scoped idempotent creation, worker leases and checkpoints, cancellable workflow transitions, restart/lease recovery quarantine and a transactional **metadata-only** outbox. Exposed HTTP routes only allow owner task create, list, get and cancel; worker claiming and event delivery remain internal, with **no external effects**. A worker's claimed result remains **awaiting_verification**, not completed. Setup and safeguards: [TASK_PERSISTENCE.md](TASK_PERSISTENCE.md).
 
 Acceptance gates: local unit tests, GitHub Actions PostgreSQL migrations and real concurrent worker tests, owner review of backwards-compatible bootstrap API, no database provisioning or deployment. Next: model gateway and independent verifier as small owner-reviewed PRs.
+
+## Milestone 3 — first-party MAX Model Gateway (this PR)
+
+Internal async Python library with OpenAI Chat Completions and Anthropic Messages request/response + SSE normalization; explicit model metadata/capabilities; local-only privacy enforcement; remote opt-in with priced admission ceiling; deterministic routing; inert tool proposals; strict parsing and bounded streams; safe non-streaming fallback limited to pre-body 429/503. Mock-provider fixture tests only: no owner FreeLLMAPI account or provider secrets, deployment or new public endpoint. See [GATEWAY_IMPLEMENTATION.md](GATEWAY_IMPLEMENTATION.md) for runbook, caveats and tests.
+
+**Acceptance:** retain all previous core/PostgreSQL tests, pass both CI Python versions, verify no credential/redirect leakage, and document unknown account quotas, tokenization, global budgets and future MAX Trust. Owner manually reviews and merges. Following PR: MAX Trust authorization and independently verified task outcomes.

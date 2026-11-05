@@ -86,3 +86,11 @@ These recommendations do **not** silently replace product requirements or claim 
 7. Complete repository tree inventory and real Windows/Hyprland hardware verification before freezing performance/platform decisions.
 
 Decision owner: the user. Engineering worker recommends, explains and supplies evidence; does not grant permissions or spend/deploy.
+
+## Milestone 3 reviewed implementation constraints
+
+- **ADR-004 implemented at contract level only:** OpenAI **Chat Completions** and Anthropic **Messages** transports are available as Python adapters and mock-tested. This does **not** mean live account/API compatibility is verified, and does not include OpenAI Responses API. The intended FreeLLMAPI instance remains unresolved (ADR-005).
+- **Privacy default:** external cloud calls require explicit opt-in and a per-request USD ceiling with configured token prices; confidential/restricted data stays local-only. No automatic provider discovery or blanket fallback.
+- **Pricing limitation:** input counts are conservative text-envelope estimates, not an exact tokenizer, and an admission ceiling is not an absolute charge guarantee. Future global quota/account reconciliation and authoritative usage checks remain open.
+- **Trust boundary:** all model-originated tool calls remain inert proposals; no execution until MAX Trust grants a typed, audited operation. Streaming does not retry/fallback after any response begins.
+- **Human-controlled rollout:** review GitHub CI, code and policy before merging; no provider secrets, backend deploy or account actions are authorized here.

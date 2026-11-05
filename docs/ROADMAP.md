@@ -99,3 +99,7 @@ Development API setup and explicit security limitations: [CORE_BOOTSTRAP.md](COR
 ## Milestone 2 implementation slice
 
 A durable PostgreSQL repository with explicit Alembic migration, idempotent create, cancel, bounded worker lease/checkpoint and internal outbox is proposed in a focused PR. It does not provide a worker, real AI, tool execution or remote deploy. Read [TASK_PERSISTENCE.md](TASK_PERSISTENCE.md). This PR must pass both Python-version CI matrices and be owner-merged before proceeding to the model gateway.
+
+## Milestone 3 implementation slice
+
+The owner-controlled MAX Gateway is now a **Python library**, not a publicly reachable service. Its explicit adapters handle OpenAI-compatible Chat Completions and Anthropic Messages with normalized text/stream/tool proposals, privacy routing and per-request budget admission. No selected FreeLLMAPI endpoint or real provider credentials have been configured. Model text cannot trigger tool execution. See [GATEWAY_IMPLEMENTATION.md](GATEWAY_IMPLEMENTATION.md). The next owner-reviewed milestone handles MAX Trust and independent verification.

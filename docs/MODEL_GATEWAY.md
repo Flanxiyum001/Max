@@ -70,3 +70,7 @@ Keys are injected from a trusted OS-managed secret store and rotated separately.
 - Provider selection and fallback auditable with actual model/provider IDs.
 
 References: [RESEARCH_FINDINGS.md](RESEARCH_FINDINGS.md), [TECHNICAL_DESIGN.md](TECHNICAL_DESIGN.md), [THREAT_MODEL.md](THREAT_MODEL.md), and owner [DECISIONS.md](DECISIONS.md).
+
+## Milestone 3 implemented subset (2026-11-05)
+
+The first-party internal gateway contract has landed as a reviewable branch under `src/max_core/gateway/`; usage, stream, tool proposal and privacy-negative tests use HTTPX's mock transport. **No provider is connected and no public API/production deployment exists.** The gateway supports two text chat wire formats, bounded SSE streaming, fail-closed cloud authorization, quoted-price preflight and restricted fallback. This is **a narrower subset** than the full architecture described above: neither vision/audio, schema-mode probing, global cost ledgers nor trusted MAX tool authorization are implemented. Refer to [GATEWAY_IMPLEMENTATION.md](GATEWAY_IMPLEMENTATION.md) for accurate scope and implementation-level limitations.
