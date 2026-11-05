@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
@@ -174,13 +174,13 @@ def test_same_revision_tie_break_is_stable(store: TaskStore) -> None:
     first = service.page("owner", task.id, limit=1)
     assert first.next_cursor
     second = service.page("owner", task.id, limit=1, cursor=first.next_cursor)
-    assert [first.events[0].kind, second.events[0].kind] == sorted(
-        ["task.queued", "task.extra"], key=lambda k: next(
-            x.id for x in Session(store.engine).scalars(
-                select(OutboxEvent).where(OutboxEvent.kind == k, OutboxEvent.task_id == task.id)
-            )
-        )
-    )
+    with Session(store.engine) as session:
+        ordered = session.scalars(
+            select(OutboxEvent)
+            .where(OutboxEvent.task_id == task.id)
+            .order_by(OutboxEvent.task_revision, OutboxEvent.id)
+        ).all()
+    assert [first.events[0].kind, second.events[0].kind] == [event.kind for event in ordered]
     assert second.next_cursor is None
 
 
@@ -211,7 +211,7 @@ def test_cli_renders_metadata_without_objective(store: TaskStore) -> None:
         headers=authorized(),
         transport=httpx.MockTransport(handle),
     ) as client:
-        rendered = render_timeline(client, __import__("uuid").UUID(task_id), limit=1, max_pages=10)
+        rendered = render_timeline(client, UUID(task_id), limit=1, max_pages=10)
     assert "task.queued" in rendered
     assert "task.checkpointed" in rendered
     assert "task.awaiting_verification" in rendered
