@@ -408,16 +408,25 @@ def test_postgres_exact_replay_refuses_tampered_checkpoint_metadata(
         assert existing is not None
         assert existing.verdict == "verified"
         assert existing.reason_code == supported.reason_code
-        assert session.scalars(
-            select(VerificationCheck.id).where(VerificationCheck.task_id == task_id)
-        ).all() == rows_before
-        assert session.scalars(
-            select(OutboxEvent.event_key).where(OutboxEvent.task_id == task_id)
-        ).all() == keys_before
-        assert session.scalar(
-            select(OutboxEvent.id).where(
-                OutboxEvent.task_id == task_id,
-                OutboxEvent.kind == "task.verified",
+        assert (
+            session.scalars(
+                select(VerificationCheck.id).where(VerificationCheck.task_id == task_id)
+            ).all()
+            == rows_before
+        )
+        assert (
+            session.scalars(
+                select(OutboxEvent.event_key).where(OutboxEvent.task_id == task_id)
+            ).all()
+            == keys_before
+        )
+        assert (
+            session.scalar(
+                select(OutboxEvent.id).where(
+                    OutboxEvent.task_id == task_id,
+                    OutboxEvent.kind == "task.verified",
+                )
             )
-        ) is not None
+            is not None
+        )
     assert postgres_store.get("owner", task_id).state == "completed"
