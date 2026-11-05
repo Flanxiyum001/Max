@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 from max_core.models import OutboxEvent, TrustAudit, VerificationCheck
 from max_core.store import StoreError, TaskStore
 from max_core.verification import IndependentVerifier
-from tests.test_durable_tasks import store  # noqa: F401
 
 ARTIFACT = b"trusted fixture observed through separate reader"
 
