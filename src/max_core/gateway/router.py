@@ -66,11 +66,7 @@ class Gateway:
             if spec.inference_destination == InferenceDestination.CLOUD:
                 # Cloud always requires known pricing and a quoted request budget,
                 # even when its proxy is on loopback.
-                if (
-                    cost is None
-                    or request.max_cost_usd is None
-                    or cost > request.max_cost_usd
-                ):
+                if cost is None or request.max_cost_usd is None or cost > request.max_cost_usd:
                     continue
             elif request.max_cost_usd is not None and (cost is None or cost > request.max_cost_usd):
                 continue
