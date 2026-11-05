@@ -81,8 +81,6 @@ def test_postgres_simultaneous_cancel_idempotent_no_duplicate_effect(
     assert final.state == "cancelled"
     assert final.revision == 2
     with Session(postgres_store.engine) as session:
-        events = session.scalars(
-            select(OutboxEvent).where(OutboxEvent.task_id == task.id)
-        ).all()
+        events = session.scalars(select(OutboxEvent).where(OutboxEvent.task_id == task.id)).all()
     assert sorted(event.kind for event in events) == ["task.cancelled", "task.queued"]
     assert all(event.delivery_state == "pending" for event in events)
