@@ -8,7 +8,14 @@ from typing import Any
 
 import httpx
 
-from max_core.gateway.contracts import Dialect, GatewayError, GatewayRequest, GatewayResponse, ModelSpec, StreamEvent
+from max_core.gateway.contracts import (
+    Dialect,
+    GatewayError,
+    GatewayRequest,
+    GatewayResponse,
+    ModelSpec,
+    StreamEvent,
+)
 from max_core.gateway.normalize import normalize_anthropic, normalize_openai
 from max_core.gateway.streaming import anthropic_events, openai_events, sse_frames
 
@@ -19,7 +26,9 @@ def _messages(request: GatewayRequest, dialect: Dialect) -> dict[str, Any]:
     if dialect == Dialect.OPENAI_CHAT:
         return {"messages": [{"role": m.role, "content": m.content} for m in request.messages]}
     system_parts = [m.content for m in request.messages if m.role == "system"]
-    regular = [{"role": m.role, "content": m.content} for m in request.messages if m.role != "system"]
+    regular = [
+        {"role": m.role, "content": m.content} for m in request.messages if m.role != "system"
+    ]
     if not regular:
         raise GatewayError("invalid_request")
     result: dict[str, Any] = {"messages": regular}
@@ -43,7 +52,10 @@ def _params(spec: ModelSpec, request: GatewayRequest, *, stream: bool) -> dict[s
 
 
 def _headers(spec: ModelSpec, *, stream: bool) -> dict[str, str]:
-    result = {"Content-Type": "application/json", "Accept": "text/event-stream" if stream else "application/json"}
+    result = {
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream" if stream else "application/json",
+    }
     if spec.dialect == Dialect.OPENAI_CHAT:
         if spec.api_key is not None:
             result["Authorization"] = f"Bearer {spec.api_key}"
@@ -56,7 +68,9 @@ def _headers(spec: ModelSpec, *, stream: bool) -> dict[str, str]:
 
 def _check_status(status: int) -> None:
     if status in {429, 503}:
-        raise GatewayError("rate_limited" if status == 429 else "provider_unavailable", fallback_safe=True)
+        raise GatewayError(
+            "rate_limited" if status == 429 else "provider_unavailable", fallback_safe=True
+        )
     if status in {401, 403}:
         raise GatewayError("auth_failure")
     if status == 400 or status == 422:
@@ -76,8 +90,11 @@ class HTTPAdapter:
     async def complete(self, spec: ModelSpec, request: GatewayRequest) -> GatewayResponse:
         try:
             async with self.client.stream(
-                "POST", spec.endpoint, json=_params(spec, request, stream=False),
-                headers=_headers(spec, stream=False), timeout=request.timeout_seconds,
+                "POST",
+                spec.endpoint,
+                json=_params(spec, request, stream=False),
+                headers=_headers(spec, stream=False),
+                timeout=request.timeout_seconds,
                 follow_redirects=False,
             ) as response:
                 _check_status(response.status_code)
@@ -105,8 +122,11 @@ class HTTPAdapter:
     async def stream(self, spec: ModelSpec, request: GatewayRequest) -> AsyncIterator[StreamEvent]:
         try:
             async with self.client.stream(
-                "POST", spec.endpoint, json=_params(spec, request, stream=True),
-                headers=_headers(spec, stream=True), timeout=request.timeout_seconds,
+                "POST",
+                spec.endpoint,
+                json=_params(spec, request, stream=True),
+                headers=_headers(spec, stream=True),
+                timeout=request.timeout_seconds,
                 follow_redirects=False,
             ) as response:
                 _check_status(response.status_code)
