@@ -221,14 +221,10 @@ def test_postgres_retry_when_commit_lands_between_prior_lookup_and_snapshot(
             owner_id, target_id, "pg-gap-window-001"
         )
         committed.append(first.check_id)
-        monkeypatch.setattr(
-            IndependentVerifier, "_snapshot", staticmethod(commit_before_snapshot)
-        )
+        monkeypatch.setattr(IndependentVerifier, "_snapshot", staticmethod(commit_before_snapshot))
         return original(session, owner_id, target_id)
 
-    monkeypatch.setattr(
-        IndependentVerifier, "_snapshot", staticmethod(commit_before_snapshot)
-    )
+    monkeypatch.setattr(IndependentVerifier, "_snapshot", staticmethod(commit_before_snapshot))
     restored = IndependentVerifier(postgres_store.engine).verify_dev_add(
         "owner", task_id, "pg-gap-window-001"
     )
