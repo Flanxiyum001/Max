@@ -188,7 +188,7 @@ def test_execution_time_overrun_is_quarantined(
 ) -> None:
     task_id = task_for(store, objective("dev.health", {}))
     times = iter((100.0, 102.0))
-    monkeypatch.setattr(bounded_worker.time, "monotonic", lambda: next(times))
+    monkeypatch.setattr(bounded_worker, "monotonic", lambda: next(times))
     report = BoundedWorker(store).run_one(task_id)
     assert report.state == "needs_reconciliation"
     assert report.outcome_digest is None
