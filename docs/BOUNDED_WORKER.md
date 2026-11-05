@@ -88,3 +88,8 @@ Review unit and PostgreSQL concurrency tests for: each operation, schema/unknown
 No database migration or dependency is introduced. If unmerged, close this single PR. If merged, revert only this scoped worker, tests and two trusted internal store methods after reviewing any local in-flight dev tasks (do not delete real data). Already-recorded task/outbox entries are durable and are not rolled back automatically. **The owner alone reviews and merges**.
 
 **Next gates (not part of Milestone 7):** trusted independent observer for local computations; stronger process-based time isolation before any nontrivial operation; dedicated locally authenticated worker identity/role before running outside a single-user development environment; comprehensive secrets/retention controls and owner-machine validation before any sensitive or remote use.
+
+
+## Milestone 8 independent arithmetic observer (separate owner-review branch)
+
+A separately reviewed [independent `dev.add` observer](INDEPENDENT_EVIDENCE_OBSERVER.md) recomputes the expected mathematical result from persisted inputs, without calling this worker's calculator or trusting its output digest as evidence of truth. The existing `IndependentVerifier` remains the sole task finalizer. New attempt-bound records hold the exact observer request identity and input/checkpoint/claim provenance. **Mathematical correctness does not attest that the worker process ran.** The bounded worker remains manual, pure, local-only and unchanged by this milestone.
