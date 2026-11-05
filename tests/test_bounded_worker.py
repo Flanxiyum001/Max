@@ -57,12 +57,13 @@ def test_each_registered_operation_records_unverified_outcome(
         ).all()
         assert len(checkpoints) == 1
         assert checkpoints[0].step_name == json.loads(operation)["op"]
-        events = session.scalars(
-            select(OutboxEvent).where(OutboxEvent.task_id == task_id)
-        ).all()
+        events = session.scalars(select(OutboxEvent).where(OutboxEvent.task_id == task_id)).all()
         assert len(events) == 4
         assert sorted(x.kind for x in events) == [
-            "task.awaiting_verification", "task.checkpointed", "task.queued", "task.running"
+            "task.awaiting_verification",
+            "task.checkpointed",
+            "task.queued",
+            "task.running",
         ]
         assert all(x.delivery_state == "pending" for x in events)
 
@@ -92,9 +93,7 @@ def test_bad_or_unknown_operation_does_not_claim(store: TaskStore, bad: str) -> 
         BoundedWorker(store).run_one(task_id)
     assert store.get("owner", task_id).state == "queued"
     with Session(store.engine) as session:
-        events = session.scalars(
-            select(OutboxEvent).where(OutboxEvent.task_id == task_id)
-        ).all()
+        events = session.scalars(select(OutboxEvent).where(OutboxEvent.task_id == task_id)).all()
         assert len(events) == 1 and events[0].kind == "task.queued"
 
 
@@ -224,9 +223,7 @@ def test_expired_lease_never_becomes_verified_or_claimed_again(store: TaskStore)
     assert store.reconcile_expired("owner") == 0
 
 
-def test_verifier_needs_independent_observation(
-    store: TaskStore
-) -> None:
+def test_verifier_needs_independent_observation(store: TaskStore) -> None:
     task_id = task_for(store, objective("dev.add", {"a": 3, "b": 5}))
     report = BoundedWorker(store).run_one(task_id)
     assert report.state == "awaiting_verification"
@@ -270,9 +267,7 @@ def test_no_network_shell_or_file_capability_in_operations(
     )
 
 
-def test_worker_does_not_reveal_rejected_objective(
-    store: TaskStore
-) -> None:
+def test_worker_does_not_reveal_rejected_objective(store: TaskStore) -> None:
     sensitive = '{"op":"dev.health","params":{},"secret":"VERY_PRIVATE_TEST_VALUE"}'
     task_id = task_for(store, sensitive)
     with pytest.raises(WorkerError) as exc:
