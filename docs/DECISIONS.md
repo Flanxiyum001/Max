@@ -94,3 +94,11 @@ Decision owner: the user. Engineering worker recommends, explains and supplies e
 - **Pricing limitation:** input counts are conservative text-envelope estimates, not an exact tokenizer, and an admission ceiling is not an absolute charge guarantee. Future global quota/account reconciliation and authoritative usage checks remain open.
 - **Trust boundary:** all model-originated tool calls remain inert proposals; no execution until MAX Trust grants a typed, audited operation. Streaming does not retry/fallback after any response begins.
 - **Human-controlled rollout:** review GitHub CI, code and policy before merging; no provider secrets, backend deploy or account actions are authorized here.
+
+## Milestone 4 security posture — implementation status
+
+- **Trust registered capability:** `task.status` only; it returns task ID, state and revision. All side-effectful tools and security/financial changes are **unregistered and denied**, even with a locally approved grant.
+- **Approval:** local bearer-authenticated owner route can approve a **single read-only** scoped action. The grant is bound to task/actor/session/device/proposal ID/parameters, has a short expiry and is transactionally single-use. The bearer token is **not human-presence/MFA proof** and must never authorize real purchases, deployments, messages, shell or vault sharing.
+- **Independent verification:** trusted in-process reader interface provides separate observed bytes; only matching SHA-256 can advance a task from `awaiting_verification` to `completed`. There is no real external effect observer or attestation yet; this is a mocked internal verification contract.
+- **Storage:** additive migration `0002_trust_verification` stores approval ledger, basic audit and evidence check records; readiness now checks revision 0002. DB audit is not tamper-evident and requires future role separation.
+- **Review control:** no migration on a real database, no merge, no deploy or external tool capability without separate owner approval. See [TRUST_IMPLEMENTATION.md](TRUST_IMPLEMENTATION.md).
