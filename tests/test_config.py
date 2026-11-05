@@ -51,12 +51,16 @@ def test_invalid_log_level() -> None:
         Settings(bearer_token=TEST_TOKEN, log_level="TRACE")
 
 
-@pytest.mark.parametrize("url", ["sqlite:///test.db", "postgresql://localhost/test", "file:///tmp/test.db"])
+@pytest.mark.parametrize(
+    "url", ["sqlite:///test.db", "postgresql://localhost/test", "file:///tmp/test.db"]
+)
 def test_task_database_must_use_postgresql_psycopg(url: str) -> None:
     with pytest.raises(ConfigurationError, match="MAX_DATABASE_URL"):
         Settings(bearer_token=TEST_TOKEN, database_url=url)
 
 
 def test_database_url_is_not_printed_in_settings_repr() -> None:
-    settings = Settings(bearer_token=TEST_TOKEN, database_url="postgresql+psycopg://example@localhost/test")
+    settings = Settings(
+        bearer_token=TEST_TOKEN, database_url="postgresql+psycopg://example@localhost/test"
+    )
     assert "postgresql+psycopg" not in repr(settings)
