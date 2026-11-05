@@ -17,9 +17,8 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import SQLAlchemyError
 
-from max_core.config import ConfigurationError, Settings
+from max_core.config import Settings
 from max_core.store import StoreError, create_store
 
 OBSERVER_ID = "max.dev_add.expected_result"
@@ -165,7 +164,8 @@ def main(argv: list[str] | None = None) -> int:
             "This verifies calculation correctness, NOT proof the worker ran."
         )
         return 0 if recorded.conclusion == "supported" and fresh.state == "completed" else 3
-    except (ConfigurationError, StoreError, SQLAlchemyError, OSError, ValueError, RuntimeError):
+    except Exception:
+        # CLI boundary: never print private SQL, objective or third-party exception text.
         print(
             "MAX observer: denied, conflicted, stale or unavailable; no verification success claimed.",
             file=sys.stderr,
