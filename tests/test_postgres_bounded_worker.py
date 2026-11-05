@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from max_core import bounded_worker
 from max_core.bounded_worker import BoundedWorker, WorkerError
 from max_core.models import OutboxEvent
-from max_core.store import StoreError, TaskStore
+from max_core.store import TaskStore
 
 
 def objective(a: int = 9, b: int = 3) -> str:
@@ -24,9 +24,7 @@ def objective(a: int = 9, b: int = 3) -> str:
 def test_postgres_two_workers_never_execute_same_task(
     postgres_store: TaskStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    task, _ = postgres_store.create(
-        "owner", objective(), "pg-worker-double-" + uuid4().hex
-    )
+    task, _ = postgres_store.create("owner", objective(), "pg-worker-double-" + uuid4().hex)
     entering, release = Event(), Event()
     original = bounded_worker.execute_operation
     calls = 0
@@ -62,9 +60,7 @@ def test_postgres_two_workers_never_execute_same_task(
 def test_postgres_concurrent_cancel_after_start_acknowledges_real_stop(
     postgres_store: TaskStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    task, _ = postgres_store.create(
-        "owner", objective(3, 2), "pg-worker-cancel-" + uuid4().hex
-    )
+    task, _ = postgres_store.create("owner", objective(3, 2), "pg-worker-cancel-" + uuid4().hex)
     entering, release = Event(), Event()
     original = bounded_worker.execute_operation
 
@@ -130,12 +126,8 @@ def test_postgres_cancel_races_unverified_outcome_without_completion(
     assert "task.verified" not in kinds
 
 
-def test_postgres_expired_claim_requires_manual_reconciliation(
-    postgres_store: TaskStore
-) -> None:
-    task, _ = postgres_store.create(
-        "owner", objective(), "pg-worker-interrupted-" + uuid4().hex
-    )
+def test_postgres_expired_claim_requires_manual_reconciliation(postgres_store: TaskStore) -> None:
+    task, _ = postgres_store.create("owner", objective(), "pg-worker-interrupted-" + uuid4().hex)
     postgres_store.claim("owner", task.id, "interrupted-worker", ttl_seconds=5)
     with pytest.raises(WorkerError, match="task_not_queued"):
         BoundedWorker(postgres_store).run_one(task.id)
