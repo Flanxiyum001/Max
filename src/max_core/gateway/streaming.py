@@ -93,8 +93,14 @@ async def openai_events(
             if text_length > MAX_TEXT:
                 raise GatewayError("stream_too_large")
             if chunk:
-                yield StreamEvent(seq, request.request_id, spec.provider_id, spec.model_id,
-                                  "content_delta", text=chunk)
+                yield StreamEvent(
+                    seq,
+                    request.request_id,
+                    spec.provider_id,
+                    spec.model_id,
+                    "content_delta",
+                    text=chunk,
+                )
                 seq += 1
         tool_deltas = delta.get("tool_calls", [])
         if not isinstance(tool_deltas, list):
@@ -133,15 +139,23 @@ async def openai_events(
     for idx in sorted(calls):
         call = calls[idx]
         proposal = _tool(call["id"], call["name"], call["arguments"])
-        yield StreamEvent(seq, request.request_id, spec.provider_id, spec.model_id,
-                          "tool_proposal", tool_proposal=proposal)
+        yield StreamEvent(
+            seq,
+            request.request_id,
+            spec.provider_id,
+            spec.model_id,
+            "tool_proposal",
+            tool_proposal=proposal,
+        )
         seq += 1
     if final_usage is not None:
-        yield StreamEvent(seq, request.request_id, spec.provider_id, spec.model_id,
-                          "usage", usage=final_usage)
+        yield StreamEvent(
+            seq, request.request_id, spec.provider_id, spec.model_id, "usage", usage=final_usage
+        )
         seq += 1
-    yield StreamEvent(seq, request.request_id, spec.provider_id, spec.model_id,
-                      "complete", finish_reason=finish)
+    yield StreamEvent(
+        seq, request.request_id, spec.provider_id, spec.model_id, "complete", finish_reason=finish
+    )
 
 
 async def anthropic_events(
@@ -185,15 +199,25 @@ async def anthropic_events(
                     text_length += len(initial)
                     if text_length > MAX_TEXT:
                         raise GatewayError("stream_too_large")
-                    yield StreamEvent(seq, request.request_id, spec.provider_id, spec.model_id,
-                                      "content_delta", text=initial)
+                    yield StreamEvent(
+                        seq,
+                        request.request_id,
+                        spec.provider_id,
+                        spec.model_id,
+                        "content_delta",
+                        text=initial,
+                    )
                     seq += 1
             elif typ == "tool_use":
                 tool_count += 1
                 if tool_count > MAX_TOOLS:
                     raise GatewayError("invalid_tool_proposal")
-                blocks[idx] = {"type": "tool_use", "id": block.get("id", ""),
-                               "name": block.get("name", ""), "input": ""}
+                blocks[idx] = {
+                    "type": "tool_use",
+                    "id": block.get("id", ""),
+                    "name": block.get("name", ""),
+                    "input": "",
+                }
             else:
                 raise GatewayError("unsupported_capability")
         elif kind == "content_block_delta":
@@ -208,8 +232,14 @@ async def anthropic_events(
                 if text_length > MAX_TEXT:
                     raise GatewayError("stream_too_large")
                 if chunk:
-                    yield StreamEvent(seq, request.request_id, spec.provider_id, spec.model_id,
-                                      "content_delta", text=chunk)
+                    yield StreamEvent(
+                        seq,
+                        request.request_id,
+                        spec.provider_id,
+                        spec.model_id,
+                        "content_delta",
+                        text=chunk,
+                    )
                     seq += 1
             elif block["type"] == "tool_use" and delta.get("type") == "input_json_delta":
                 part = delta.get("partial_json")
@@ -228,8 +258,14 @@ async def anthropic_events(
             if block["type"] == "tool_use":
                 input_json = block["input"] or "{}"
                 proposal = _tool(block["id"], block["name"], input_json)
-                yield StreamEvent(seq, request.request_id, spec.provider_id, spec.model_id,
-                                  "tool_proposal", tool_proposal=proposal)
+                yield StreamEvent(
+                    seq,
+                    request.request_id,
+                    spec.provider_id,
+                    spec.model_id,
+                    "tool_proposal",
+                    tool_proposal=proposal,
+                )
                 seq += 1
         elif kind == "message_delta":
             delta = _mapping(obj.get("delta"))
@@ -241,7 +277,9 @@ async def anthropic_events(
             usage = _usage(obj.get("usage"), "input_tokens", "output_tokens")
             if usage is not None:
                 input_count = usage.input_tokens if usage.input_tokens is not None else input_count
-                output_count = usage.output_tokens if usage.output_tokens is not None else output_count
+                output_count = (
+                    usage.output_tokens if usage.output_tokens is not None else output_count
+                )
         elif kind == "message_stop":
             stopped = True
             break
@@ -250,8 +288,15 @@ async def anthropic_events(
     if not stopped or blocks:
         raise GatewayError("stream_interrupted")
     if input_count is not None or output_count is not None:
-        yield StreamEvent(seq, request.request_id, spec.provider_id, spec.model_id,
-                          "usage", usage=TokenUsage(input_count, output_count))
+        yield StreamEvent(
+            seq,
+            request.request_id,
+            spec.provider_id,
+            spec.model_id,
+            "usage",
+            usage=TokenUsage(input_count, output_count),
+        )
         seq += 1
-    yield StreamEvent(seq, request.request_id, spec.provider_id, spec.model_id,
-                      "complete", finish_reason=finish)
+    yield StreamEvent(
+        seq, request.request_id, spec.provider_id, spec.model_id, "complete", finish_reason=finish
+    )
