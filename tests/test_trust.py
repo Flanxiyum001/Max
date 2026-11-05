@@ -18,7 +18,6 @@ from max_core.models import ApprovalGrant, TrustAudit, utc_now
 from max_core.store import TaskStore
 from max_core.trust import ActorContext, TrustError, TrustService
 from tests.conftest import TEST_TOKEN
-from tests.test_durable_tasks import store  # noqa: F401
 
 
 def context(task_id: str, **kwargs: str) -> ActorContext:
