@@ -98,3 +98,21 @@ Do not begin telephony, payments, vault sharing, autonomous deployment, or unres
 ## 12. Open architecture decisions
 
 See [DECISIONS.md](DECISIONS.md). No candidate framework, provider, or integration is accepted solely because it appears in this document.
+
+## 13. Phase 0B decision refinement — proposed stack (2026-11-05)
+
+This section is the working candidate baseline; previous sections remain provisional, not proof of implementation.
+
+- **MAX Core:** Python/FastAPI as a modular first-party API, background worker with bounded queue and outbox persisted in PostgreSQL. A Go/TypeScript core was considered but would increase initial ecosystem integration or developer workload without proven benefit. Avoid in-memory authoritative tasks and premature microservices. Core handles task IDs, states, authz context, checkpoints, retry budget, side-effect record and verifier.
+- **Database:** PostgreSQL as source of truth, with schema migrations, separate narrowly-scoped DB roles, external encrypted backups and restore drills. Evaluate managed DB price/storage/retention in the first deploy milestone. SQLite remains a viable isolated experiment alternative but is not the proposed hosted durability store.
+- **UI:** shared TypeScript components + Tauri 2 desktop prototype (Windows 11 and Hyprland explicitly tested), private iPhone responsive web UI. Electron offers mature desktop APIs at higher memory footprint; native Qt affords deeper OS behavior at greater UI duplication. Wayland floating/pinned/click-through capabilities remain **unverified until a real Hyprland compositor test**. Do not promise background iOS voice on a PWA.
+- **Model transport:** MAX-owned request and response schema, separate OpenAI Chat Completions-style and Anthropic Messages-style adapters, optional vetted FreeLLMAPI and direct provider backends, local Ollama adapter. Capability and billing metadata must be probed per provider, not inferred from a compatible URL. No cloud fallback from local-only data. See [MODEL_GATEWAY.md](MODEL_GATEWAY.md).
+- **Tools and agents:** typed allowlisted capability registry with trusted MAX Trust authorization on every call. MCP transport authorization is not MAX's own permission model; malicious tool output cannot alter scope. Use Playwright browser contexts **plus separate process/network isolation** for hostile research, and sandbox acquired skills. [Official MCP spec](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization), [Playwright isolation](https://playwright.dev/docs/browser-contexts).
+- **Voice:** local opt-in wake/VAD, switchable STT/TTS adapters, interruption and privacy controls. Licensing varies between openWakeWord code and bundled weights; a licensed original voice is required. Measure real device-to-first-audio latency rather than accepting model benchmarks.
+- **Telephony:** no provider chosen; published Twilio India domestic voice restrictions block treating the service as a guaranteed Indian two-way solution. Prefer authenticated in-app voice first, and run a real provider/regional feasibility gate later.
+- **OpenClaw:** reference implementation/patterns only, not foundation. Full tradeoffs in [OPENCLAW_EVALUATION.md](OPENCLAW_EVALUATION.md). OpenHands SDK may later support **isolated coding jobs**, not MAX Core ownership. Hermes Agent is useful for learning/skill lifecycle comparisons, not permission delegation.
+- **Security:** central deny-by-default policy, exact-action approval, separate device node enrollment, keyed secrets, data classification, owner-controlled PRs, independent verification and supervised recovery. See [THREAT_MODEL.md](THREAT_MODEL.md).
+
+**Cost/risk note:** Python+Postgres+worker+browser+speech+desktop may introduce multiple operational dependencies. Add them progressively. Actual hosting, storage, GPU, token, telecom and licensing costs are **unknown until quoted/measured**; no 'free forever' claim. Prototype resource limits and backup restoration before deployment.
+
+Eight explicit diagrams: [ARCHITECTURE_DIAGRAMS.md](ARCHITECTURE_DIAGRAMS.md). Primary-source evidence and unresolved claims: [RESEARCH_FINDINGS.md](RESEARCH_FINDINGS.md). Test cases: [VALIDATION_PLAN.md](VALIDATION_PLAN.md). No runtime or infrastructure changes were made in Phase 0B.
