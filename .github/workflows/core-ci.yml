@@ -26,6 +26,7 @@ jobs:
       - name: Install validation dependencies
         run: |
           python -m pip install --upgrade pip
+          python -m pip install 'setuptools>=84.1.0,<85'
           python -m pip install -e '.[dev]'
       - name: Lint
         run: python -m ruff check src tests
