@@ -43,6 +43,12 @@ I want MAX to be dependable before it becomes complicated. My development approa
 
 MAX will never be allowed to grant itself permissions, treat external content as trusted instructions, or report an action as complete without evidence. Sensitive operations require explicit confirmation. Payment authentication secrets do not belong in assistant memory.
 
+## Current implementation milestone — local MAX Core bootstrap
+
+I now have a **small local development API** under `src/max_core/`, with fail-closed configuration, a temporary owner bearer token, minimal health routes, allowlisted JSON request logs, and tests. I can run it locally following [my setup guide](docs/CORE_BOOTSTRAP.md). This is **not** yet a working autonomous assistant, remote web service, memory system, or model gateway.
+
+I deliberately keep this development listener bound to `127.0.0.1`. I won't deploy it publicly or connect personal accounts until a stronger authentication and security milestone has been reviewed.
+
 ## Planned platforms
 
 | Platform | Experience |
