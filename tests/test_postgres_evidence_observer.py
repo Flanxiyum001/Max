@@ -237,16 +237,15 @@ def test_postgres_upgrade_0002_to_0003_preserves_actual_historical_row(
     postgres_store: TaskStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Migrate an isolated temporary schema containing a PRE-0003 check."""
-    from alembic import command
     from alembic.config import Config
     from sqlalchemy import create_engine
+
+    from alembic import command
 
     schema = "max_observer_test_" + uuid4().hex
     with postgres_store.engine.begin() as connection:
         connection.exec_driver_sql(f'CREATE SCHEMA "{schema}"')
-    schema_url = postgres_store.engine.url.set(
-        query={"options": f"-csearch_path={schema}"}
-    )
+    schema_url = postgres_store.engine.url.set(query={"options": f"-csearch_path={schema}"})
     monkeypatch.setenv("MAX_DATABASE_URL", schema_url.render_as_string(hide_password=False))
     engine = create_engine(schema_url)
     task_id = str(uuid4())
@@ -260,8 +259,11 @@ def test_postgres_upgrade_0002_to_0003_preserves_actual_historical_row(
                     "idempotency_key,state,revision,created_at,updated_at) "
                     "VALUES (:id,'owner','legacy test',:hash,:key,'completed',5,now(),now())"
                 ),
-                {"id": task_id, "hash": hashlib.sha256(b"legacy test").hexdigest(),
-                 "key": "migration-legacy-001"},
+                {
+                    "id": task_id,
+                    "hash": hashlib.sha256(b"legacy test").hexdigest(),
+                    "key": "migration-legacy-001",
+                },
             )
             connection.execute(
                 text(
@@ -269,7 +271,11 @@ def test_postgres_upgrade_0002_to_0003_preserves_actual_historical_row(
                     "(id,owner_id,task_id,observed_digest,expected_digest,verdict,checked_at) "
                     "VALUES (:id,'owner',:task,:digest,:digest,'verified',now())"
                 ),
-                {"id": check_id, "task": task_id, "digest": hashlib.sha256(b"evidence").hexdigest()},
+                {
+                    "id": check_id,
+                    "task": task_id,
+                    "digest": hashlib.sha256(b"evidence").hexdigest(),
+                },
             )
         command.upgrade(Config("alembic.ini"), "0003_independent_observer")
         with engine.connect() as connection:
