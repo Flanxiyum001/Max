@@ -31,7 +31,7 @@ def _int_count(value: Any) -> int | None:
         return None
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise GatewayError("malformed_provider_response")
-    return value
+    return int(value)
 
 
 def _text(value: Any) -> str:
