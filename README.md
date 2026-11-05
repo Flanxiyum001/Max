@@ -6,7 +6,7 @@ MAX is my long-term project to build a personal, voice-first AI assistant that w
 
 I'm designing MAX as **my own assistant and software stack**: its identity, experience, orchestration, memory, permissions, task execution, and skill system are defined by this project. I may use established libraries or external integrations where they are genuinely necessary, but they are implementation details—not MAX's identity.
 
-> **Status (2026-11-05):** Foundation and architecture documents are merged, along with **four local-development implementation milestones** (Core, durable tasks, dual-format Gateway, and limited Trust/verification). MAX is **not yet an autonomous assistant, connected AI model, desktop/mobile client or production service**. Features below remain goals unless explicitly marked implemented.
+> **Status (2026-11-05):** Foundation and architecture documents are merged, along with **four owner-merged local-development milestones** (Core, durable tasks, dual-format Gateway, and limited Trust/verification); a fifth, read-only task timeline is proposed in a separate review PR. MAX is **not yet an autonomous assistant, connected AI model, desktop/mobile client or production service**. Features below remain goals unless explicitly marked implemented.
 
 ## What I want MAX to do
 
@@ -56,7 +56,9 @@ I have an **internal local-development Python/FastAPI Core**, not a publicly hos
 
 Historically verified CI for merged PR #7 reported **125 passing tests on Python 3.11 and 125 on 3.13**, with an ephemeral PostgreSQL database. This **does not verify any live provider, actual device or real-world action**. My setup and boundaries are in [Core setup](docs/CORE_BOOTSTRAP.md), [task persistence](docs/TASK_PERSISTENCE.md), [gateway implementation](docs/GATEWAY_IMPLEMENTATION.md) and [Trust implementation](docs/TRUST_IMPLEMENTATION.md).
 
-The [Phase 0 current-state audit](docs/PHASE0_AUDIT.md), [53-row requirements matrix](docs/REQUIREMENT_TRACEABILITY.md) and [architecture exit criteria](docs/PHASE0_EXIT_CRITERIA.md) explain what is complete, partial or unverified. My next recommended, **not yet started**, milestone is a **local read-only task status timeline and terminal client**. Payments, deployment, shell actions, document sharing and remote computer control remain unavailable.
+A [local read-only task timeline](docs/TASK_TIMELINE.md) is implemented on its own review branch, **not yet merged or deployed**, to show metadata event history in a terminal without executing anything.
+
+The [Phase 0 current-state audit](docs/PHASE0_AUDIT.md), [53-row requirements matrix](docs/REQUIREMENT_TRACEABILITY.md) and [architecture exit criteria](docs/PHASE0_EXIT_CRITERIA.md) explain what is complete, partial or unverified. The current **review-only milestone 5** implements a local read-only task status timeline and terminal client. Its acceptance depends on CI and owner merge. Payments, deployment, shell actions, document sharing and remote computer control remain unavailable.
 
 ## Planned platforms
 
