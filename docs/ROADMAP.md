@@ -88,3 +88,9 @@ Each phase must have scoped assignments, tests, acceptance criteria, owner-visib
 | Later | Communications/vault/evolution/production hardening | Consent/licensing, regional legality, independent review and restore tests |
 
 Do not combine unrelated stages in an oversized PR or promise milestones are delivered based on documents. Milestone-specific scope, proof and risk templates: [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md), [VALIDATION_PLAN.md](VALIDATION_PLAN.md), [REQUIREMENT_TRACEABILITY.md](REQUIREMENT_TRACEABILITY.md).
+
+## Phase 1 milestone-1 implementation boundary
+
+The first runtime PR adds **local-only** MAX Core packaging, process health, minimal authenticated owner endpoints, safe access logging and automated quality checks. It intentionally does **not** satisfy the full Phase 1 line items above (persistent tasks, PostgreSQL, model gateway and tools). Those are separate, owner-reviewed PRs.
+
+Development API setup and explicit security limitations: [CORE_BOOTSTRAP.md](CORE_BOOTSTRAP.md). Each PR is merged by the owner manually into `max`; no automated production deployment.
