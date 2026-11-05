@@ -1,0 +1,1 @@
+"""MAX Core bootstrap tests."""
