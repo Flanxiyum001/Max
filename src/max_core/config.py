@@ -31,7 +31,9 @@ class Settings:
             raise ConfigurationError("MAX_BIND_HOST must be 127.0.0.1 in this milestone")
         if not 1024 <= self.bind_port <= 65535:
             raise ConfigurationError("MAX_BIND_PORT must be an integer between 1024 and 65535")
-        if self.database_url is not None and not self.database_url.startswith("postgresql+psycopg://"):
+        if self.database_url is not None and not self.database_url.startswith(
+            "postgresql+psycopg://"
+        ):
             raise ConfigurationError("MAX_DATABASE_URL must use postgresql+psycopg://")
         if self.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             raise ConfigurationError("MAX_LOG_LEVEL must be a supported logging level")
