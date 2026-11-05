@@ -1,70 +1,66 @@
 # MAX
 
-**A personal, voice-first AI assistant that grows with its owner.**
+**One assistant. One identity. Your devices. Your control.**
 
-MAX is intended to be a cross-platform personal assistant with a floating holographic desktop companion, natural voice interaction, persistent memory, dynamic skills, multi-agent task execution, secure integrations, local and cloud AI, and bounded self-recovery.
+MAX is our independently designed, voice-first personal AI system. Its purpose is to turn natural conversation into **authorized, verifiable work**—while remembering what matters, improving with experience, and staying firmly under its owner's control.
 
-## Project status
+MAX is **not a repackaged agent framework**. We own the product architecture, orchestration, permissions, memory lifecycle, task execution, skill governance, and user experience. External integrations, model engines, and open-source libraries may be used behind replaceable interfaces where they solve a genuine engineering need; none should define MAX's identity or have unchecked authority.
 
-**Stage: Foundation and architecture.** No production application has been implemented yet. Technology choices remain provisional until the architecture review is complete.
+> **Project status:** Architecture and engineering foundation. The full application has **not** been built, deployed, or verified yet. Capabilities below describe our design goals, not features that are already working.
 
-## Product surfaces
+## The experience we're building
 
-- **Windows 11:** floating, transparent, always-on-top orb companion; background operation and gaming-aware quiet behaviour.
-- **Arch Linux + Hyprland:** equivalent desktop companion and local execution node.
-- **iPhone:** responsive web interface.
-- **Voice:** wake-word interaction, speech recognition, speech generation, interruption, inbound and outbound calling.
+- **A living desktop presence.** A small, translucent holographic orb with a luminous cyan ring, subtle blue reflections, and responsive animation. It stays out of the way during games and focused work.
+- **Voice that feels natural.** Wake or push-to-talk, conversational speech, interruption, quick cancellations, and a distinctive original British-English voice.
+- **A reliable personal operator.** MAX can plan multi-step work, choose specialized workers, use approved tools, preserve progress across restarts, and verify results before reporting success.
+- **Memory that can be trusted.** Useful preferences, project context, corrections, and task history—with provenance, privacy boundaries, and owner-controlled correction or deletion.
+- **Skills that grow.** MAX can find, assess, test, and propose new skills, then improve reusable workflows without silently expanding its permissions.
+- **Your machines, securely coordinated.** Windows 11 and Arch Linux/Hyprland companions, plus an iPhone browser interface; sensitive device operations require narrow, device-enforced authorization.
+- **Control over important actions.** Confidential documents are protected; external sends, sensitive changes, and every payment are gated by explicit confirmation.
 
-The supplied blue/cyan orb image is the visual reference. Preserve its dark centre, luminous cyan/turquoise rim, electric-blue internal reflections, and restrained holographic character.
+## Our stack, by design
 
-## Core capabilities
+The product is divided into small first-party components, each with a clear responsibility:
 
-1. Personal assistant identity, personality, and persistent memory.
-2. Provider-independent model gateway for configured cloud providers and local Ollama models.
-3. Agent harness for planning, tool use, dynamic delegation, checkpoints, cancellation, verification, and reporting.
-4. Skill discovery, inspection, installation, isolation, testing, versioning, and controlled improvement.
-5. MCP and native API integrations through a permission-aware tool registry.
-6. Dedicated agent-controlled browser and web research that prefers no-cost methods where practical, while respecting provider terms, rate limits, robots controls, and access restrictions.
-7. Google Drive for user-selected documents, knowledge exports, and backups; PostgreSQL for operational state and structured memory.
-8. Windows and Linux execution nodes for authorised coding, development, and device tasks.
-9. Spotify, home automation, WhatsApp, email, and two-way telephony integrations.
-10. Encrypted personal vault for sensitive documents and financial references.
-11. Self-evaluation and bounded recovery with an independent supervisor.
-12. Auditable, human-controlled financial and other sensitive operations.
+| MAX component | What it owns |
+|---|---|
+| **MAX Core** | Intent, planning, specialist coordination, and task state |
+| **MAX Gateway** | Model-independent intelligence interface, selection, streaming, and budgets |
+| **MAX Trust** | Identity, policy checks, approvals, data boundaries, and audit |
+| **MAX Memory** | Structured memory, provenance, knowledge retrieval, and retention |
+| **MAX Skills** | Skill discovery, inspection, sandbox testing, versioning, and rollback |
+| **MAX Voice** | Wake-up, speech, interruption, and turn-taking |
+| **MAX Presence** | Holographic desktop companion and responsive mobile UI |
+| **MAX Nodes** | Authorized, isolated execution on enrolled devices |
+| **MAX Evolution** | Evaluations, lessons, controlled improvements, and recovery |
+| **MAX Connect** | Optional communications, personal services, and device integrations |
 
-## Non-negotiable safety and engineering rules
+These are **logical modules**, not ten separately deployed services. We will start with a manageable modular core and split processes only when isolation, performance, or reliability demands it.
 
-- Never commit secrets, API keys, tokens, passwords, private keys, Aadhaar/passport scans, card data, UPI PINs, OTPs, or other personal records.
-- Never store CVVs, UPI PINs, or OTPs in assistant memory. Use trusted payment-provider interfaces and require explicit approval for each transaction.
-- Sensitive document access and sharing must be authenticated, recipient-checked, policy-controlled, and audited.
-- Downloaded skills, webpages, emails, documents, and tool outputs are untrusted input—not instructions that can override MAX's policies.
-- Skills and agents cannot grant themselves permissions.
-- Use least privilege, scoped credentials, isolated workspaces, and explicit approval gates for consequential actions.
-- Never bypass authentication, MFA, anti-cheat, access controls, paywalls, or service restrictions.
-- Never modify unrelated projects or existing Discord bots.
-- Never deploy untested repairs or loop indefinitely. Retries and recovery are bounded; preserve evidence and escalate when uncertain.
-- Never claim work is complete without observable verification evidence.
+## The principle behind every feature
 
-## Repository map
+**A model can suggest an action. It cannot grant itself the right to perform it.** Authorization is checked independently, execution is scoped, consequential actions require the appropriate confirmation, and completion must be backed by observable evidence.
 
-- `MAX.md` — identity, purpose, and foundational principles.
-- `SOUL.md` — personality and communication.
-- `CORE.md` — operating and task-execution model.
-- `MEMORY.md` — memory policy and lifecycle.
-- `SKILLS.md` — skill lifecycle and trust model.
-- `TOOLS.md` — tool registry and integration approach.
-- `SECURITY.md` — threat model, permissions, and sensitive-data handling.
-- `EVOLUTION.md` — learning and controlled improvement.
-- `IDENTITY.md` — voice and visual identity.
-- `OPERATIONS.md` — health, recovery, and supervision.
-- `docs/PRODUCT_SPECIFICATION.md` — consolidated product requirements.
-- `docs/TECHNICAL_DESIGN.md` — provisional architecture and open technical decisions.
-- `docs/DECISIONS.md` — architecture decision register.
-- `docs/ROADMAP.md` — development milestones.
-- `docs/DEVELOPMENT_WORKFLOW.md` — Codex implementation and verification rules.
+MAX never stores banking PINs, one-time passwords, or card security codes. It must not bypass account security, workplace controls, or game protections. Sensitive files and personal history are not ordinary agent training material.
 
-## Development approach
+## Supported platforms — planned
 
-Codex is the primary implementation worker. Work is divided into small, reviewable assignments with tests and acceptance criteria. Architecture decisions are recorded before implementation. The owner is a beginner and should receive plain-language explanations and only essential product-level questions.
+| Platform | Intended experience |
+|---|---|
+| **Windows 11** | Floating orb, background voice, gaming-aware focus, enrolled execution node |
+| **Arch Linux + Hyprland** | Equivalent companion, subject to real Wayland/window-manager verification |
+| **iPhone browser** | Private responsive interface, task status, and foreground voice where supported |
 
-See [the roadmap](docs/ROADMAP.md) and [development workflow](docs/DEVELOPMENT_WORKFLOW.md).
+Platform capabilities are subject to real-device tests. In particular, uninterrupted always-on-top behavior on Wayland and background voice in mobile browsers are **not** assumed.
+
+## Development state
+
+Phase 0 is dedicated to architecture research, security boundaries, technology evaluation, and a documented implementation sequence. We will then build and test **one working vertical slice at a time** instead of generating a huge, unverified application.
+
+Start here: [Architecture](ARCHITECTURE.md) · [Product specification](docs/PRODUCT_SPECIFICATION.md) · [Technical design](docs/TECHNICAL_DESIGN.md) · [Security design](docs/SECURITY_ARCHITECTURE.md) · [Roadmap](docs/ROADMAP.md) · [Implementation plan](docs/IMPLEMENTATION_PLAN.md).
+
+MAX's operating identity lives in [MAX.md](MAX.md), [SOUL.md](SOUL.md), [CORE.md](CORE.md), and related root documents. [AGENTS.md](AGENTS.md) separately governs the engineering worker. These files specify requirements; **runtime code and tests must enforce the rules**.
+
+---
+
+*Build the foundation correctly. Prove each capability. Make MAX better without surrendering control.*
