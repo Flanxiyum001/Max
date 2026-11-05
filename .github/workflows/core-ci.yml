@@ -53,18 +53,6 @@ jobs:
       - name: Show format corrections on failure
         if: failure()
         run: python -m ruff format --diff src tests
-      - name: Show exact formatter output for review
-        if: failure()
-        run: |
-          python -m ruff format src tests
-          python - <<'PY'
-          import json
-          import subprocess
-          from pathlib import Path
-          for name in subprocess.check_output(["git", "diff", "--name-only"], text=True).splitlines():
-              if name.endswith(".py"):
-                  print("MAX_FORMAT_OUTPUT " + json.dumps({"path": name, "content": Path(name).read_text()}, ensure_ascii=True))
-          PY
       - name: Static typing
         run: python -m mypy src/max_core
       - name: Apply PostgreSQL migrations
