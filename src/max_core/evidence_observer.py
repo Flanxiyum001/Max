@@ -16,8 +16,8 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import SQLAlchemyError
 
 from max_core.config import ConfigurationError, Settings
 from max_core.store import StoreError, create_store
