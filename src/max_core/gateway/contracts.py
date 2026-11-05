@@ -76,6 +76,8 @@ class ModelSpec:
             raise ValueError("Invalid model identifier")
         if not isinstance(self.dialect, Dialect) or self.context_tokens < 1:
             raise ValueError("Invalid model dialect or context window")
+        if type(self.is_local) is not bool:
+            raise ValueError("Endpoint locality must be a boolean")
         if not isinstance(self.inference_destination, InferenceDestination):
             raise ValueError("Invalid inference destination classification")
         if self.inference_destination == InferenceDestination.VERIFIED_LOCAL and not self.is_local:
@@ -136,6 +138,10 @@ class GatewayRequest:
             raise ValueError("At least one and at most 48 messages are required")
         if not isinstance(self.privacy, Privacy):
             raise ValueError("Unknown data privacy classification")
+        if any(type(value) is not bool for value in (
+            self.cloud_allowed, self.local_only, self.allow_fallback
+        )):
+            raise ValueError("Gateway authorization flags must be booleans")
         if (
             not 1 <= self.max_input_tokens <= 1_000_000
             or not 1 <= self.max_output_tokens <= 1_000_000
