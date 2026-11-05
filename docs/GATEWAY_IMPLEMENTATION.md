@@ -106,3 +106,31 @@ To undo, revert/close the PR. No data migrations or external side effects requir
 For a FreeLLMAPI instance on `127.0.0.1` that may relay requests upstream, set `CLOUD` for explicitly cloud-routed models or leave `UNKNOWN` until routing is independently reviewed. **Never mark an unverified proxy `VERIFIED_LOCAL` merely because its HTTP address is loopback.** The app does not inspect the FreeLLMAPI deployment, pin upstream egress routes, authenticate forwarded model identity, classify prompt sensitivity for callers, or validate live prices: these are mandatory later security gates.
 
 Redaction scope is limited to ordinary `repr()`/`str()` of `ChatMessage`, `GatewayRequest`, `GatewayResponse`, `ToolProposal`, `StreamEvent` and existing `ModelSpec`, plus suppressed exception chaining for expected HTTPX and malformed-provider/tool-JSON failures. **Explicit serialization such as `dataclasses.asdict`, arbitrary caller logging, introspection of exception `__context__`, third-party transport diagnostics and compromised infrastructure remain outside this guarantee.** Do not log gateway payload objects or attach arbitrary exception details to telemetry. No credential loader or live FreeLLMAPI connection is introduced. Existing HTTPX mock tests remain the validation boundary.
+
+## Milestone 9 Stage A — credential-free model catalogue contracts
+
+Stage A introduces `catalogue.py` with versioned, immutable provider/model/route
+identities, capability evidence, pricing and availability observations, a
+catalogue snapshot, and a **separate** owner-reviewed route-policy contract.
+`DiscoveredRoute` and `CatalogueSnapshot` intentionally have no destination
+or approval field: discovered data cannot authorize inference.
+
+`Gateway.selection_metadata()` projects explicitly bound legacy `ModelSpec`
+objects into credential-free views. The views contain neither `api_key` nor
+endpoint URLs, raw authentication headers, or any execution method. A route
+identity contains the gateway, upstream provider, model, opaque concrete route,
+dialect, and a distinct catalogue revision in the selection view. Unknown
+capabilities are not promoted by legacy `ModelSpec.capabilities` values;
+separately reviewed capability evidence must be supplied.
+
+**No selector or live catalogue client is added.** `ModelSpec` still carries
+its legacy adapter credential internally and no credential-store migration
+occurs. The existing `Gateway.eligible()` remains the mandatory request
+admission path. All existing cloud, UNKNOWN, streaming, fallback and cost
+checks remain unchanged. A selection view is informational, not a grant.
+
+The contracts are not a substitute for runtime route attestation, egress
+enforcement, schema/credential storage, or live compatibility verification.
+Stage B may add fixture-only parsing and versioned snapshot merge, without
+automatic policy elevation. See
+[MILESTONE_9_STAGE_A_SECURE_MODEL_CONTRACTS.md](MILESTONE_9_STAGE_A_SECURE_MODEL_CONTRACTS.md).
