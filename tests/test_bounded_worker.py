@@ -274,3 +274,50 @@ def test_worker_does_not_reveal_rejected_objective(store: TaskStore) -> None:
         BoundedWorker(store).run_one(task_id)
     assert "VERY_PRIVATE_TEST_VALUE" not in str(exc.value)
     assert store.get("owner", task_id).state == "queued"
+
+
+def test_worker_never_claims_another_owner_task(store: TaskStore) -> None:
+    other, _ = store.create(
+        "another-owner", objective("dev.add", {"a": 1, "b": 2}), "foreign-worker-001"
+    )
+    with pytest.raises(StoreError) as exc:
+        BoundedWorker(store).run_one(other.id)
+    assert exc.value.status_code == 404
+    assert store.get("another-owner", other.id).state == "queued"
+
+
+def test_cancel_after_unverified_outcome_is_rejected(store: TaskStore) -> None:
+    task_id = task_for(store, objective("dev.health", {}))
+    result = BoundedWorker(store).run_one(task_id)
+    assert result.state == "awaiting_verification"
+    with pytest.raises(StoreError) as exc:
+        store.cancel("owner", task_id)
+    assert exc.value.status_code == 409
+    assert store.get("owner", task_id).state == "awaiting_verification"
+
+
+def test_expired_cancellation_ack_requires_reconciliation(store: TaskStore) -> None:
+    task_id = task_for(store, objective("dev.health", {}))
+    store.claim("owner", task_id, "expired-owner", ttl_seconds=5)
+    assert store.cancel("owner", task_id).state == "cancelling"
+    with Session(store.engine) as session, session.begin():
+        task = session.get(Task, task_id)
+        assert task is not None
+        task.lease_until = datetime.now(UTC) - timedelta(seconds=2)
+    with pytest.raises(StoreError):
+        store.acknowledge_stopped_cancel("owner", task_id, "expired-owner")
+    assert store.get("owner", task_id).state == "cancelling"
+    assert store.reconcile_expired("owner") == 1
+    assert store.get("owner", task_id).state == "needs_reconciliation"
+
+
+def test_cli_requires_local_bootstrap_auth_before_db(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("MAX_API_BEARER_TOKEN", raising=False)
+    monkeypatch.setenv("MAX_DATABASE_URL", "postgresql+psycopg://ignored@127.0.0.1/unused")
+    assert bounded_worker.main(["run", str(uuid4())]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "No success is claimed" in captured.err
+    assert "ignored" not in captured.err
