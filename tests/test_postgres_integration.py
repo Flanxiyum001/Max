@@ -41,7 +41,9 @@ def test_postgresql_concurrent_claim_and_outbox_lease(postgres_store: TaskStore)
             return False
 
     with ThreadPoolExecutor(max_workers=5) as executor:
-        results = list(executor.map(claim, ["worker-a", "worker-b", "worker-c", "worker-d", "worker-e"]))
+        results = list(
+            executor.map(claim, ["worker-a", "worker-b", "worker-c", "worker-d", "worker-e"])
+        )
     assert sum(results) == 1
 
     # All pending events are leased by only one claim token; no duplicate claim per event.
