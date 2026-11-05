@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from max_core import bounded_worker, evidence_observer, verification
+from max_core import bounded_worker, evidence_observer
 from max_core.bounded_worker import BoundedWorker
 from max_core.evidence_observer import DevAddObserver, ObservationSnapshot
 from max_core.models import OutboxEvent, Task, TaskCheckpoint, TrustAudit, VerificationCheck
@@ -74,7 +73,9 @@ def test_real_worker_claim_is_independently_recomputed(
     monkeypatch.setattr(bounded_worker, "execute_operation", forbidden)
     result = _verify(store, task.id)
     assert (result.conclusion, result.verdict, result.task_state) == (
-        "supported", "verified", "completed"
+        "supported",
+        "verified",
+        "completed",
     )
     assert "correctness" not in (result.reason_code or "")
     assert store.get(_OWNER, task.id).state == "completed"
@@ -111,7 +112,9 @@ def test_wrong_worker_digest_is_contradicted_without_completion(store: TaskStore
             select(VerificationCheck).where(VerificationCheck.task_id == task_id)
         )
         assert check is not None and check.observed_digest == _digest()
-        kinds = session.scalars(select(OutboxEvent.kind).where(OutboxEvent.task_id == task_id)).all()
+        kinds = session.scalars(
+            select(OutboxEvent.kind).where(OutboxEvent.task_id == task_id)
+        ).all()
         assert "task.verified" not in kinds
 
 
@@ -131,9 +134,7 @@ def test_wrong_worker_digest_is_contradicted_without_completion(store: TaskStore
         "x" * 500,
     ],
 )
-def test_invalid_or_unsupported_input_never_completes(
-    store: TaskStore, invalid: str
-) -> None:
+def test_invalid_or_unsupported_input_never_completes(store: TaskStore, invalid: str) -> None:
     step = "dev.health" if '"dev.health"' in invalid else "dev.add"
     task_id = _record(store, objective=invalid, checkpoint_step=step)
     result = _verify(store, task_id)
@@ -184,7 +185,9 @@ def test_objective_integrity_hash_detects_tampering(store: TaskStore) -> None:
     assert store.get(_OWNER, task_id).state == "awaiting_verification"
 
 
-@pytest.mark.parametrize("field", ["revision", "objective", "evidence_digest", "last_checkpoint_id"])
+@pytest.mark.parametrize(
+    "field", ["revision", "objective", "evidence_digest", "last_checkpoint_id"]
+)
 def test_changed_snapshot_rejected_before_commit(
     store: TaskStore, monkeypatch: pytest.MonkeyPatch, field: str
 ) -> None:
@@ -210,9 +213,12 @@ def test_changed_snapshot_rejected_before_commit(
     with pytest.raises(StoreError, match="Stale observer"):
         _verify(store, task_id)
     with Session(store.engine) as session:
-        assert session.scalars(
-            select(VerificationCheck).where(VerificationCheck.task_id == task_id)
-        ).all() == []
+        assert (
+            session.scalars(
+                select(VerificationCheck).where(VerificationCheck.task_id == task_id)
+            ).all()
+            == []
+        )
         assert not session.scalars(
             select(OutboxEvent).where(
                 OutboxEvent.task_id == task_id, OutboxEvent.kind == "task.verified"
@@ -248,7 +254,9 @@ def test_same_request_is_exact_replay_and_new_request_is_not(store: TaskStore) -
     with pytest.raises(StoreError, match="unavailable for observation"):
         _verify(store, task_id, "observer-new-002")
     with Session(store.engine) as session:
-        checks = session.scalars(select(VerificationCheck).where(VerificationCheck.task_id == task_id)).all()
+        checks = session.scalars(
+            select(VerificationCheck).where(VerificationCheck.task_id == task_id)
+        ).all()
         assert len(checks) == 1
         assert checks[0].request_fingerprint == IndependentVerifier._fingerprint(_OWNER, task_id)
 
@@ -273,7 +281,7 @@ def test_same_request_id_changed_observer_version_conflicts(
 
 
 def test_prior_mismatch_replay_after_later_success_preserves_original_decision(
-    store: TaskStore
+    store: TaskStore,
 ) -> None:
     task_id = _record(store, claim_digest=hashlib.sha256(b"bad").hexdigest())
     mismatch = _verify(store, task_id, "observer-mismatch-001")
@@ -327,7 +335,9 @@ def test_crash_before_transaction_commit_allows_exact_request_retry(
     with pytest.raises(RuntimeError):
         _verify(store, task_id, "observer-crash-001")
     with Session(store.engine) as session:
-        checks = session.scalars(select(VerificationCheck).where(VerificationCheck.task_id == task_id)).all()
+        checks = session.scalars(
+            select(VerificationCheck).where(VerificationCheck.task_id == task_id)
+        ).all()
         assert checks == []
     monkeypatch.setattr(IndependentVerifier, "_still_bound", staticmethod(original))
     first = _verify(store, task_id, "observer-crash-001")
@@ -381,9 +391,6 @@ def test_cli_sensitive_values_not_exposed(
     store: TaskStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     task_id = _record(store)
-    from contextlib import nullcontext
-
-    original_client = evidence_observer.create_store
     monkeypatch.setenv("MAX_API_BEARER_TOKEN", "test-secret-" + "0123456789abcdef" * 3)
     monkeypatch.setenv("MAX_DATABASE_URL", "postgresql+psycopg://SECRET_PASSWORD@127.0.0.1/test")
     monkeypatch.setattr(evidence_observer, "create_store", lambda url: store)
@@ -402,6 +409,9 @@ def test_invalid_request_id_never_creates_check(store: TaskStore) -> None:
     with pytest.raises(StoreError, match="Invalid observer"):
         _verify(store, task_id, "bad key")
     with Session(store.engine) as session:
-        assert session.scalars(
-            select(VerificationCheck).where(VerificationCheck.task_id == task_id)
-        ).all() == []
+        assert (
+            session.scalars(
+                select(VerificationCheck).where(VerificationCheck.task_id == task_id)
+            ).all()
+            == []
+        )
