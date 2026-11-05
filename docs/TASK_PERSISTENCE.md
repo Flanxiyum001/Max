@@ -70,3 +70,7 @@ GitHub CI provisions **ephemeral PostgreSQL 17** with **test-only credentials**,
 No database was created or changed for the user in this assignment. To undo this **unmerged** milestone, close the PR. If the schema was manually applied to an isolated **disposable local test DB**, it may be dropped or reverted after verifying its data is unneeded; do not run `alembic downgrade` against a database with real tasks without a reviewed backup and rollback plan.
 
 Next: explicit model gateway and independent verification (separate PRs), followed by secured tool policy and a real worker. The owner reviews and merges each PR manually; no deployment.
+
+## Milestone 4 schema/readiness follow-up
+
+The owner-reviewed Trust milestone adds additive Alembic revision `0002_trust_verification` (approval grants, metadata-only policy audit and independent verification records). Durable API readiness now requires **revision 0002**, not 0001. Task completion is only available through the **internal verifier with trusted observation bytes**; a worker's reported evidence hash remains untrusted. Before migrating an existing database, review [TRUST_IMPLEMENTATION.md](TRUST_IMPLEMENTATION.md) and obtain a backup/rollback plan. No database was modified when creating the PR.

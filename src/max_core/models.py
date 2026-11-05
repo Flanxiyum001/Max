@@ -70,3 +70,62 @@ class OutboxEvent(Base):
         DateTime(timezone=True), nullable=False, default=utc_now
     )
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ApprovalGrant(Base):
+    """Owner decision for one bounded, non-effectful tool invocation."""
+
+    __tablename__ = "max_approval_grants"
+    __table_args__ = (Index("ix_max_approval_owner_state", "owner_id", "state"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    task_id: Mapped[str] = mapped_column(ForeignKey("max_tasks.id"), nullable=False)
+    tool_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    actor_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    session_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    device_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    proposal_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    binding_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class TrustAudit(Base):
+    """Metadata-only decision journal; no raw prompts, credentials or tool parameters."""
+
+    __tablename__ = "max_trust_audit"
+    __table_args__ = (Index("ix_max_trust_audit_task", "task_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    task_id: Mapped[str] = mapped_column(ForeignKey("max_tasks.id"), nullable=False)
+    approval_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    action: Mapped[str] = mapped_column(String(50), nullable=False)
+    decision: Mapped[str] = mapped_column(String(30), nullable=False)
+    reason: Mapped[str] = mapped_column(String(60), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+
+class VerificationCheck(Base):
+    """Immutable-in-application record of an independent observation attempt."""
+
+    __tablename__ = "max_verification_checks"
+    __table_args__ = (Index("ix_max_verification_task", "task_id", "checked_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    task_id: Mapped[str] = mapped_column(ForeignKey("max_tasks.id"), nullable=False)
+    observed_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    expected_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    verdict: Mapped[str] = mapped_column(String(30), nullable=False)
+    checked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )

@@ -70,3 +70,11 @@ Acceptance gates: local unit tests, GitHub Actions PostgreSQL migrations and rea
 Internal async Python library with OpenAI Chat Completions and Anthropic Messages request/response + SSE normalization; explicit model metadata/capabilities; local-only privacy enforcement; remote opt-in with priced admission ceiling; deterministic routing; inert tool proposals; strict parsing and bounded streams; safe non-streaming fallback limited to pre-body 429/503. Mock-provider fixture tests only: no owner FreeLLMAPI account or provider secrets, deployment or new public endpoint. See [GATEWAY_IMPLEMENTATION.md](GATEWAY_IMPLEMENTATION.md) for runbook, caveats and tests.
 
 **Acceptance:** retain all previous core/PostgreSQL tests, pass both CI Python versions, verify no credential/redirect leakage, and document unknown account quotas, tokenization, global budgets and future MAX Trust. Owner manually reviews and merges. Following PR: MAX Trust authorization and independently verified task outcomes.
+
+## Milestone 4 — MAX Trust and independent observer verification (this PR)
+
+An additive `0002_trust_verification` migration, deny-by-default approved action registry containing only `task.status`, scoped short-lived single-use approvals, owner-authenticated **local-only** review/decision routes, metadata-only audit, and evidence-source-injected independent result verification. Verified results alone can transition `awaiting_verification` -> `completed` with a transactional event; all uncertain outcomes remain unverified. No arbitrary tool dispatch, live external effects, model-owned approval, shell, payment, deployment or remote identity.
+
+**Acceptance:** owner/device/session/call/parameter binding, expiry/replay denial, cross-owner isolation, mismatches never complete, concurrent PostgreSQL approval and verifier one-winner tests, zero approval action on high-risk tools, migrations/ready checks, CI Python 3.11 and 3.13 all green. Detailed boundaries: [TRUST_IMPLEMENTATION.md](TRUST_IMPLEMENTATION.md).
+
+**Release gate:** owner manually merges this PR after CI and migration review. External read-only tools, secure identity and actual source-specific verification are later isolated milestones.
