@@ -39,7 +39,9 @@ def _digest(value: bytes) -> str:
 def make_events(store: TaskStore, key: str) -> tuple[str, bytes]:
     task, _ = store.create("owner", "Private objective: never include in timeline", key)
     store.claim("owner", task.id, "worker-1")
-    store.checkpoint("owner", task.id, "worker-1", "checkpoint-001", "private-step", _digest(b"secret"))
+    store.checkpoint(
+        "owner", task.id, "worker-1", "checkpoint-001", "private-step", _digest(b"secret")
+    )
     evidence = b"independent observation fixture"
     store.record_outcome("owner", task.id, "worker-1", _digest(evidence))
     return task.id, evidence
@@ -49,7 +51,12 @@ def test_owner_route_requires_auth_and_storage(client: TestClient, store: TaskSt
     task, _ = store.create("owner", "Sensitive", "timeline-auth-001")
     live = api(store)
     assert live.get(f"/v1/tasks/{task.id}/events").status_code == 401
-    assert live.get(f"/v1/tasks/{task.id}/events", headers={"Authorization": "Bearer wrong"}).status_code == 401
+    assert (
+        live.get(
+            f"/v1/tasks/{task.id}/events", headers={"Authorization": "Bearer wrong"}
+        ).status_code
+        == 401
+    )
     assert live.get(f"/v1/tasks/{uuid4()}/events", headers=authorized()).status_code == 404
     assert client.get(f"/v1/tasks/{task.id}/events", headers=authorized()).status_code == 503
     assert client.get(f"/v1/tasks/{task.id}/events").status_code == 401
@@ -147,7 +154,17 @@ def test_no_objective_secrets_lease_or_claim_fields_leak(store: TaskStore) -> No
     response = api(store).get(f"/v1/tasks/{task_id}/events", headers=authorized())
     assert response.status_code == 200
     text = response.text
-    for private in ("Private objective", "private-step", "secret", "lease_owner", "claim_token", "payload_digest", "evidence_digest", "idempotency_key", "objective"):
+    for private in (
+        "Private objective",
+        "private-step",
+        "secret",
+        "lease_owner",
+        "claim_token",
+        "payload_digest",
+        "evidence_digest",
+        "idempotency_key",
+        "objective",
+    ):
         assert private not in text
     event = response.json()["events"][0]
     assert set(event) == {"event_key", "kind", "task_revision", "created_at"}
@@ -219,15 +236,18 @@ def test_cli_renders_metadata_without_objective(store: TaskStore) -> None:
     assert "not evidence that an external action happened" in rendered
 
 
-@pytest.mark.parametrize("url", [
-    "https://127.0.0.1:8765",
-    "http://localhost:8765",
-    "http://169.254.169.254:8765",
-    "http://example.com:8765",
-    "http://127.0.0.1:80",
-    "http://user:password@127.0.0.1:8765",
-    "http://127.0.0.1:8765/private",
-])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://127.0.0.1:8765",
+        "http://localhost:8765",
+        "http://169.254.169.254:8765",
+        "http://example.com:8765",
+        "http://127.0.0.1:80",
+        "http://user:password@127.0.0.1:8765",
+        "http://127.0.0.1:8765/private",
+    ],
+)
 def test_cli_refuses_nonloopback_or_unexpected_urls(url: str) -> None:
     with pytest.raises(TimelineClientError):
         _local_url(url)
