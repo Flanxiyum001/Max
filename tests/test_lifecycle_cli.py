@@ -25,7 +25,7 @@ from max_core.lifecycle_cli import (
     status_task,
 )
 from max_core.models import OutboxEvent, Task
-from max_core.store import StoreError, TaskStore
+from max_core.store import TaskStore
 from max_core.timeline_cli import TimelineClientError, render_timeline
 from max_core.verification import IndependentVerifier
 from tests.conftest import TEST_TOKEN
@@ -48,12 +48,15 @@ def local_http(store: TaskStore) -> Iterator[tuple[httpx.Client, list[tuple[str,
         assert request.url.host == "127.0.0.1"
         calls.append((method, path))
         response = api.request(
-            method, request.url.raw_path.decode("ascii"),
-            headers=dict(request.headers), content=request.content
+            method,
+            request.url.raw_path.decode("ascii"),
+            headers=dict(request.headers),
+            content=request.content,
         )
         return httpx.Response(
-            response.status_code, content=response.content,
-            headers={"content-type": "application/json"}
+            response.status_code,
+            content=response.content,
+            headers={"content-type": "application/json"},
         )
 
     with httpx.Client(
@@ -126,10 +129,14 @@ def test_authentication_and_unconfigured_storage_fail_closed(
             base_url="http://127.0.0.1",
         )
 
-        def wrong_auth(request: httpx.Request) -> httpx.Response:
-            result = api.request(
-                request.method, request.url.path, headers={"Authorization": token},
-                content=request.content
+        def wrong_auth(
+            request: httpx.Request, *, test_api: TestClient = api, bad_token: str = token
+        ) -> httpx.Response:
+            result = test_api.request(
+                request.method,
+                request.url.path,
+                headers={"Authorization": bad_token},
+                content=request.content,
             )
             return httpx.Response(result.status_code, content=result.content)
 
@@ -148,15 +155,21 @@ def test_authentication_and_unconfigured_storage_fail_closed(
         create_app(Settings(bearer_token=TEST_TOKEN)),
         base_url="http://127.0.0.1",
     )
-    assert missing.post(
-        "/v1/tasks",
-        headers={"Authorization": f"Bearer {TEST_TOKEN}", "Idempotency-Key": "missing-db-001"},
-        json={"objective": "Safe demo"},
-    ).status_code == 503
-    assert missing.post(
-        f"/v1/tasks/{task.id}/cancel",
-        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
-    ).status_code == 503
+    assert (
+        missing.post(
+            "/v1/tasks",
+            headers={"Authorization": f"Bearer {TEST_TOKEN}", "Idempotency-Key": "missing-db-001"},
+            json={"objective": "Safe demo"},
+        ).status_code
+        == 503
+    )
+    assert (
+        missing.post(
+            f"/v1/tasks/{task.id}/cancel",
+            headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        ).status_code
+        == 503
+    )
 
 
 def test_cross_owner_denied_for_status_cancel_and_history(
@@ -208,7 +221,9 @@ def test_cancel_again_is_noop_and_completed_is_rejected(
     finished, _ = store.create("owner", "Verified fixture", "cancel-terminal-001")
     store.claim("owner", finished.id, "worker-fixture")
     evidence = b"test-only-observation"
-    store.record_outcome("owner", finished.id, "worker-fixture", hashlib.sha256(evidence).hexdigest())
+    store.record_outcome(
+        "owner", finished.id, "worker-fixture", hashlib.sha256(evidence).hexdigest()
+    )
 
     class Reader:
         def observe(self, task_id: str) -> bytes:
@@ -251,7 +266,9 @@ def test_status_readback_failure_never_claims_confirmed_cancel() -> None:
             return httpx.Response(200, json={"id": str(task_id), "state": "queued", "revision": 1})
         if seen == 2:
             assert request.method == "POST"
-            return httpx.Response(200, json={"id": str(task_id), "state": "cancelled", "revision": 2})
+            return httpx.Response(
+                200, json={"id": str(task_id), "state": "cancelled", "revision": 2}
+            )
         return httpx.Response(503, text="secret-server-body-do-not-show")
 
     with httpx.Client(
@@ -309,7 +326,9 @@ def test_cli_main_create_status_cancel_history_do_not_print_sensitive_content(
 ) -> None:
     real_http, calls = local_http
     monkeypatch.setenv("MAX_API_BEARER_TOKEN", TEST_TOKEN)
-    monkeypatch.setattr(lifecycle_cli, "_prompt_objective", lambda: "Do not display this private title")
+    monkeypatch.setattr(
+        lifecycle_cli, "_prompt_objective", lambda: "Do not display this private title"
+    )
     monkeypatch.setattr(lifecycle_cli.httpx, "Client", lambda **kwargs: nullcontext(real_http))
     assert lifecycle_cli.main(["create", "--idempotency-key", "cli-main-safe-001"]) == 0
     created = capsys.readouterr().out
@@ -327,8 +346,10 @@ def test_cli_main_create_status_cancel_history_do_not_print_sensitive_content(
     cancelled = capsys.readouterr().out
     assert "cancelled" in cancelled
     assert "Do not display this private title" not in cancelled
-    assert not any(method == "POST" and path != "/v1/tasks" and not path.endswith("/cancel")
-                   for method, path in calls)
+    assert not any(
+        method == "POST" and path != "/v1/tasks" and not path.endswith("/cancel")
+        for method, path in calls
+    )
 
 
 def test_cli_error_body_never_echoes_auth_or_error_payload(
@@ -341,9 +362,7 @@ def test_cli_error_body_never_echoes_auth_or_error_payload(
         assert request.url.host == "127.0.0.1"
         return httpx.Response(401, text=sentinel + TEST_TOKEN)
 
-    client = httpx.Client(
-        base_url="http://127.0.0.1:8765", transport=httpx.MockTransport(denied)
-    )
+    client = httpx.Client(base_url="http://127.0.0.1:8765", transport=httpx.MockTransport(denied))
     monkeypatch.setattr(lifecycle_cli.httpx, "Client", lambda **kwargs: client)
     assert lifecycle_cli.main(["status", str(uuid4())]) == 2
     printed = capsys.readouterr()
