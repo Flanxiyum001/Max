@@ -49,3 +49,11 @@ Every PR targets `max` from its current owner-approved tip. The owner reviews an
 7. **Owner manually merges; never auto-merge or deploy.** Next runtime milestone starts from the owner-merged default branch, not this pending branch.
 
 The full recursive source-tree inventory and comparison against any additional private owner specification files not furnished to this run are **open documentation verification items**. Do not misstate them as completed.
+
+## Milestone 1 — secure local MAX Core bootstrap (this PR)
+
+A new first-party Python/FastAPI package adds: strong explicit environment configuration; **loopback-only** CLI binding; a temporary bearer token for local development; request IDs and allowlisted JSON logs; liveness/readiness; two protected status routes; package metadata; negative-case tests; and PR CI for lint, formatting, typing, tests and a dependency audit. Setup: [CORE_BOOTSTRAP.md](CORE_BOOTSTRAP.md).
+
+**Acceptance:** missing/weak token fails before serving, non-loopback bind rejected, duplicate/malformed auth denied, spoofed Host rejected, no secret in logs/repr, unexpected 500 sanitized, pytest locally passing, CI results actually verified on PR. Do not present this single-token bootstrap as secure remote authentication. No DB or provider changes. No deployment.
+
+**Next review gate:** after owner manually merges the milestone-1 PR, milestone 2 creates *durable* PostgreSQL task state, checkpoints and transactional outbox on a new branch. It must not reuse the bootstrap token as public production auth.
