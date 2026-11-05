@@ -121,9 +121,12 @@ class TaskStore:
         try:
             with self.engine.connect() as connection:
                 version = connection.scalar(text("SELECT version_num FROM alembic_version LIMIT 1"))
-                if version != "0001_durable_tasks":
+                if version != "0002_trust_verification":
                     return False
                 connection.execute(text("SELECT id FROM max_tasks LIMIT 1"))
+                connection.execute(text("SELECT id FROM max_approval_grants LIMIT 1"))
+                connection.execute(text("SELECT id FROM max_trust_audit LIMIT 1"))
+                connection.execute(text("SELECT id FROM max_verification_checks LIMIT 1"))
             return True
         except SQLAlchemyError:
             return False
