@@ -6,7 +6,6 @@ import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
-import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -15,7 +14,6 @@ from max_core.models import ApprovalGrant, OutboxEvent, TrustAudit, Verification
 from max_core.store import StoreError, TaskStore
 from max_core.trust import ActorContext, TrustError, TrustService
 from max_core.verification import IndependentVerifier
-from tests.test_postgres_integration import postgres_store  # noqa: F401
 
 
 def test_postgres_concurrent_approval_consume_only_one(
