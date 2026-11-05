@@ -30,7 +30,9 @@ def store(tmp_path: object) -> TaskStore:
 
 @pytest.fixture
 def durable_client(store: TaskStore) -> TestClient:
-    return TestClient(create_app(Settings(bearer_token=TEST_TOKEN), store=store), base_url="http://localhost")
+    return TestClient(
+        create_app(Settings(bearer_token=TEST_TOKEN), store=store), base_url="http://localhost"
+    )
 
 
 def _auth() -> dict[str, str]:
@@ -45,9 +47,13 @@ def test_persistent_post_replay_returns_same_task_and_no_duplicate_event(
     durable_client: TestClient, store: TaskStore
 ) -> None:
     headers = _auth()
-    created = durable_client.post("/v1/tasks", json={"objective": "Run safe checks"}, headers=headers)
+    created = durable_client.post(
+        "/v1/tasks", json={"objective": "Run safe checks"}, headers=headers
+    )
     assert created.status_code == 201
-    duplicate = durable_client.post("/v1/tasks", json={"objective": "Run safe checks"}, headers=headers)
+    duplicate = durable_client.post(
+        "/v1/tasks", json={"objective": "Run safe checks"}, headers=headers
+    )
     assert duplicate.status_code == 200
     assert duplicate.json()["id"] == created.json()["id"]
     assert store.get("owner", created.json()["id"]).state == "queued"
@@ -57,7 +63,10 @@ def test_persistent_post_replay_returns_same_task_and_no_duplicate_event(
 
 def test_idempotency_key_with_different_body_is_conflict(durable_client: TestClient) -> None:
     headers = _auth()
-    assert durable_client.post("/v1/tasks", headers=headers, json={"objective": "First"}).status_code == 201
+    assert (
+        durable_client.post("/v1/tasks", headers=headers, json={"objective": "First"}).status_code
+        == 201
+    )
     conflict = durable_client.post("/v1/tasks", headers=headers, json={"objective": "Second"})
     assert conflict.status_code == 409
     assert "Idempotency key" in conflict.json()["detail"]
@@ -124,7 +133,12 @@ def test_checkpoint_replay_and_conflict(store: TaskStore) -> None:
     store.claim("owner", task.id, "worker-one")
     saved = store.checkpoint("owner", task.id, "worker-one", "checkpoint-op-001", "step-a", _hash())
     assert saved.last_checkpoint_id
-    assert store.checkpoint("owner", task.id, "worker-one", "checkpoint-op-001", "step-a", _hash()).revision == saved.revision
+    assert (
+        store.checkpoint(
+            "owner", task.id, "worker-one", "checkpoint-op-001", "step-a", _hash()
+        ).revision
+        == saved.revision
+    )
     with pytest.raises(StoreError):
         store.checkpoint("owner", task.id, "worker-one", "checkpoint-op-001", "step-b", _hash())
 
