@@ -113,7 +113,7 @@ Supplementary: [RESEARCH_FINDINGS.md](RESEARCH_FINDINGS.md), [DEPENDENCY_EVALUAT
 | FIN-04 | Encrypted identity document vault and verified recipient sharing | [DATA_AND_STORAGE.md](DATA_AND_STORAGE.md), [SECURITY.md](../SECURITY.md) | partial | No encrypted vault, step-up confirmation or controlled delivery | Later |
 | FIN-05 | Security/evolution cannot self-amend privileges | [EVOLUTION_ENGINE.md](EVOLUTION_ENGINE.md); hardcoded Trust allowlist | partial | No real skill/evolution or source-change runtime to test | Later |
 | GOV-01 | Separate MAX project; unrelated bots untouched | [AGENTS.md](../AGENTS.md); repo tree shows only MAX files | complete | Runtime deployment/service topology not verified | No |
-| GOV-02 | Owner manually reviews/merges all milestone PRs | [AGENTS.md](../AGENTS.md), [DEVELOPMENT_WORKFLOW.md](DEVELOPMENT_WORKFLOW.md); PRs #1–#7 merged by owner | complete | Keep this governance requirement | No |
+| GOV-02 | Owner manually reviews/merges all milestone PRs | [AGENTS.md](../AGENTS.md), [DEVELOPMENT_WORKFLOW.md](DEVELOPMENT_WORKFLOW.md); PRs #1–#7 are merged | partial | GitHub merge state does not independently prove each merge actor/review; continue the explicit owner gate | No |
 | GOV-03 | No infrastructure, accounts or deployments during audit | Scope of this documentation branch; GitHub diff must prove no runtime changes | complete | Audit PR must remain docs-only and unmerged | No |
 | GOV-04 | Test evidence and release gates | .github/workflows/core-ci.yml; prior PR #7 CI: 125 tests on each Python version, mock and ephemeral DB | partial | No live-provider/device/backup proof, SAST, license/secret scanning or production release review | Later |
 
