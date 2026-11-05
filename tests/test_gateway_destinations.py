@@ -326,9 +326,10 @@ def test_provider_failure_path_suppresses_sensitive_exception_chain(
             raise httpx.ConnectError(marker, request=req)
         return httpx.Response(200, text="{not-json:" + marker)
 
+    model = proxy_cloud(api_key="SENSITIVE_DUMMY_CREDENTIAL")
     with pytest.raises(GatewayError) as captured:
         run_complete(
-            [proxy_cloud(api_key="SENSITIVE_DUMMY_CREDENTIAL")],
+            [model],
             transport,
             request(cloud_allowed=True, max_cost_usd=Decimal("1")),
         )
