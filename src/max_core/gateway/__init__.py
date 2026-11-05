@@ -16,7 +16,16 @@ from max_core.gateway.contracts import (
 from max_core.gateway.router import Gateway
 
 __all__ = [
-    "ChatMessage", "Dialect", "Gateway", "GatewayError", "GatewayRequest",
-    "GatewayResponse", "HTTPAdapter", "ModelSpec", "Privacy", "StreamEvent",
-    "TokenUsage", "ToolProposal",
+    "ChatMessage",
+    "Dialect",
+    "Gateway",
+    "GatewayError",
+    "GatewayRequest",
+    "GatewayResponse",
+    "HTTPAdapter",
+    "ModelSpec",
+    "Privacy",
+    "StreamEvent",
+    "TokenUsage",
+    "ToolProposal",
 ]
