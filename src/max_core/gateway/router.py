@@ -97,6 +97,10 @@ class Gateway:
     async def complete(self, request: GatewayRequest) -> GatewayResponse:
         options = self._candidates(request)
         for index, spec in enumerate(options):
+            # Repeat admission at every fallback boundary rather than trusting
+            # an earlier candidate list for a different inference destination.
+            if spec not in self.eligible(request):
+                raise GatewayError("no_eligible_provider")
             try:
                 result = await self.adapter.complete(spec, request)
                 return self._postflight(result, request)
