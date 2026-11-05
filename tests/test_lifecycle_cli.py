@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Iterator
+from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -309,7 +310,7 @@ def test_cli_main_create_status_cancel_history_do_not_print_sensitive_content(
     real_http, calls = local_http
     monkeypatch.setenv("MAX_API_BEARER_TOKEN", TEST_TOKEN)
     monkeypatch.setattr(lifecycle_cli, "_prompt_objective", lambda: "Do not display this private title")
-    monkeypatch.setattr(lifecycle_cli.httpx, "Client", lambda **kwargs: real_http)
+    monkeypatch.setattr(lifecycle_cli.httpx, "Client", lambda **kwargs: nullcontext(real_http))
     assert lifecycle_cli.main(["create", "--idempotency-key", "cli-main-safe-001"]) == 0
     created = capsys.readouterr().out
     assert "cli-main-safe-001" in created
