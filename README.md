@@ -1,66 +1,69 @@
 # MAX
 
-**One assistant. One identity. Your devices. Your control.**
+**My personal AI assistant. Built as a personal project.**
 
-MAX is our independently designed, voice-first personal AI system. Its purpose is to turn natural conversation into **authorized, verifiable work**—while remembering what matters, improving with experience, and staying firmly under its owner's control.
+MAX is my long-term project to build a personal, voice-first AI assistant that works across my devices, understands what I want to accomplish, and helps me carry out tasks safely and reliably.
 
-MAX is **not a repackaged agent framework**. We own the product architecture, orchestration, permissions, memory lifecycle, task execution, skill governance, and user experience. External integrations, model engines, and open-source libraries may be used behind replaceable interfaces where they solve a genuine engineering need; none should define MAX's identity or have unchecked authority.
+I'm designing MAX as **my own assistant and software stack**: its identity, experience, orchestration, memory, permissions, task execution, and skill system are defined by this project. I may use established libraries or external integrations where they are genuinely necessary, but they are implementation details—not MAX's identity.
 
-> **Project status:** Architecture and engineering foundation. The full application has **not** been built, deployed, or verified yet. Capabilities below describe our design goals, not features that are already working.
+> **Status:** Foundation and architecture in progress. The features below are goals, not claims of a finished application.
 
-## The experience we're building
+## What I want MAX to do
 
-- **A living desktop presence.** A small, translucent holographic orb with a luminous cyan ring, subtle blue reflections, and responsive animation. It stays out of the way during games and focused work.
-- **Voice that feels natural.** Wake or push-to-talk, conversational speech, interruption, quick cancellations, and a distinctive original British-English voice.
-- **A reliable personal operator.** MAX can plan multi-step work, choose specialized workers, use approved tools, preserve progress across restarts, and verify results before reporting success.
-- **Memory that can be trusted.** Useful preferences, project context, corrections, and task history—with provenance, privacy boundaries, and owner-controlled correction or deletion.
-- **Skills that grow.** MAX can find, assess, test, and propose new skills, then improve reusable workflows without silently expanding its permissions.
-- **Your machines, securely coordinated.** Windows 11 and Arch Linux/Hyprland companions, plus an iPhone browser interface; sensitive device operations require narrow, device-enforced authorization.
-- **Control over important actions.** Confidential documents are protected; external sends, sensitive changes, and every payment are gated by explicit confirmation.
+- **Be present when I need it.** A floating cyan-and-blue holographic orb on my desktop, with clear listening, thinking, speaking, and working states.
+- **Talk naturally.** Wake-word or push-to-talk interaction, responsive speech, interruptions, and an original refined British-English voice.
+- **Help me get things done.** Plan work, use approved tools, coordinate specialized agents, save progress, and show evidence of what actually happened.
+- **Remember the right things.** Keep useful personal preferences, project context, and task history while letting me review, correct, export, or delete them.
+- **Improve over time.** Evaluate outcomes, learn from corrections, and safely add or refine skills without silently changing its permissions.
+- **Work across my devices.** Windows 11 and Arch Linux/Hyprland desktop companions, with an iPhone browser interface.
+- **Respect my boundaries.** Ask before consequential actions, protect sensitive information, and never mistake a model's suggestion for permission.
 
-## Our stack, by design
+## The MAX architecture
 
-The product is divided into small first-party components, each with a clear responsibility:
+I'm organizing MAX around a set of modules I control:
 
-| MAX component | What it owns |
-|---|---|
-| **MAX Core** | Intent, planning, specialist coordination, and task state |
-| **MAX Gateway** | Model-independent intelligence interface, selection, streaming, and budgets |
-| **MAX Trust** | Identity, policy checks, approvals, data boundaries, and audit |
-| **MAX Memory** | Structured memory, provenance, knowledge retrieval, and retention |
-| **MAX Skills** | Skill discovery, inspection, sandbox testing, versioning, and rollback |
-| **MAX Voice** | Wake-up, speech, interruption, and turn-taking |
-| **MAX Presence** | Holographic desktop companion and responsive mobile UI |
-| **MAX Nodes** | Authorized, isolated execution on enrolled devices |
-| **MAX Evolution** | Evaluations, lessons, controlled improvements, and recovery |
-| **MAX Connect** | Optional communications, personal services, and device integrations |
+| Module | Responsibility |
+| --- | --- |
+| **MAX Core** | Understand goals, plan tasks, coordinate workers |
+| **MAX Gateway** | Route requests through a model-independent interface |
+| **MAX Trust** | Enforce permissions, approvals, and audit rules |
+| **MAX Memory** | Store and retrieve useful context with provenance |
+| **MAX Skills** | Inspect, test, register, and roll back capabilities |
+| **MAX Voice** | Handle speech, wake-up, and interruption |
+| **MAX Presence** | Render the desktop companion and mobile interface |
+| **MAX Nodes** | Execute authorized work on enrolled devices |
+| **MAX Evolution** | Evaluate improvements and support bounded recovery |
+| **MAX Connect** | Connect optional personal services and communication channels |
 
-These are **logical modules**, not ten separately deployed services. We will start with a manageable modular core and split processes only when isolation, performance, or reliability demands it.
+These are logical parts of **one personal project**, not a claim that ten standalone services already exist. The architecture is designed to keep the core independent of any one AI provider or third-party framework.
 
-## The principle behind every feature
+## How I'm building it
 
-**A model can suggest an action. It cannot grant itself the right to perform it.** Authorization is checked independently, execution is scoped, consequential actions require the appropriate confirmation, and completion must be backed by observable evidence.
+I want MAX to be dependable before it becomes complicated. My development approach is to design the security boundaries first, implement small working pieces, test real outcomes, and only then expand the system.
 
-MAX never stores banking PINs, one-time passwords, or card security codes. It must not bypass account security, workplace controls, or game protections. Sensitive files and personal history are not ordinary agent training material.
+MAX will never be allowed to grant itself permissions, treat external content as trusted instructions, or report an action as complete without evidence. Sensitive operations require explicit confirmation. Payment authentication secrets do not belong in assistant memory.
 
-## Supported platforms — planned
+## Planned platforms
 
-| Platform | Intended experience |
-|---|---|
-| **Windows 11** | Floating orb, background voice, gaming-aware focus, enrolled execution node |
-| **Arch Linux + Hyprland** | Equivalent companion, subject to real Wayland/window-manager verification |
-| **iPhone browser** | Private responsive interface, task status, and foreground voice where supported |
+| Platform | Experience |
+| --- | --- |
+| Windows 11 | Floating desktop orb, background voice, gaming-aware quiet mode |
+| Arch Linux + Hyprland | Desktop companion and authorized local execution |
+| iPhone | Responsive private web companion |
 
-Platform capabilities are subject to real-device tests. In particular, uninterrupted always-on-top behavior on Wayland and background voice in mobile browsers are **not** assumed.
+Platform-specific behavior will be validated on real devices. In particular, Wayland overlay behavior and mobile background voice are not assumed to work without testing.
 
-## Development state
+## Project documentation
 
-Phase 0 is dedicated to architecture research, security boundaries, technology evaluation, and a documented implementation sequence. We will then build and test **one working vertical slice at a time** instead of generating a huge, unverified application.
+- [Architecture](ARCHITECTURE.md)
+- [Product specification](docs/PRODUCT_SPECIFICATION.md)
+- [Technical design](docs/TECHNICAL_DESIGN.md)
+- [Security architecture](docs/SECURITY_ARCHITECTURE.md)
+- [Roadmap](docs/ROADMAP.md)
+- [Implementation plan](docs/IMPLEMENTATION_PLAN.md)
 
-Start here: [Architecture](ARCHITECTURE.md) · [Product specification](docs/PRODUCT_SPECIFICATION.md) · [Technical design](docs/TECHNICAL_DESIGN.md) · [Security design](docs/SECURITY_ARCHITECTURE.md) · [Roadmap](docs/ROADMAP.md) · [Implementation plan](docs/IMPLEMENTATION_PLAN.md).
-
-MAX's operating identity lives in [MAX.md](MAX.md), [SOUL.md](SOUL.md), [CORE.md](CORE.md), and related root documents. [AGENTS.md](AGENTS.md) separately governs the engineering worker. These files specify requirements; **runtime code and tests must enforce the rules**.
+The [MAX identity](MAX.md), [personality](SOUL.md), and [operating model](CORE.md) describe how I want the assistant to behave. [AGENTS.md](AGENTS.md) contains separate instructions for coding workers; the future runtime must enforce security in code rather than relying on Markdown alone.
 
 ---
 
-*Build the foundation correctly. Prove each capability. Make MAX better without surrendering control.*
+**MAX is a personal project. I'm building it for myself, one verified capability at a time.**
