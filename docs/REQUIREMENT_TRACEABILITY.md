@@ -46,8 +46,9 @@ Supplementary: [RESEARCH_FINDINGS.md](RESEARCH_FINDINGS.md), [DEPENDENCY_EVALUAT
 
 ## Phase 0B acceptance
 
-- [x] Documents/designs can be reviewed in the PR — presence to be confirmed by GitHub fetch.
-- [ ] All internal relative links and diagrams rendered/validated; record real results in PR.
+- [x] All 19 required documents fetched on the milestone branch and non-empty; see [PHASE0B_VALIDATION_REPORT.md](PHASE0B_VALIDATION_REPORT.md).
+- [x] All 22 changed files' local link destinations checked against known document paths; no unknown targets found.
+- [ ] Eight Mermaid graphs rendered and visually validated; presence verified, rendering not run.
 - [ ] All user-supplied owner specification documents checked against this register. If those private source documents were not available, record the gap rather than inventing requirements.
 - [ ] Complete recursive tracked-file inventory, not just known-path reads; see REPO_INVENTORY limitations.
 - [ ] Any provider account capability and local device test completed (not in Phase 0; carry forward as explicit gates).
