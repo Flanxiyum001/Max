@@ -54,3 +54,9 @@ Operational tasks, approvals, and structured memory use a transactional authorit
 Authenticated session -> persistent task -> one configured model adapter -> one safe read-only tool -> policy decision and audit -> status stream -> verified outcome. No telephony, payments, vault sharing, unrestricted desktop control, or automatic deployment.
 
 See docs/TECHNICAL_DESIGN.md and docs/DECISIONS.md for candidate technologies and unresolved choices.
+
+## Phase 0B architecture review links
+
+The baseline above is a proposed logical topology, not a deployed implementation. The complete set of **eight trust-boundary diagrams** is in [docs/ARCHITECTURE_DIAGRAMS.md](docs/ARCHITECTURE_DIAGRAMS.md). Primary-source stack comparison: [docs/RESEARCH_FINDINGS.md](docs/RESEARCH_FINDINGS.md) and [docs/DEPENDENCY_EVALUATION.md](docs/DEPENDENCY_EVALUATION.md). OpenClaw go/no-go: [docs/OPENCLAW_EVALUATION.md](docs/OPENCLAW_EVALUATION.md). Threats: [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md). Data: [docs/DATA_AND_STORAGE.md](docs/DATA_AND_STORAGE.md). Calling: [docs/TELEPHONY_ARCHITECTURE.md](docs/TELEPHONY_ARCHITECTURE.md).
+
+MAX Core is the authoritative workflow/task and verification plane, **MAX Trust owns policy and approvals**, and MAX Gateway is the provider-normalizing interface. Even when an external coding worker or skill produces output, it receives bounded task authority and cannot approve its own actions. Financial and sensitive-vault operations remain deferred until their dedicated risk review. This branch does not add code or initialize external services.
