@@ -82,9 +82,7 @@ class TaskTimeline:
         return f"{payload}.{signature}"
 
     def _decode(self, cursor: str, owner_id: str, task_id: str) -> _Position:
-        if not isinstance(cursor, str) or len(cursor) > 512 or not _CURSOR_FORMAT.fullmatch(
-            cursor
-        ):
+        if not isinstance(cursor, str) or len(cursor) > 512 or not _CURSOR_FORMAT.fullmatch(cursor):
             raise StoreError(_INVALID_CURSOR, 422)
         payload, signature = cursor.rsplit(".", 1)
         expected = hmac.new(self._key, payload.encode("ascii"), hashlib.sha256).hexdigest()
@@ -97,8 +95,7 @@ class TaskTimeline:
             data = json.loads(raw.decode("utf-8"))
             if (
                 not isinstance(data, dict)
-                or set(data)
-                != {"v", "owner", "task", "snapshot", "last_revision", "last_id"}
+                or set(data) != {"v", "owner", "task", "snapshot", "last_revision", "last_id"}
                 or type(data["v"]) is not int
                 or data["v"] != 1
                 or data["owner"] != owner_id
@@ -135,9 +132,7 @@ class TaskTimeline:
         with self.store.sessions() as session:
             # Ownership checked before inspecting a cursor. A foreign task is always 404.
             task = session.execute(
-                select(Task.id, Task.revision).where(
-                    Task.id == task_id, Task.owner_id == owner_id
-                )
+                select(Task.id, Task.revision).where(Task.id == task_id, Task.owner_id == owner_id)
             ).one_or_none()
             if task is None:
                 raise StoreError("Task not found", 404)
