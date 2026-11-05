@@ -16,6 +16,8 @@ from types import MappingProxyType
 from typing import Any
 from uuid import UUID, uuid4
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from max_core.config import ConfigurationError, Settings
 from max_core.store import StoreError, TaskStore, create_store
 
@@ -252,7 +254,7 @@ def main(argv: list[str] | None = None) -> int:
         count = store.reconcile_expired(_OWNER, limit=50)
         print(f"Quarantined expired tasks: {count}; no operation was retried.")
         return 0
-    except (ConfigurationError, StoreError, WorkerError):
+    except (ConfigurationError, StoreError, WorkerError, SQLAlchemyError, OSError):
         print(
             "MAX worker: task denied, uncertain or unavailable; inspect local status. "
             "No success is claimed.",
