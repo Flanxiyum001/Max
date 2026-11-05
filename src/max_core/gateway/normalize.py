@@ -69,8 +69,13 @@ def _usage(payload: Any, input_key: str, output_key: str) -> TokenUsage | None:
 
 
 def actual_cost(spec: ModelSpec, usage: TokenUsage | None) -> Decimal | None:
-    if (usage is None or usage.input_tokens is None or usage.output_tokens is None or
-            spec.input_usd_per_million is None or spec.output_usd_per_million is None):
+    if (
+        usage is None
+        or usage.input_tokens is None
+        or usage.output_tokens is None
+        or spec.input_usd_per_million is None
+        or spec.output_usd_per_million is None
+    ):
         return None
     return (
         Decimal(usage.input_tokens) * spec.input_usd_per_million
@@ -104,8 +109,14 @@ def normalize_openai(data: Any, request_id: str, spec: ModelSpec) -> GatewayResp
         raise GatewayError("malformed_provider_response")
     usage = _usage(obj.get("usage"), "prompt_tokens", "completion_tokens")
     return GatewayResponse(
-        request_id, spec.provider_id, spec.model_id, content, tuple(tools),
-        finish_reason, usage, actual_cost(spec, usage),
+        request_id,
+        spec.provider_id,
+        spec.model_id,
+        content,
+        tuple(tools),
+        finish_reason,
+        usage,
+        actual_cost(spec, usage),
     )
 
 
@@ -136,6 +147,12 @@ def normalize_anthropic(data: Any, request_id: str, spec: ModelSpec) -> GatewayR
         raise GatewayError("malformed_provider_response")
     usage = _usage(obj.get("usage"), "input_tokens", "output_tokens")
     return GatewayResponse(
-        request_id, spec.provider_id, spec.model_id, content, tuple(tools),
-        stop_reason, usage, actual_cost(spec, usage),
+        request_id,
+        spec.provider_id,
+        spec.model_id,
+        content,
+        tuple(tools),
+        stop_reason,
+        usage,
+        actual_cost(spec, usage),
     )
