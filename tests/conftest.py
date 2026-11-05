@@ -7,7 +7,6 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 
-
 from max_core.api import create_app
 from max_core.config import Settings
 from max_core.models import Base
