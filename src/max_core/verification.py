@@ -259,7 +259,16 @@ class IndependentVerifier:
             prior = self._prior(session, owner_id, task_id, request_id, fingerprint)
             if prior is not None:
                 return prior
-            snapshot = self._snapshot(session, owner_id, task_id)
+            try:
+                snapshot = self._snapshot(session, owner_id, task_id)
+            except StoreError:
+                # Another transaction may have completed this same request
+                # between the first idempotency lookup and the task-state read.
+                # PostgreSQL READ COMMITTED sees its committed check on a new SELECT.
+                prior = self._prior(session, owner_id, task_id, request_id, fingerprint)
+                if prior is not None:
+                    return prior
+                raise
 
         # No task-row lock is held during independent arithmetic observation.
         # Only trusted fixed-source DevAddObserver can issue this conclusion.
