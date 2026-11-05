@@ -51,8 +51,8 @@ async def sse_frames(lines: AsyncIterator[str]) -> AsyncIterator[tuple[str, str]
 def _json(data: str) -> dict[str, Any]:
     try:
         result = json.loads(data)
-    except (ValueError, json.JSONDecodeError) as exc:
-        raise GatewayError("malformed_provider_response") from exc
+    except (ValueError, json.JSONDecodeError):
+        raise GatewayError("malformed_provider_response") from None
     return _mapping(result)
 
 
