@@ -6,7 +6,8 @@ from secrets import token_hex
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status as http_status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import status as http_status
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.base import RequestResponseEndpoint
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -149,3 +150,4 @@ def create_app(settings: Settings | None = None, store: TaskStore | None = None)
             raise _error(exc) from None
 
     return app
+
