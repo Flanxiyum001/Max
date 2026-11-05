@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import traceback
+from collections.abc import Callable
 from dataclasses import replace
 from decimal import Decimal
 from io import StringIO
@@ -78,8 +79,12 @@ def test_loopback_cloud_proxy_allowed_only_with_cloud_and_cost_permission() -> N
     assert seen[0].url.port == 14001
 
 
-@pytest.mark.parametrize("destination", [unknown_proxy(), cloud(inference_destination=InferenceDestination.UNKNOWN)])
-@pytest.mark.parametrize("privacy", [Privacy.PUBLIC, Privacy.INTERNAL, Privacy.CONFIDENTIAL, Privacy.RESTRICTED])
+@pytest.mark.parametrize(
+    "destination", [unknown_proxy(), cloud(inference_destination=InferenceDestination.UNKNOWN)]
+)
+@pytest.mark.parametrize(
+    "privacy", [Privacy.PUBLIC, Privacy.INTERNAL, Privacy.CONFIDENTIAL, Privacy.RESTRICTED]
+)
 def test_unknown_inference_denied_even_with_cloud_opt_in(
     destination: ModelSpec, privacy: Privacy
 ) -> None:
@@ -109,7 +114,9 @@ def test_sensitive_data_denied_to_loopback_cloud_proxy(privacy: Privacy) -> None
         {"max_cost_usd": Decimal("1"), "local_only": True},
     ],
 )
-def test_cloud_proxy_requires_valid_cost_and_local_only_permissions(incomplete: dict[str, Any]) -> None:
+def test_cloud_proxy_requires_valid_cost_and_local_only_permissions(
+    incomplete: dict[str, Any],
+) -> None:
     with pytest.raises(GatewayError, match="no_eligible_provider"):
         run_complete(
             [proxy_cloud()],
@@ -129,9 +136,7 @@ def test_cloud_proxy_requires_valid_cost_and_local_only_permissions(incomplete: 
 def test_cloud_proxy_with_unknown_pricing_cannot_send(
     input_rate: Decimal | None, output_rate: Decimal | None
 ) -> None:
-    proxy = proxy_cloud(
-        input_usd_per_million=input_rate, output_usd_per_million=output_rate
-    )
+    proxy = proxy_cloud(input_usd_per_million=input_rate, output_usd_per_million=output_rate)
     with pytest.raises(GatewayError, match="no_eligible_provider"):
         run_complete(
             [proxy],
@@ -207,18 +212,22 @@ def test_loopback_cloud_proxy_cannot_be_fallback_for_restricted_data() -> None:
 
 
 def test_fallback_never_sends_to_unknown_or_unauthorized_cloud_proxy() -> None:
+    def transport_for(
+        calls: list[int | None],
+    ) -> Callable[[httpx.Request], httpx.Response]:
+        def handler(msg: httpx.Request) -> httpx.Response:
+            calls.append(msg.url.port)
+            return httpx.Response(503)
+
+        return handler
+
     for other, req in (
         (unknown_proxy(provider_id="unknown", priority=10), request(allow_fallback=True)),
         (proxy_cloud(priority=10), request(allow_fallback=True)),
     ):
         seen: list[int | None] = []
-
-        def transport(msg: httpx.Request) -> httpx.Response:
-            seen.append(msg.url.port)
-            return httpx.Response(503)
-
         with pytest.raises(GatewayError, match="provider_unavailable"):
-            run_complete([local(priority=0), other], transport, req)
+            run_complete([local(priority=0), other], transport_for(seen), req)
         assert seen == [14000]
 
 
@@ -256,9 +265,7 @@ def test_gateway_request_and_response_repr_hide_prompts_and_tool_arguments() -> 
         max_input_tokens=100,
         max_output_tokens=5,
     )
-    proposal = ToolProposal(
-        call_id="call1", name="search", arguments={"token": tool_marker}
-    )
+    proposal = ToolProposal(call_id="call1", name="search", arguments={"token": tool_marker})
     result = GatewayResponse(
         request_id="sensitive-req-001",
         provider_id="fake",
@@ -331,9 +338,7 @@ def test_provider_failure_path_suppresses_sensitive_exception_chain(
         assert sensitive not in str(captured.value)
         assert sensitive not in repr(captured.value)
         assert sensitive not in public_traceback
-    assert captured.value.code in {
-        "timeout", "provider_unavailable", "malformed_provider_response"
-    }
+    assert captured.value.code in {"timeout", "provider_unavailable", "malformed_provider_response"}
 
 
 def test_stream_transport_error_traceback_is_sanitized() -> None:
@@ -348,9 +353,7 @@ def test_stream_transport_error_traceback_is_sanitized() -> None:
                 [proxy_cloud()],
                 HTTPAdapter(client),
             )
-            async for _ in gateway.stream(
-                request(cloud_allowed=True, max_cost_usd=Decimal("1"))
-            ):
+            async for _ in gateway.stream(request(cloud_allowed=True, max_cost_usd=Decimal("1"))):
                 pass
 
     with pytest.raises(GatewayError) as captured:
