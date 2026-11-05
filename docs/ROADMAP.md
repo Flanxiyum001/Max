@@ -94,3 +94,8 @@ Do not combine unrelated stages in an oversized PR or promise milestones are del
 The first runtime PR adds **local-only** MAX Core packaging, process health, minimal authenticated owner endpoints, safe access logging and automated quality checks. It intentionally does **not** satisfy the full Phase 1 line items above (persistent tasks, PostgreSQL, model gateway and tools). Those are separate, owner-reviewed PRs.
 
 Development API setup and explicit security limitations: [CORE_BOOTSTRAP.md](CORE_BOOTSTRAP.md). Each PR is merged by the owner manually into `max`; no automated production deployment.
+
+
+## Milestone 2 implementation slice
+
+A durable PostgreSQL repository with explicit Alembic migration, idempotent create, cancel, bounded worker lease/checkpoint and internal outbox is proposed in a focused PR. It does not provide a worker, real AI, tool execution or remote deploy. Read [TASK_PERSISTENCE.md](TASK_PERSISTENCE.md). This PR must pass both Python-version CI matrices and be owner-merged before proceeding to the model gateway.
