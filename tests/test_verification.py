@@ -53,7 +53,9 @@ def test_matching_independent_observation_completes_once(store: TaskStore) -> No
     with pytest.raises(StoreError, match="unavailable for verification"):
         IndependentVerifier(store.engine, reader).verify("owner", task_id)
     with Session(store.engine) as session:
-        checks = session.scalars(select(VerificationCheck).where(VerificationCheck.task_id == task_id)).all()
+        checks = session.scalars(
+            select(VerificationCheck).where(VerificationCheck.task_id == task_id)
+        ).all()
         events = session.scalars(select(OutboxEvent).where(OutboxEvent.task_id == task_id)).all()
         assert len(checks) == 1
         assert checks[0].observed_digest == digest(ARTIFACT)
@@ -69,13 +71,16 @@ def test_mismatched_worker_claim_is_not_completion(store: TaskStore) -> None:
     assert result.task_state == "awaiting_verification"
     assert store.get("owner", task_id).state == "awaiting_verification"
     with Session(store.engine) as session:
-        checks = session.scalars(select(VerificationCheck).where(VerificationCheck.task_id == task_id)).all()
+        checks = session.scalars(
+            select(VerificationCheck).where(VerificationCheck.task_id == task_id)
+        ).all()
         assert len(checks) == 1 and checks[0].verdict == "mismatch"
 
 
 @pytest.mark.parametrize("value", [None, b"x" * 1_000_001])
 def test_unavailable_or_large_observation_keeps_task_unverified(
-    store: TaskStore, value: bytes | None,
+    store: TaskStore,
+    value: bytes | None,
 ) -> None:
     task_id = waiting_task(store, "verify-unavailable-001")
     outcome = IndependentVerifier(store.engine, FixtureReader(value)).verify("owner", task_id)
@@ -121,10 +126,18 @@ def test_verifier_is_internal_not_public_http_capability(store: TaskStore) -> No
 
 def test_verification_after_mismatch_may_be_reobserved(store: TaskStore) -> None:
     task_id = waiting_task(store, "verify-recheck-001")
-    assert IndependentVerifier(store.engine, FixtureReader(b"wrong")).verify("owner", task_id).verdict == "mismatch"
-    assert IndependentVerifier(store.engine, FixtureReader(ARTIFACT)).verify("owner", task_id).verdict == "verified"
+    assert (
+        IndependentVerifier(store.engine, FixtureReader(b"wrong")).verify("owner", task_id).verdict
+        == "mismatch"
+    )
+    assert (
+        IndependentVerifier(store.engine, FixtureReader(ARTIFACT)).verify("owner", task_id).verdict
+        == "verified"
+    )
     with Session(store.engine) as session:
-        entries = session.scalars(select(VerificationCheck).where(VerificationCheck.task_id == task_id)).all()
+        entries = session.scalars(
+            select(VerificationCheck).where(VerificationCheck.task_id == task_id)
+        ).all()
         assert sorted(e.verdict for e in entries) == ["mismatch", "verified"]
 
 
