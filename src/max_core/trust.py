@@ -18,8 +18,8 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from max_core.gateway.contracts import ToolProposal
-from max_core.models import ApprovalGrant, Task, TrustAudit, utc_now
-from max_core.store import StoreError, _is_expired, _locked
+from max_core.models import ApprovalGrant, TrustAudit, utc_now
+from max_core.store import _is_expired, _locked
 
 _ACTOR = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 _TOOL = "task.status"
