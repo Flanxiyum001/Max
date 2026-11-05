@@ -208,6 +208,8 @@ class BoundedWorker:
             start = time.monotonic()
             result = execute_operation(operation)
             duration = time.monotonic() - start
+            if not isinstance(result, bytes) or len(result) > OPERATIONS[operation.operation_id].max_output_bytes:
+                return self._recover_or_quarantine(canonical_id)
             if duration > min(_OPERATION_SECONDS, OPERATIONS[operation.operation_id].max_seconds):
                 return self._recover_or_quarantine(canonical_id)
 
@@ -222,7 +224,7 @@ class BoundedWorker:
                 # Concurrent cancel/lease expiry may have won. Do not assert success.
                 return self._recover_or_quarantine(canonical_id)
             return WorkerReport(canonical_id, saved.state, digest, result.decode("ascii"))
-        except (StoreError, WorkerError, Exception, KeyboardInterrupt):
+        except (Exception, KeyboardInterrupt):
             # A fault may have happened after computation: always quarantine, never retry.
             return self._recover_or_quarantine(canonical_id)
 
