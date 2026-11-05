@@ -90,3 +90,8 @@ The [MAX identity](MAX.md), [personality](SOUL.md), and [operating model](CORE.m
 ---
 
 **MAX is a personal project. I'm building it for myself, one verified capability at a time.**
+
+
+## Milestone 7 — bounded local developer worker (review branch)
+
+I'm adding my first **manually invoked, strictly allowlisted local task execution** in a separate review-only milestone. The only operations are a constant static status response and bounded integer addition, using typed JSON data. The worker uses PostgreSQL leases and checkpoints, can acknowledge a cancellation **only after its operation stops**, quarantines interrupted/uncertain tasks and records outcomes as **awaiting independent verification**, not completed. No model, general code execution, shell, network tool, personal-file access, or agent orchestration is enabled. See [bounded worker limits and local test commands](docs/BOUNDED_WORKER.md). This work is not merged or deployed unless I review and approve its PR.

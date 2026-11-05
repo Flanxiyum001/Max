@@ -303,6 +303,48 @@ class TaskStore:
                 _event(session, task, "task.needs_reconciliation")
             return len(tasks)
 
+    def acknowledge_stopped_cancel(self, owner_id: str, task_id: str, worker_id: str) -> TaskView:
+        """Trusted worker only: finish cancellation AFTER its local work has stopped.
+
+        A client/model cannot call this method through the HTTP API. Expired or
+        mismatched leases must be reconciled rather than treated as confirmation.
+        """
+        with self.sessions.begin() as session:
+            task = _locked(session, task_id, owner_id)
+            if (
+                task.state != "cancelling"
+                or task.lease_owner != worker_id
+                or _is_expired(task.lease_until)
+            ):
+                raise StoreError("No active cancellation acknowledgment lease")
+            _advance(task, "cancelled")
+            task.lease_owner = None
+            task.lease_until = None
+            _event(session, task, "task.cancelled")
+            session.flush()
+            return TaskView.from_record(task)
+
+    def quarantine_claim(self, owner_id: str, task_id: str, worker_id: str) -> TaskView:
+        """Trusted worker: uncertain execution => reconciliation, NEVER replay.
+
+        Only the current unexpired lease owner may quarantine running/cancelling
+        work. No success assertion, verified completion or automatic retry.
+        """
+        with self.sessions.begin() as session:
+            task = _locked(session, task_id, owner_id)
+            if (
+                task.state not in {"running", "cancelling"}
+                or task.lease_owner != worker_id
+                or _is_expired(task.lease_until)
+            ):
+                raise StoreError("No active worker lease for quarantine")
+            _advance(task, "needs_reconciliation")
+            task.lease_owner = None
+            task.lease_until = None
+            _event(session, task, "task.needs_reconciliation")
+            session.flush()
+            return TaskView.from_record(task)
+
     def lease_outbox(self, limit: int = 20, ttl_seconds: int = 60) -> list[OutboxLease]:
         """Claims metadata events, not external actions. Re-leasing needs idempotent sink."""
         if not 1 <= limit <= 100 or not 5 <= ttl_seconds <= 3600:
