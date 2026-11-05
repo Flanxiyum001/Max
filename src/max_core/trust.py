@@ -94,8 +94,13 @@ class SafeTaskStatus:
 
 
 def _audit(
-    session: Session, owner_id: str, task_id: str, approval_id: str | None,
-    action: str, decision: str, reason: str,
+    session: Session,
+    owner_id: str,
+    task_id: str,
+    approval_id: str | None,
+    action: str,
+    decision: str,
+    reason: str,
 ) -> None:
     session.add(
         TrustAudit(
@@ -114,9 +119,8 @@ def _parameters(context: ActorContext, proposal: ToolProposal) -> str:
     """Pure schema validation. Never execute or import code from a tool name."""
     if not isinstance(proposal, ToolProposal) or proposal.name != _TOOL:
         raise TrustError("capability_denied")
-    if (
-        not isinstance(proposal.call_id, str)
-        or not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", proposal.call_id)
+    if not isinstance(proposal.call_id, str) or not re.fullmatch(
+        r"[A-Za-z0-9._:-]{1,128}", proposal.call_id
     ):
         raise TrustError("invalid_proposal")
     if (
@@ -159,8 +163,13 @@ class TrustService:
             with self.sessions.begin() as session:
                 _locked(session, context.task_id, context.owner_id)
                 _audit(
-                    session, context.owner_id, context.task_id, None,
-                    "request", "deny", error.code,
+                    session,
+                    context.owner_id,
+                    context.task_id,
+                    None,
+                    "request",
+                    "deny",
+                    error.code,
                 )
             raise
         approval = ApprovalGrant(
@@ -180,8 +189,13 @@ class TrustService:
             _locked(session, context.task_id, context.owner_id)
             session.add(approval)
             _audit(
-                session, context.owner_id, context.task_id, approval.id,
-                "request", "pending", "owner_approval_required",
+                session,
+                context.owner_id,
+                context.task_id,
+                approval.id,
+                "request",
+                "pending",
+                "owner_approval_required",
             )
         return GrantView.from_record(approval)
 
@@ -215,22 +229,38 @@ class TrustService:
                 raise TrustError("approval_not_found", 404)
             if grant.state != "pending":
                 _audit(
-                    session, owner_id, grant.task_id, grant.id,
-                    "decision", "deny", "approval_not_pending",
+                    session,
+                    owner_id,
+                    grant.task_id,
+                    grant.id,
+                    "decision",
+                    "deny",
+                    "approval_not_pending",
                 )
                 failure = TrustError("approval_not_pending", 409)
             elif _is_expired(grant.expires_at):
                 grant.state = "expired"
                 _audit(
-                    session, owner_id, grant.task_id, grant.id, "decision", "deny", "approval_expired"
+                    session,
+                    owner_id,
+                    grant.task_id,
+                    grant.id,
+                    "decision",
+                    "deny",
+                    "approval_expired",
                 )
                 failure = TrustError("approval_expired", 409)
             else:
                 grant.state = "approved" if approve else "denied"
                 grant.decided_at = utc_now()
                 _audit(
-                    session, owner_id, grant.task_id, grant.id,
-                    "decision", "approved" if approve else "denied", "owner_decision",
+                    session,
+                    owner_id,
+                    grant.task_id,
+                    grant.id,
+                    "decision",
+                    "approved" if approve else "denied",
+                    "owner_decision",
                 )
             view = GrantView.from_record(grant)
         if failure:
@@ -248,8 +278,13 @@ class TrustService:
             with self.sessions.begin() as session:
                 _locked(session, context.task_id, context.owner_id)
                 _audit(
-                    session, context.owner_id, context.task_id, None,
-                    "execute", "deny", error.code,
+                    session,
+                    context.owner_id,
+                    context.task_id,
+                    None,
+                    "execute",
+                    "deny",
+                    error.code,
                 )
             raise
         failure: TrustError | None = None
@@ -278,16 +313,26 @@ class TrustService:
                 reason = ""
             if reason:
                 _audit(
-                    session, context.owner_id, task.id, grant.id,
-                    "execute", "deny", reason,
+                    session,
+                    context.owner_id,
+                    task.id,
+                    grant.id,
+                    "execute",
+                    "deny",
+                    reason,
                 )
                 failure = TrustError(reason, 409)
             else:
                 grant.state = "consumed"
                 grant.consumed_at = utc_now()
                 _audit(
-                    session, context.owner_id, task.id, grant.id,
-                    "execute", "allow", "single_use_read",
+                    session,
+                    context.owner_id,
+                    task.id,
+                    grant.id,
+                    "execute",
+                    "allow",
+                    "single_use_read",
                 )
                 result = SafeTaskStatus(task.id, task.state, task.revision)
         if failure:
