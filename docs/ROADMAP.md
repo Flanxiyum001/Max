@@ -70,3 +70,21 @@ Order is provisional and may change after architecture and risk review.
 - Controlled rollout and operational runbooks.
 
 Each phase must have scoped assignments, tests, acceptance criteria, owner-visible status, and rollback instructions. No phase is complete based on generated code alone.
+
+## Milestone PR governance and Phase 0B closure
+
+**Default branch is `max`, not `main`.** Owner merges every milestone PR manually. Each new PR starts from the last owner-merged `max` tip; no auto-merge or deployment. Existing 0A PR #2 established personal project identity, initial docs and the review process. **0B** closes the architecture research/document gap by adding source-backed evaluations, an India telephony risk gate, data and threat models, traceability and eight diagrams. Its scope is **documentation only**; it is not a completed runnable MAX feature.
+
+### Implementation review order after 0B owner approval
+
+| Milestone PR | Target | Observable exit and minimum negative cases |
+| --- | --- | --- |
+| 1 | Secure core skeleton | Config/auth/redaction, status API, CI, unauthenticated request rejected |
+| 2 | Durable tasks/outbox | Migrations, restart recovery, cancel and duplicate-side-effect tests |
+| 3 | Dual-format model gateway | OpenAI/Anthropic fixtures, budget/privacy routing, outage/streaming tests |
+| 4 | MAX Trust + one safe tool | Exact-action approval, audit, replay denial and verified read-only result |
+| 5 | Desktop/mobile/voice prototypes | Real Windows/Hyprland foreground/focus checks and iPhone foreground use |
+| 6+ | Bounded agents/nodes/skills/browser/memory | Each capability isolated, tested and individually owner merged |
+| Later | Communications/vault/evolution/production hardening | Consent/licensing, regional legality, independent review and restore tests |
+
+Do not combine unrelated stages in an oversized PR or promise milestones are delivered based on documents. Milestone-specific scope, proof and risk templates: [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md), [VALIDATION_PLAN.md](VALIDATION_PLAN.md), [REQUIREMENT_TRACEABILITY.md](REQUIREMENT_TRACEABILITY.md).
