@@ -20,3 +20,8 @@ The proposed `planning`, `awaiting approval` and `verifying` orchestration phase
 ## Milestone 7 manually invoked development worker — review branch (2026-11-05)
 
 The **only** initial executable capability is a local operator-launched [bounded worker](BOUNDED_WORKER.md), **not** the proposed planner/agent runtime above. The worker requires a queued owner task with exact JSON operation schema and an existing PostgreSQL lease. Two constant-time pure operations are allowlisted; result digests are stored via the existing unverified outcome gate. The added worker-only cancellation acknowledgment uses an unexpired exact owner/worker lease and executes **only after local work has stopped**. Faults enter the pre-existing `needs_reconciliation` state, never an automatic retry. No automatic scheduler, trust-tool permission expansion or independent evidence source is shipped. See [Trust boundaries](TRUST_IMPLEMENTATION.md).
+
+
+## Milestone 8 — internal dev.add expected-result observer (review branch)
+
+A manually invoked, non-agent [independent deterministic observer](INDEPENDENT_EVIDENCE_OBSERVER.md) can separately evaluate a `dev.add` result against a worker's untrusted SHA-256 claim. The existing trusted verifier remains responsible for an attempt-bound, transactional `awaiting_verification → completed` transition and event; contradicted or inconclusive evidence never auto-retries a worker. No general agent planner, long-running observer scheduler, external event attestation or high-risk execution capability is implemented. Completion in this restricted prototype means **the mathematical answer was independently supported**, not worker-execution attestation.
