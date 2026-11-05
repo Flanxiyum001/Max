@@ -118,7 +118,12 @@ class VerificationCheck(Base):
     """Immutable-in-application record of an independent observation attempt."""
 
     __tablename__ = "max_verification_checks"
-    __table_args__ = (Index("ix_max_verification_task", "task_id", "checked_at"),)
+    __table_args__ = (
+        Index("ix_max_verification_task", "task_id", "checked_at"),
+        UniqueConstraint("owner_id", "task_id", "request_id", name="uq_observer_owner_task_request"),
+        # A request ID is owner-global; cross-task reuse must conflict, not silently fork.
+        UniqueConstraint("owner_id", "request_id", name="uq_observer_owner_request"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     owner_id: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -126,6 +131,19 @@ class VerificationCheck(Base):
     observed_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
     expected_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     verdict: Mapped[str] = mapped_column(String(30), nullable=False)
+    # Nullable only for backward compatibility with pre-Milestone 8 checks.
+    request_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    request_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    task_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    checkpoint_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    input_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    operation_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    observer_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    observer_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source_kind: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    reason_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    result_state: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    result_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
     checked_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
