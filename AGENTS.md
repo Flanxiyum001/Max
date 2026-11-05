@@ -20,3 +20,10 @@ For each change provide: objective, scope and exclusions, changed files, design 
 
 ## Phase 0 boundaries
 Documentation and research only. No runtime implementation, provisioning, credentials, or production actions. Validate real platform constraints before freezing stack decisions.
+
+## Mandatory milestone pull-request workflow
+- Every milestone must be delivered as a **separate, focused pull request** targeting the repository's default `max` branch. Use a newly named feature branch for each milestone; never commit directly to `max`.
+- The owner personally reviews and merges each PR. **Never merge, enable auto-merge, deploy, or promote a branch on the owner's behalf.**
+- Start a new milestone from the latest owner-merged `max` rather than accidentally stacking unreviewed changes. If a dependency needs a stacked PR, explain it and ask before using one.
+- Include objective, changed files, decisions, risk and rollback, exact validation performed, checks not run, and a scoped acceptance checklist in the PR body.
+- Verify the PR base/head and changed-file list before opening it. Do not claim CI is passing unless GitHub checks confirm it; expose blockers and unimplemented requirements.
