@@ -1,6 +1,6 @@
 # MAX implementation plan — reviewable assignments
 
-**Status:** Planning only. Do not treat estimates as delivery promises.
+**Status:** Historical milestone plan, updated with current post-PR #7 audit below. Estimates are not delivery promises.
 
 ## PR 0A — first-party foundation and project ownership (current)
 Personal-project README, coding-agent instructions, baseline architecture, secure module boundaries and staged plan. Exit: owner review of these documents. **This does not mean Phase 0 research and all 19 required deliverables are complete.**
@@ -78,3 +78,9 @@ An additive `0002_trust_verification` migration, deny-by-default approved action
 **Acceptance:** owner/device/session/call/parameter binding, expiry/replay denial, cross-owner isolation, mismatches never complete, concurrent PostgreSQL approval and verifier one-winner tests, zero approval action on high-risk tools, migrations/ready checks, CI Python 3.11 and 3.13 all green. Detailed boundaries: [TRUST_IMPLEMENTATION.md](TRUST_IMPLEMENTATION.md).
 
 **Release gate:** owner manually merges this PR after CI and migration review. External read-only tools, secure identity and actual source-specific verification are later isolated milestones.
+
+## Current-status interpretation — requirements audit 2026-11-05
+
+The sections titled "this PR" above were written **during historical milestone development**. They are retained as implementation records, not instructions to reopen or redo merged PRs. As of `max` commit `72f67b1ec6a737c813f4ca633457a9ca39223b94`, foundation PRs #1–#3 and local Core/DB/Gateway/Trust PRs #4–#7 are **merged**. No actual connected provider, autonomous worker, device/voice/web client, Drive/vault/telephony or production server is implemented.
+
+**Phase 0 closure:** architecture/design coverage exists, but still requires explicit [exit-criteria review](PHASE0_EXIT_CRITERIA.md) and [owner-requirement gap audit](PHASE0_AUDIT.md). Only a **local read-only owner task timeline** is recommended as the next small implementation; that work needs its own owner-reviewed PR. Never infer provider/account compatibility from OpenAI/Anthropic mock fixtures or authorization for external effects from the single approved task-status read.
