@@ -103,14 +103,14 @@ class HTTPAdapter:
                     if len(chunks) + len(chunk) > MAX_RESPONSE_BYTES:
                         raise GatewayError("response_too_large")
                     chunks.extend(chunk)
-        except httpx.TimeoutException as exc:
-            raise GatewayError("timeout") from exc
-        except httpx.RequestError as exc:
-            raise GatewayError("provider_unavailable") from exc
+        except httpx.TimeoutException:
+            raise GatewayError("timeout") from None
+        except httpx.RequestError:
+            raise GatewayError("provider_unavailable") from None
         try:
             data = json.loads(chunks)
-        except (ValueError, UnicodeError) as exc:
-            raise GatewayError("malformed_provider_response") from exc
+        except (ValueError, UnicodeError):
+            raise GatewayError("malformed_provider_response") from None
         if not isinstance(data, dict):
             raise GatewayError("malformed_provider_response")
         if data.get("model") is not None and data["model"] != spec.model_id:
@@ -139,5 +139,5 @@ class HTTPAdapter:
                         yield event
         except httpx.TimeoutException as exc:
             raise GatewayError("timeout") from exc
-        except httpx.RequestError as exc:
-            raise GatewayError("stream_interrupted") from exc
+        except httpx.RequestError:
+            raise GatewayError("stream_interrupted") from None
