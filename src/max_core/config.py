@@ -19,6 +19,7 @@ class Settings:
     bind_host: str = "127.0.0.1"
     bind_port: int = 8765
     log_level: str = "INFO"
+    database_url: str | None = None
 
     def __post_init__(self) -> None:
         token = self.bearer_token
@@ -30,6 +31,8 @@ class Settings:
             raise ConfigurationError("MAX_BIND_HOST must be 127.0.0.1 in this milestone")
         if not 1024 <= self.bind_port <= 65535:
             raise ConfigurationError("MAX_BIND_PORT must be an integer between 1024 and 65535")
+        if self.database_url is not None and not self.database_url.startswith("postgresql+psycopg://"):
+            raise ConfigurationError("MAX_DATABASE_URL must use postgresql+psycopg://")
         if self.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             raise ConfigurationError("MAX_LOG_LEVEL must be a supported logging level")
 
@@ -47,4 +50,5 @@ class Settings:
             bind_host=env.get("MAX_BIND_HOST", "127.0.0.1"),
             bind_port=port,
             log_level=env.get("MAX_LOG_LEVEL", "INFO").upper(),
+            database_url=env.get("MAX_DATABASE_URL") or None,
         )
