@@ -61,3 +61,11 @@ refresh/diff, versioned route matching and provenance preservation. Unknown
 routes must stay UNREVIEWED/UNKNOWN; never carry owner approvals across changed
 upstream routes without an explicit review. Verify the deployed catalogue
 contract and receive owner approval before any authenticated read-only GET.
+
+## Stage A security redaction regression
+
+The existing streaming adapter used explicit exception chaining on HTTPX timeouts
+while normal completions suppressed their transport exception context. Stage A
+aligns streaming timeout handling with the existing non-streaming redaction
+policy and adds a mock-only traceback regression test. No fallback or transport
+retry rule changes.
