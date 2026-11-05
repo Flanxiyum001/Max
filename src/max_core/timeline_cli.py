@@ -168,7 +168,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"MAX timeline: {exc}", file=sys.stderr)
         return 2
     except httpx.HTTPError:
-        print("MAX timeline: Local MAX is unavailable or returned an unsafe response", file=sys.stderr)
+        print(
+            "MAX timeline: Local MAX is unavailable or returned an unsafe response", file=sys.stderr
+        )
         return 2
     print(output)
     return 0
