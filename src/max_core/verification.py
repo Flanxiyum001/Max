@@ -91,8 +91,13 @@ class IndependentVerifier:
             )
             session.add(check)
             _audit(
-                session, owner_id, task.id, None, "verification",
-                "allow" if verdict == "verified" else "deny", verdict,
+                session,
+                owner_id,
+                task.id,
+                None,
+                "verification",
+                "allow" if verdict == "verified" else "deny",
+                verdict,
             )
             if verdict == "verified":
                 _advance(task, "completed")
