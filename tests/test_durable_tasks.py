@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
+from datetime import timedelta, timezone
 from hashlib import sha256
 from uuid import uuid4
 
@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from max_core.api import create_app
 from max_core.config import Settings
 from max_core.models import Base, OutboxEvent, Task, utc_now
-from max_core.store import StoreError, TaskStore
+from max_core.store import StoreError, TaskStore, _is_expired
 from tests.conftest import TEST_TOKEN
 
 
@@ -232,3 +232,10 @@ def test_readiness_does_not_claim_sqlite_is_production_migrated(
     durable_client: TestClient,
 ) -> None:
     assert durable_client.get("/health/ready").status_code == 503
+
+
+def test_expiry_conversion_respects_offset_aware_datetimes() -> None:
+    future = (utc_now() + timedelta(minutes=2)).astimezone(timezone(timedelta(hours=5, minutes=30)))
+    assert not _is_expired(future)
+    past = (utc_now() - timedelta(minutes=2)).astimezone(timezone(timedelta(hours=-4)))
+    assert _is_expired(past)
