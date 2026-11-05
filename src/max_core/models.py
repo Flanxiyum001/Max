@@ -120,7 +120,9 @@ class VerificationCheck(Base):
     __tablename__ = "max_verification_checks"
     __table_args__ = (
         Index("ix_max_verification_task", "task_id", "checked_at"),
-        UniqueConstraint("owner_id", "task_id", "request_id", name="uq_observer_owner_task_request"),
+        UniqueConstraint(
+            "owner_id", "task_id", "request_id", name="uq_observer_owner_task_request"
+        ),
         # A request ID is owner-global; cross-task reuse must conflict, not silently fork.
         UniqueConstraint("owner_id", "request_id", name="uq_observer_owner_request"),
     )
