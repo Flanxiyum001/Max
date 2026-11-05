@@ -13,7 +13,7 @@ from sqlalchemy import inspect, select, text
 from sqlalchemy.orm import Session
 
 from max_core.evidence_observer import DevAddObserver, ObservationSnapshot
-from max_core.models import OutboxEvent, Task, TrustAudit, VerificationCheck
+from max_core.models import OutboxEvent, Task, TaskCheckpoint, TrustAudit, VerificationCheck
 from max_core.store import StoreError, TaskStore
 from max_core.verification import IndependentVerifier
 
@@ -299,3 +299,134 @@ def test_postgres_upgrade_0002_to_0003_preserves_actual_historical_row(
         engine.dispose()
         with postgres_store.engine.begin() as connection:
             connection.exec_driver_sql(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+
+
+def test_postgres_exact_replay_accepts_unchanged_checkpoint(postgres_store: TaskStore) -> None:
+    task_id = waiting(postgres_store)
+    request_id = "pg-checkpoint-integrity-001"
+    verifier = IndependentVerifier(postgres_store.engine)
+    first = verifier.verify_dev_add("owner", task_id, request_id)
+    assert first.verdict == "verified"
+    assert first.conclusion == "supported"
+    assert first.task_state == "completed"
+
+    with Session(postgres_store.engine) as session:
+        check = session.scalar(
+            select(VerificationCheck).where(
+                VerificationCheck.task_id == task_id,
+                VerificationCheck.request_id == request_id,
+            )
+        )
+        assert check is not None
+        cp = session.get(TaskCheckpoint, check.checkpoint_id)
+        assert cp is not None
+        assert cp.task_id == task_id
+        assert cp.operation_key == "dev-operation-v1"
+        assert cp.step_name == check.operation_id == "dev.add"
+        assert cp.payload_digest == check.input_digest
+        event_keys = session.scalars(
+            select(OutboxEvent.event_key).where(OutboxEvent.task_id == task_id)
+        ).all()
+
+    # Exact replay returns the historical check and state, not a second decision.
+    second = verifier.verify_dev_add("owner", task_id, request_id)
+    assert second == first
+    assert [row.id for row in checks(postgres_store, task_id)] == [first.check_id]
+    with Session(postgres_store.engine) as session:
+        replay_event_keys = session.scalars(
+            select(OutboxEvent.event_key).where(OutboxEvent.task_id == task_id)
+        ).all()
+        assert replay_event_keys == event_keys
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "operation_key",
+        "step_name",
+        "payload_digest",
+        "other_task_checkpoint",
+        "deleted_checkpoint",
+    ],
+)
+def test_postgres_exact_replay_refuses_tampered_checkpoint_metadata(
+    postgres_store: TaskStore, mutation: str
+) -> None:
+    """Tampering after completion cannot reuse the old verified decision."""
+    task_id = waiting(postgres_store)
+    request_id = "pg-checkpoint-tamper-" + uuid4().hex
+    verifier = IndependentVerifier(postgres_store.engine)
+    supported = verifier.verify_dev_add("owner", task_id, request_id)
+    assert supported.conclusion == "supported"
+    assert supported.verdict == "verified"
+    assert supported.task_state == "completed"
+
+    with Session(postgres_store.engine) as session:
+        keys_before = session.scalars(
+            select(OutboxEvent.event_key).where(OutboxEvent.task_id == task_id)
+        ).all()
+        rows_before = session.scalars(
+            select(VerificationCheck.id).where(VerificationCheck.task_id == task_id)
+        ).all()
+    assert rows_before == [supported.check_id]
+    assert len(keys_before) >= 1
+
+    other_id = waiting(postgres_store) if mutation == "other_task_checkpoint" else None
+    with Session(postgres_store.engine) as session, session.begin():
+        saved = session.get(VerificationCheck, supported.check_id)
+        assert saved is not None
+        assert saved.checkpoint_id is not None
+        cp = session.get(TaskCheckpoint, saved.checkpoint_id)
+        assert cp is not None and cp.task_id == task_id
+        if mutation == "operation_key":
+            cp.operation_key = "dev-operation-v2"
+        elif mutation == "step_name":
+            cp.step_name = "dev.health"
+        elif mutation == "payload_digest":
+            cp.payload_digest = "0" * 64
+        elif mutation == "deleted_checkpoint":
+            session.delete(cp)
+        else:
+            assert other_id is not None
+            other = session.get(Task, other_id)
+            current = session.get(Task, task_id)
+            assert other is not None and other.last_checkpoint_id is not None
+            assert current is not None
+            # A tampered verification check and task both point at a real
+            # checkpoint belonging to another task. Equal IDs alone must
+            # not satisfy the replay binding.
+            saved.checkpoint_id = other.last_checkpoint_id
+            current.last_checkpoint_id = other.last_checkpoint_id
+
+    with pytest.raises(StoreError) as exc:
+        verifier.verify_dev_add("owner", task_id, request_id)
+    assert exc.value.status_code == 409
+    assert str(exc.value) == "Observer request binding changed"
+
+    with Session(postgres_store.engine) as session:
+        existing = session.get(VerificationCheck, supported.check_id)
+        assert existing is not None
+        assert existing.verdict == "verified"
+        assert existing.reason_code == supported.reason_code
+        assert (
+            session.scalars(
+                select(VerificationCheck.id).where(VerificationCheck.task_id == task_id)
+            ).all()
+            == rows_before
+        )
+        assert (
+            session.scalars(
+                select(OutboxEvent.event_key).where(OutboxEvent.task_id == task_id)
+            ).all()
+            == keys_before
+        )
+        assert (
+            session.scalar(
+                select(OutboxEvent.id).where(
+                    OutboxEvent.task_id == task_id,
+                    OutboxEvent.kind == "task.verified",
+                )
+            )
+            is not None
+        )
+    assert postgres_store.get("owner", task_id).state == "completed"

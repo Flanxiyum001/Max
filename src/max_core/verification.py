@@ -146,13 +146,40 @@ class IndependentVerifier:
             return None
         if prior.task_id != task_id or prior.request_fingerprint != fingerprint:
             raise StoreError("Observer request idempotency conflict", 409)
-        task = session.scalar(select(Task).where(Task.id == task_id, Task.owner_id == owner_id))
+        # Revalidate the *row*, not just the checkpoint UUID. Its task
+        # association provides the owner boundary through the locked task.
+        # Only new observer decisions have a request ID; legacy fixture-reader
+        # checks are unaffected.
+        task = session.scalar(
+            select(Task).where(Task.id == task_id, Task.owner_id == owner_id).with_for_update()
+        )
+        checkpoint = (
+            session.scalar(
+                select(TaskCheckpoint)
+                .where(
+                    TaskCheckpoint.id == prior.checkpoint_id,
+                    TaskCheckpoint.task_id == task_id,
+                )
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            if task is not None and prior.checkpoint_id is not None
+            else None
+        )
         if (
             task is None
             or prior.input_digest is None
             or hashlib.sha256(task.objective.encode("utf-8")).hexdigest() != prior.input_digest
             or task.objective_hash != prior.input_digest
             or prior.checkpoint_id != task.last_checkpoint_id
+            or prior.operation_id != "dev.add"
+            or checkpoint is None
+            or checkpoint.id != prior.checkpoint_id
+            or checkpoint.task_id != task.id
+            or checkpoint.operation_key != "dev-operation-v1"
+            or checkpoint.step_name != "dev.add"
+            or checkpoint.step_name != prior.operation_id
+            or checkpoint.payload_digest != prior.input_digest
             or prior.expected_digest != task.evidence_digest
             or prior.result_state is None
             or prior.result_revision is None
