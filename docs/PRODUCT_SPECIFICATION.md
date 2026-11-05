@@ -102,3 +102,11 @@ A separate Railway project is intended for MAX. Existing Discord bots and unrela
 ## 14. Initial development principle
 
 Start with secure, testable foundation: repository standards, architecture records, authentication/authorization model, configuration and secret handling, health/observability, model gateway interface, task persistence, and a minimal vertical slice. Do not build all integrations at once.
+
+## 15. Phase 0B provenance and requirement reconciliation (2026-11-05)
+
+The user-provided **CODEX MASTER ASSIGNMENT — MAX PHASE 0** explicitly identifies **FreeLLMAPI as the intended gateway** and requests compatibility with two API formats. The original baseline above lists multiple provider accounts but not that named gateway. These are not equivalent statements. Preserve both as owner input; design a **MAX-owned transport-neutral gateway** with OpenAI-compatible and Anthropic Messages-style adapters, then ask for/verify the exact FreeLLMAPI endpoint and whether [this public similarly named project](https://github.com/lov0u/freellmapi/blob/main/docs/api.md) is actually intended. No public repository identity or quota is proven for the owner's system. See [MODEL_GATEWAY.md](MODEL_GATEWAY.md) and [DECISIONS.md](DECISIONS.md).
+
+Owner-provided hardware, account/token estimates, Google Drive capacity and platform constraints are planning inputs, not live-verified facts. No claim of a functioning MAX runtime, desktop client, voice service, vault, telephony or access to private documents is made by these requirements. Owner has confirmed **manual review and merge for each milestone PR**, with no automatic merge/deployment.
+
+**Source-of-truth hierarchy:** explicit owner instructions and owner-provided specs → MAX identity/security product requirements → this specification → architecture/ADRs → implementation plans. When contradictory, record and escalate before changing critical requirements. Architecture evidence, threats, diagrams and research are indexed in [REQUIREMENT_TRACEABILITY.md](REQUIREMENT_TRACEABILITY.md).
