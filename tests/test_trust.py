@@ -68,7 +68,8 @@ def test_owner_approval_exact_match_single_use_and_no_objective(store: TaskStore
 
 @pytest.mark.parametrize("change", ["actor_id", "session_id", "device_id", "owner_id"])
 def test_grant_cannot_cross_actor_session_device_owner(
-    store: TaskStore, change: str,
+    store: TaskStore,
+    change: str,
 ) -> None:
     task, _ = store.create("owner", "Scope", "trust-scope-001")
     service = TrustService(store.engine)
@@ -91,9 +92,15 @@ def test_altered_parameters_or_proposal_id_do_not_consume_grant(store: TaskStore
     grant = service.request(scope, proposal(task.id))
     service.decide("owner", grant.id, True)
     with pytest.raises(TrustError, match="invalid_action_parameters"):
-        service.execute(scope, grant.id, ToolProposal("call-001", "task.status", {"task_id": task.id, "admin": True}))
+        service.execute(
+            scope,
+            grant.id,
+            ToolProposal("call-001", "task.status", {"task_id": task.id, "admin": True}),
+        )
     with pytest.raises(TrustError, match="approval_binding_mismatch"):
-        service.execute(scope, grant.id, ToolProposal("changed-call", "task.status", {"task_id": task.id}))
+        service.execute(
+            scope, grant.id, ToolProposal("changed-call", "task.status", {"task_id": task.id})
+        )
     assert service.execute(scope, grant.id, proposal(task.id)).task_id == task.id
 
 
@@ -108,7 +115,9 @@ def test_high_risk_tools_denied_and_audited(store: TaskStore, action: str) -> No
         service.request(context(task.id), ToolProposal("call-001", action, {"task_id": task.id}))
     with Session(store.engine) as session:
         latest = session.scalar(
-            select(TrustAudit).where(TrustAudit.task_id == task.id).order_by(TrustAudit.created_at.desc())
+            select(TrustAudit)
+            .where(TrustAudit.task_id == task.id)
+            .order_by(TrustAudit.created_at.desc())
         )
         assert latest is not None and latest.decision == "deny"
         assert latest.reason == "capability_denied"
@@ -169,19 +178,40 @@ def test_authenticated_owner_only_routes_and_strict_decision(store: TaskStore) -
         base_url="http://localhost",
     )
     assert client.get("/v1/approvals").status_code == 401
-    assert client.post(f"/v1/approvals/{grant.id}/decision", json={"approve": True}).status_code == 401
+    assert (
+        client.post(f"/v1/approvals/{grant.id}/decision", json={"approve": True}).status_code == 401
+    )
     auth = {"Authorization": f"Bearer {TEST_TOKEN}"}
     pending = client.get("/v1/approvals", headers=auth)
     assert pending.status_code == 200
     assert pending.json()[0]["id"] == grant.id
     assert pending.json()[0]["device_id"] == "device-1"
-    assert client.post(f"/v1/approvals/{grant.id}/decision", headers=auth, json={"approve": "yes"}).status_code == 422
-    assert client.post(f"/v1/approvals/{grant.id}/decision", headers=auth, json={"approve": True, "role": "admin"}).status_code == 422
-    response = client.post(f"/v1/approvals/{grant.id}/decision", headers=auth, json={"approve": True})
+    assert (
+        client.post(
+            f"/v1/approvals/{grant.id}/decision", headers=auth, json={"approve": "yes"}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            f"/v1/approvals/{grant.id}/decision",
+            headers=auth,
+            json={"approve": True, "role": "admin"},
+        ).status_code
+        == 422
+    )
+    response = client.post(
+        f"/v1/approvals/{grant.id}/decision", headers=auth, json={"approve": True}
+    )
     assert response.status_code == 200
     assert response.json()["state"] == "approved"
     assert client.get("/v1/approvals", headers=auth).json() == []
-    assert client.post(f"/v1/approvals/{grant.id}/decision", headers=auth, json={"approve": True}).status_code == 409
+    assert (
+        client.post(
+            f"/v1/approvals/{grant.id}/decision", headers=auth, json={"approve": True}
+        ).status_code
+        == 409
+    )
 
 
 def test_missing_db_owner_approval_route_fails_closed(client: TestClient) -> None:
@@ -202,5 +232,7 @@ def test_cannot_use_approved_grant_for_unknown_tool(store: TaskStore) -> None:
     grant = service.request(scope, proposal(task.id))
     service.decide("owner", grant.id, True)
     with pytest.raises(TrustError, match="capability_denied"):
-        service.execute(scope, grant.id, ToolProposal("call-001", "shell.run", {"task_id": task.id}))
+        service.execute(
+            scope, grant.id, ToolProposal("call-001", "shell.run", {"task_id": task.id})
+        )
     assert service.execute(scope, grant.id, proposal(task.id)).task_id == task.id
