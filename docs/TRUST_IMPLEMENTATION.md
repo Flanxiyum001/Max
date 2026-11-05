@@ -60,3 +60,8 @@ GitHub CI runs Python 3.11 and 3.13 with ephemeral PostgreSQL 17, Alembic `upgra
 This is a distinct owner-review PR based on the owner-merged Milestone 3. **No automatic merge or deployment.** Closing the unmerged PR has no effect on existing systems. After manual migration, perform data-preserving rollback review: a direct `alembic downgrade` destroys approval/audit/verification history and should not be run against real data.
 
 A later PR may add a **separately sandboxed non-sensitive read-only adapter** and strongly authenticated owner identity. High-risk tools must stay unavailable until their individual threat models, step-up authentication, idempotency and verifier are approved.
+
+
+## Milestone 7 fixed local worker — no change to Trust permissions
+
+The new [bounded worker](BOUNDED_WORKER.md) is launched manually by the owner against an isolated local development DB; it does **not** run under a model-originated `ToolProposal` or expand the Trust allowlist beyond `task.status`. Its hardcoded `dev.health` and `dev.add` are fixed pure computations, not plugins or general tools. It uses existing `TaskStore.record_outcome()` and never calls the independent verifier. The resulting `awaiting_verification` state is **not a verified success**. Only an independently injected trusted read-only evidence observer can transition to `completed`. A worker cancellation acknowledgment is separately lease-fenced and requires that local work already stopped. These statements apply only to Milestone 7's unmerged review branch and must not be read as authorization for remote or high-risk effects.
