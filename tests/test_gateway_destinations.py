@@ -18,7 +18,6 @@ import pytest
 
 from max_core.gateway import (
     ChatMessage,
-    Dialect,
     Gateway,
     GatewayError,
     GatewayRequest,
