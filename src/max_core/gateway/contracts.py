@@ -138,9 +138,10 @@ class GatewayRequest:
             raise ValueError("At least one and at most 48 messages are required")
         if not isinstance(self.privacy, Privacy):
             raise ValueError("Unknown data privacy classification")
-        if any(type(value) is not bool for value in (
-            self.cloud_allowed, self.local_only, self.allow_fallback
-        )):
+        if any(
+            type(value) is not bool
+            for value in (self.cloud_allowed, self.local_only, self.allow_fallback)
+        ):
             raise ValueError("Gateway authorization flags must be booleans")
         if (
             not 1 <= self.max_input_tokens <= 1_000_000
