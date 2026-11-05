@@ -27,8 +27,12 @@ class Task(Base):
     idempotency_key: Mapped[str] = mapped_column(String(100), nullable=False)
     state: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
     lease_owner: Mapped[str | None] = mapped_column(String(100), nullable=True)
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_checkpoint_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
@@ -44,7 +48,9 @@ class TaskCheckpoint(Base):
     operation_key: Mapped[str] = mapped_column(String(100), nullable=False)
     step_name: Mapped[str] = mapped_column(String(100), nullable=False)
     payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
 
 
 class OutboxEvent(Base):
@@ -60,5 +66,7 @@ class OutboxEvent(Base):
     claim_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
