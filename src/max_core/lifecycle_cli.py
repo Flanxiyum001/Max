@@ -19,9 +19,9 @@ import httpx
 from max_core.config import ConfigurationError, Settings
 from max_core.timeline_cli import (
     _KNOWN_STATES,
+    TimelineClientError,
     _json,
     _local_url,
-    TimelineClientError,
     render_timeline,
 )
 
@@ -57,9 +57,7 @@ def _task_view(payload: dict[str, Any], expected_id: UUID | None = None) -> tupl
 
 def _created_payload(response: httpx.Response) -> dict[str, Any]:
     if response.status_code not in {200, 201}:
-        raise LifecycleClientError(
-            f"Task creation was not confirmed (HTTP {response.status_code})"
-        )
+        raise LifecycleClientError(f"Task creation was not confirmed (HTTP {response.status_code})")
     if len(response.content) > _MAX_RESPONSE_BYTES:
         raise LifecycleClientError("Invalid task response from local MAX")
     try:
@@ -125,8 +123,7 @@ def cancel_task(client: httpx.Client, task_id: UUID) -> tuple[str, bool]:
     latest = f"Freshly recorded state: {actual_state} (revision {revision})."
     if response.status_code == 409:
         return (
-            f"Cancellation rejected by Core (HTTP 409).\n{latest}\n"
-            "No cancellation was confirmed.",
+            f"Cancellation rejected by Core (HTTP 409).\n{latest}\nNo cancellation was confirmed.",
             False,
         )
     if actual_state == "cancelled":
