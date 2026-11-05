@@ -34,3 +34,18 @@ No deployment, financial actions, vault sharing, automatic merges, local install
 
 ## Owner review gate
 Every PR targets `max` from its current owner-approved tip. The owner reviews and merges manually. No automatic merges, deployments, credentials, or runtime changes are implied by opening a PR. The next milestone starts only after the predecessor is merged (unless the owner explicitly approves a stacked PR). The PR body must disclose actual checks and unresolved risks.
+
+## 0B documentation milestone scope and exit gate
+
+**0B branch**: `docs/phase0b-architecture-closure`, based on the owner-merged `max` after PR #2. This milestone adds research, regional feasibility, architectural diagrams and a requirement traceability checklist, and reconciles existing specs/decision logs. **No runtime, secret, infrastructure, device, account, database or production operations.**
+
+**Owner review checklist:**
+1. Confirm the recommendation to keep MAX-owned core, trust and gateway contracts with versioned third-party adapters; OpenClaw/Hermes/OpenHands are optional evaluated dependencies.
+2. Confirm the FreeLLMAPI naming ambiguity remains an **open question**, with both API wire formats preserved.
+3. Confirm India calling needs region/number/consent validation; no telephony feature is promised.
+4. Confirm storage/backup and original voice licenses remain proposed until tested/approved.
+5. Review the 19 required documents via [REQUIREMENT_TRACEABILITY.md](REQUIREMENT_TRACEABILITY.md) and eight graphs via [ARCHITECTURE_DIAGRAMS.md](ARCHITECTURE_DIAGRAMS.md); note [REPO_INVENTORY.md](REPO_INVENTORY.md) limitations.
+6. Review actual GitHub checks, internal links and any test exceptions disclosed on the PR.
+7. **Owner manually merges; never auto-merge or deploy.** Next runtime milestone starts from the owner-merged default branch, not this pending branch.
+
+The full recursive source-tree inventory and comparison against any additional private owner specification files not furnished to this run are **open documentation verification items**. Do not misstate them as completed.
