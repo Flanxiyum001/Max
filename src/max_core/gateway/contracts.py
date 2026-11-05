@@ -65,15 +65,28 @@ class ModelSpec:
             raise ValueError("Invalid model dialect or context window")
         if not self.capabilities or not self.capabilities <= {"text", "tools"}:
             raise ValueError("Only text and inert tool proposals are supported in milestone 3")
-        if self.api_key is not None and (not self.api_key or "\n" in self.api_key or "\r" in self.api_key):
+        if self.api_key is not None and (
+            not self.api_key or "\n" in self.api_key or "\r" in self.api_key
+        ):
             raise ValueError("Invalid API key configuration")
         parts = urlsplit(self.endpoint)
         hostname = parts.hostname or ""
-        if (parts.username or parts.password or parts.query or parts.fragment or not hostname or
-                not parts.path.startswith("/") or parts.path == "/"):
+        if (
+            parts.username
+            or parts.password
+            or parts.query
+            or parts.fragment
+            or not hostname
+            or not parts.path.startswith("/")
+            or parts.path == "/"
+        ):
             raise ValueError("Gateway endpoint must be an explicit, credential-free API URL")
         if self.is_local:
-            if parts.scheme not in {"http", "https"} or hostname not in {"localhost", "127.0.0.1", "::1"}:
+            if parts.scheme not in {"http", "https"} or hostname not in {
+                "localhost",
+                "127.0.0.1",
+                "::1",
+            }:
                 raise ValueError("Local model endpoints must use an explicit loopback host")
         elif parts.scheme != "https" or hostname.lower() in {"localhost", "127.0.0.1", "::1"}:
             raise ValueError("Remote model endpoints require HTTPS and a non-loopback host")
@@ -106,11 +119,16 @@ class GatewayRequest:
             raise ValueError("At least one and at most 48 messages are required")
         if not isinstance(self.privacy, Privacy):
             raise ValueError("Unknown data privacy classification")
-        if not 1 <= self.max_input_tokens <= 1_000_000 or not 1 <= self.max_output_tokens <= 1_000_000:
+        if (
+            not 1 <= self.max_input_tokens <= 1_000_000
+            or not 1 <= self.max_output_tokens <= 1_000_000
+        ):
             raise ValueError("Invalid token ceilings")
         if not self.required_capabilities or not self.required_capabilities <= {"text", "tools"}:
             raise ValueError("Unsupported requested capabilities")
-        if self.max_cost_usd is not None and (not self.max_cost_usd.is_finite() or self.max_cost_usd < 0):
+        if self.max_cost_usd is not None and (
+            not self.max_cost_usd.is_finite() or self.max_cost_usd < 0
+        ):
             raise ValueError("Invalid USD spend ceiling")
         if not 1 <= self.timeout_seconds <= 120:
             raise ValueError("Invalid deadline")
@@ -118,7 +136,10 @@ class GatewayRequest:
             raise ValueError("Invalid message type")
         # Byte count is a deliberately conservative text-only admission estimate.
         # Provider-specific token counting remains unverified; this is not a billing SLA.
-        if sum(len(message.content.encode("utf-8")) + 32 for message in self.messages) > self.max_input_tokens:
+        if (
+            sum(len(message.content.encode("utf-8")) + 32 for message in self.messages)
+            > self.max_input_tokens
+        ):
             raise ValueError("Declared input-token ceiling is below conservative text envelope")
         seen_non_system = False
         for message in self.messages:
