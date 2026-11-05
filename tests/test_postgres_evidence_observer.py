@@ -203,3 +203,35 @@ def test_postgres_readiness_and_historical_legacy_rows_preserved(postgres_store:
         assert row.checkpoint_id is None
         assert row.observer_id is None
         assert row.verdict == "verified"
+
+
+def test_postgres_retry_when_commit_lands_between_prior_lookup_and_snapshot(
+    postgres_store: TaskStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deterministically exercise the READ COMMITTED snapshot-race recovery."""
+    task_id = waiting(postgres_store)
+    original = IndependentVerifier._snapshot
+    committed: list[str] = []
+
+    def commit_before_snapshot(session: object, owner_id: str, target_id: str):
+        # Outer caller already observed no prior check; another trusted caller
+        # commits the exact same request before outer re-reads task state.
+        monkeypatch.setattr(IndependentVerifier, "_snapshot", staticmethod(original))
+        first = IndependentVerifier(postgres_store.engine).verify_dev_add(
+            owner_id, target_id, "pg-gap-window-001"
+        )
+        committed.append(first.check_id)
+        monkeypatch.setattr(
+            IndependentVerifier, "_snapshot", staticmethod(commit_before_snapshot)
+        )
+        return original(session, owner_id, target_id)
+
+    monkeypatch.setattr(
+        IndependentVerifier, "_snapshot", staticmethod(commit_before_snapshot)
+    )
+    restored = IndependentVerifier(postgres_store.engine).verify_dev_add(
+        "owner", task_id, "pg-gap-window-001"
+    )
+    assert restored.check_id == committed[0]
+    assert restored.verdict == "verified"
+    assert len(checks(postgres_store, task_id)) == 1
