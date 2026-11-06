@@ -73,7 +73,8 @@ def test_capabilities_are_extensible_unknown_by_default() -> None:
             ),
             CapabilityEvidence("structured_output"),
             CapabilityEvidence(
-                "reasoning.extended", CapabilitySupport.SUPPORTED,
+                "reasoning.extended",
+                CapabilitySupport.SUPPORTED,
                 EvidenceSource.PROTOCOL_TESTED,
             ),
         )
@@ -95,8 +96,7 @@ def test_capabilities_are_extensible_unknown_by_default() -> None:
 def test_any_provider_count_and_same_model_name_are_supported() -> None:
     providers = tuple(ProviderMetadata("gateway-dev", f"provider-{i}") for i in range(23))
     models = tuple(
-        ModelMetadata(ModelIdentity("gateway-dev", p.provider_id, "same-model"))
-        for p in providers
+        ModelMetadata(ModelIdentity("gateway-dev", p.provider_id, "same-model")) for p in providers
     )
     routes = tuple(
         DiscoveredRoute(route(p.provider_id, "same-model", f"route-{i}"))
@@ -115,7 +115,10 @@ def test_duplicate_ambiguous_and_missing_references_are_rejected() -> None:
     )
     with pytest.raises(ValueError, match="Duplicate or ambiguous"):
         CatalogueSnapshot(
-            "gateway-dev", "rev-1", providers, models,
+            "gateway-dev",
+            "rev-1",
+            providers,
+            models,
             (
                 DiscoveredRoute(route("a", "same", "same-route")),
                 DiscoveredRoute(route("b", "same", "same-route")),
@@ -127,20 +130,23 @@ def test_duplicate_ambiguous_and_missing_references_are_rejected() -> None:
         CatalogueSnapshot("gateway-dev", "rev-1", models=(ModelMetadata(route().model),))
     with pytest.raises(ValueError, match="unknown model"):
         CatalogueSnapshot(
-            "gateway-dev", "rev-1",
+            "gateway-dev",
+            "rev-1",
             providers=(ProviderMetadata("gateway-dev", "new-provider"),),
             routes=(DiscoveredRoute(route()),),
         )
     with pytest.raises(ValueError, match="Cross-gateway"):
         CatalogueSnapshot(
-            "gateway-dev", "rev-1",
+            "gateway-dev",
+            "rev-1",
             providers=(ProviderMetadata("other", "provider"),),
         )
 
 
 def test_discovered_ready_is_not_approval_or_verified_destination() -> None:
     snapshot = CatalogueSnapshot(
-        "gateway-dev", "rev-2",
+        "gateway-dev",
+        "rev-2",
         providers=(ProviderMetadata("gateway-dev", "new-provider"),),
         models=(ModelMetadata(route().model),),
         routes=(
@@ -164,15 +170,14 @@ def test_explicit_owner_review_is_required_for_approval_and_verified_local() -> 
         TrustedRoutePolicy(route(), approval=ApprovalState.APPROVED)
     with pytest.raises(ValueError, match="Approval requires"):
         TrustedRoutePolicy(
-            route(), approval=ApprovalState.APPROVED,
+            route(),
+            approval=ApprovalState.APPROVED,
             inference_destination=InferenceDestination.CLOUD,
             evidence_source=EvidenceSource.GATEWAY_REPORTED,
             policy_revision="rev-1",
         )
     with pytest.raises(ValueError, match="Verified local"):
-        TrustedRoutePolicy(
-            route(), inference_destination=InferenceDestination.VERIFIED_LOCAL
-        )
+        TrustedRoutePolicy(route(), inference_destination=InferenceDestination.VERIFIED_LOCAL)
     assert approved().approval == ApprovalState.APPROVED
 
 
@@ -222,9 +227,10 @@ def test_missing_pricing_and_availability_are_unknown() -> None:
 
 
 def test_revision_and_immutable_collections_are_validated() -> None:
-    assert CatalogueSnapshot("gateway-dev", "rev-1").revision != CatalogueSnapshot(
-        "gateway-dev", "rev-2"
-    ).revision
+    assert (
+        CatalogueSnapshot("gateway-dev", "rev-1").revision
+        != CatalogueSnapshot("gateway-dev", "rev-2").revision
+    )
     with pytest.raises(ValueError, match="immutable tuples"):
         CatalogueSnapshot("gateway-dev", "rev-1", providers=[])  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="catalogue revision"):
@@ -246,7 +252,10 @@ def test_snapshot_route_id_unique_across_provider_and_dialect() -> None:
     second = RouteIdentity(models[1].identity, "shared-route", Dialect.ANTHROPIC_MESSAGES)
     with pytest.raises(ValueError, match="Duplicate or ambiguous"):
         CatalogueSnapshot(
-            "gateway-dev", "rev-1", providers, models,
+            "gateway-dev",
+            "rev-1",
+            providers,
+            models,
             (DiscoveredRoute(first), DiscoveredRoute(second)),
         )
 

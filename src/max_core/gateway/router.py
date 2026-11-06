@@ -88,9 +88,7 @@ class Gateway:
             ):
                 continue
             evidence = (
-                verified_capabilities.get(identity)
-                if verified_capabilities is not None
-                else None
+                verified_capabilities.get(identity) if verified_capabilities is not None else None
             )
             views.append(project_model_spec(spec, identity, policy, catalogue_revision, evidence))
         if len(gateways) > 1:

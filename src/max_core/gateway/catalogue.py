@@ -349,11 +349,11 @@ def project_model_spec(
         or not isinstance(policy, TrustedRoutePolicy)
     ):
         raise ValueError("Invalid model projection arguments")
-    if (
-        (identity.model.provider_id, identity.model.model_id, identity.dialect)
-        != (spec.provider_id, spec.model_id, spec.dialect)
-        or policy.identity != identity
-    ):
+    if (identity.model.provider_id, identity.model.model_id, identity.dialect) != (
+        spec.provider_id,
+        spec.model_id,
+        spec.dialect,
+    ) or policy.identity != identity:
         raise ValueError("Route identity does not match execution configuration")
     if policy.inference_destination != spec.inference_destination:
         raise ValueError("Trusted route destination does not match execution configuration")

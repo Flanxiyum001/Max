@@ -45,9 +45,9 @@ def spec(provider: str, destination: InferenceDestination) -> ModelSpec:
     )
 
 
-def binding(provider: str, route_id: str, gateway_id: str = "gateway-A") -> tuple[
-    RouteIdentity, TrustedRoutePolicy
-]:
+def binding(
+    provider: str, route_id: str, gateway_id: str = "gateway-A"
+) -> tuple[RouteIdentity, TrustedRoutePolicy]:
     identity = RouteIdentity(
         ModelIdentity(gateway_id, provider, "same-model"), route_id, Dialect.OPENAI_CHAT
     )
@@ -138,9 +138,7 @@ def test_unreviewed_route_is_excluded_without_execution_error() -> None:
     )
     identity, policy = binding("provider-A", "route-A")
     unreviewed = replace(policy, approval=ApprovalState.UNREVIEWED)
-    assert gateway.selection_metadata(
-        [(identity, unreviewed)], catalogue_revision="cat-1"
-    ) == ()
+    assert gateway.selection_metadata([(identity, unreviewed)], catalogue_revision="cat-1") == ()
 
 
 def test_disabled_route_is_excluded_without_execution_error() -> None:
@@ -150,9 +148,7 @@ def test_disabled_route_is_excluded_without_execution_error() -> None:
     )
     identity, policy = binding("provider-A", "route-A")
     disabled = replace(policy, approval=ApprovalState.DISABLED)
-    assert gateway.selection_metadata(
-        [(identity, disabled)], catalogue_revision="cat-1"
-    ) == ()
+    assert gateway.selection_metadata([(identity, disabled)], catalogue_revision="cat-1") == ()
 
 
 def test_approved_local_route_remains_candidate() -> None:
@@ -175,9 +171,7 @@ def test_approved_cloud_route_is_metadata_not_cloud_execution_permission() -> No
     )
     identity, policy = binding("provider-A", "route-A")
     policy = replace(policy, inference_destination=InferenceDestination.CLOUD)
-    candidate = gateway.selection_metadata(
-        [(identity, policy)], catalogue_revision="cat-1"
-    )
+    candidate = gateway.selection_metadata([(identity, policy)], catalogue_revision="cat-1")
     assert len(candidate) == 1
     assert candidate[0].inference_destination == InferenceDestination.CLOUD
     # An approved selection candidate must still satisfy the original
@@ -204,9 +198,7 @@ def test_gateway_ready_discovery_does_not_approve_candidate() -> None:
     )
     assert discovered.availability.state == AvailabilityState.READY
     policy = replace(policy, approval=ApprovalState.UNREVIEWED)
-    assert gateway.selection_metadata(
-        [(identity, policy)], catalogue_revision="cat-1"
-    ) == ()
+    assert gateway.selection_metadata([(identity, policy)], catalogue_revision="cat-1") == ()
 
 
 def test_policy_destination_mismatch_rejected_even_when_unreviewed() -> None:
