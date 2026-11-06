@@ -137,7 +137,7 @@ class HTTPAdapter:
                 else:
                     async for event in anthropic_events(frames, request, spec):
                         yield event
-        except httpx.TimeoutException as exc:
-            raise GatewayError("timeout") from exc
+        except httpx.TimeoutException:
+            raise GatewayError("timeout") from None
         except httpx.RequestError:
             raise GatewayError("stream_interrupted") from None

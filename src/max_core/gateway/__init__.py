@@ -1,6 +1,24 @@
 """MAX-owned internal model gateway. No credentials or endpoints are auto-configured."""
 
 from max_core.gateway.adapters import HTTPAdapter
+from max_core.gateway.catalogue import (
+    ApprovalState,
+    AvailabilityObservation,
+    AvailabilityState,
+    CapabilityEvidence,
+    CapabilityMetadata,
+    CapabilitySupport,
+    CatalogueSnapshot,
+    DiscoveredRoute,
+    EvidenceSource,
+    ModelIdentity,
+    ModelMetadata,
+    PricingProvenance,
+    ProviderMetadata,
+    RouteIdentity,
+    SelectionMetadata,
+    TrustedRoutePolicy,
+)
 from max_core.gateway.contracts import (
     ChatMessage,
     Dialect,
@@ -17,6 +35,22 @@ from max_core.gateway.contracts import (
 from max_core.gateway.router import Gateway
 
 __all__ = [
+    "ApprovalState",
+    "AvailabilityObservation",
+    "AvailabilityState",
+    "CapabilityEvidence",
+    "CapabilityMetadata",
+    "CapabilitySupport",
+    "CatalogueSnapshot",
+    "DiscoveredRoute",
+    "EvidenceSource",
+    "ModelIdentity",
+    "ModelMetadata",
+    "PricingProvenance",
+    "ProviderMetadata",
+    "RouteIdentity",
+    "SelectionMetadata",
+    "TrustedRoutePolicy",
     "ChatMessage",
     "Dialect",
     "Gateway",
