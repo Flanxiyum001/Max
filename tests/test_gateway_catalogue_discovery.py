@@ -21,9 +21,7 @@ from max_core.gateway.catalogue_discovery import (
 from max_core.gateway.contracts import Dialect, InferenceDestination
 
 
-def entry(
-    model_id: str, provider: str = "provider-x", **extra: object
-) -> dict[str, object]:
+def entry(model_id: str, provider: str = "provider-x", **extra: object) -> dict[str, object]:
     return {
         "id": model_id,
         "object": "model",
@@ -164,12 +162,8 @@ def test_distinct_gateway_dialect_provider_and_model_produce_new_route() -> None
     different_dialect = parse_freellmapi_models(
         data, gateway_id="gw-A", dialect=Dialect.ANTHROPIC_MESSAGES
     )
-    different_provider = parse_freellmapi_models(
-        payload(entry("a", "vendor-b")), gateway_id="gw-A"
-    )
-    different_model = parse_freellmapi_models(
-        payload(entry("b", "vendor-a")), gateway_id="gw-A"
-    )
+    different_provider = parse_freellmapi_models(payload(entry("a", "vendor-b")), gateway_id="gw-A")
+    different_model = parse_freellmapi_models(payload(entry("b", "vendor-a")), gateway_id="gw-A")
     ids = {
         x.snapshot.routes[0].identity.route_id
         for x in (base, different_gateway, different_dialect, different_provider, different_model)
@@ -185,8 +179,7 @@ def test_name_collision_across_providers_is_explicitly_reported() -> None:
     assert result.ambiguous_model_ids == ("same-model",)
     assert len(result.snapshot.routes) == 2
     assert (
-        result.snapshot.routes[0].identity.route_id
-        != result.snapshot.routes[1].identity.route_id
+        result.snapshot.routes[0].identity.route_id != result.snapshot.routes[1].identity.route_id
     )
 
 
@@ -262,7 +255,9 @@ def test_invalid_dialect_gateway_id_and_observation_time_are_rejected() -> None:
         parse_freellmapi_models(data, gateway_id="invalid gateway")
     with pytest.raises(CatalogueImportError, match="invalid_catalogue_dialect"):
         parse_freellmapi_models(
-            data, gateway_id="gw-A", dialect="openai_chat"  # type: ignore[arg-type]
+            data,
+            gateway_id="gw-A",
+            dialect="openai_chat",  # type: ignore[arg-type]
         )
     with pytest.raises(CatalogueImportError, match="invalid_observation_timestamp"):
         parse_freellmapi_models(data, gateway_id="gw-A", observed_at_epoch=-1)
@@ -276,9 +271,9 @@ def test_cyclic_or_non_json_python_input_has_sanitized_error() -> None:
     with pytest.raises(CatalogueImportError, match="invalid_catalogue_payload"):
         parse_freellmapi_models(payload(entry("x", field=object())), gateway_id="gw-A")
 
+
 def test_available_false_without_status_is_reported_unavailable() -> None:
     result = parse_freellmapi_models(
         payload(entry("model-a", available=False, execution_status=None)), gateway_id="gw-A"
     )
     assert result.snapshot.routes[0].availability.state == AvailabilityState.UNAVAILABLE
-

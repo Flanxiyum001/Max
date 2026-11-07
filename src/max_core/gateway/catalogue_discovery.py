@@ -83,9 +83,7 @@ def _capabilities(row: dict[str, Any]) -> CapabilityMetadata:
         return CapabilityMetadata()
     if not isinstance(parameters, list) or len(parameters) > MAX_PARAMETERS_PER_MODEL:
         raise CatalogueImportError()
-    if any(
-        not isinstance(p, str) or _SAFE_PARAMETER.fullmatch(p) is None for p in parameters
-    ):
+    if any(not isinstance(p, str) or _SAFE_PARAMETER.fullmatch(p) is None for p in parameters):
         raise CatalogueImportError()
     if len(parameters) != len(set(parameters)):
         raise CatalogueImportError("duplicate_catalogue_parameter")
@@ -261,9 +259,7 @@ def parse_freellmapi_models(
                 key=lambda item: (item.identity.provider_id, item.identity.model_id),
             )
         )
-        ordered_routes = tuple(
-            sorted(routes, key=lambda item: item.identity.route_id)
-        )
+        ordered_routes = tuple(sorted(routes, key=lambda item: item.identity.route_id))
         snapshot = CatalogueSnapshot(
             gateway_id=gateway_id,
             revision=_revision(gateway_id, ordered_models, ordered_routes),

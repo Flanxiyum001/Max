@@ -44,10 +44,7 @@ class CatalogueChanges:
     @property
     def unchanged(self) -> bool:
         return not (
-            self.added
-            or self.removed
-            or self.metadata_changed
-            or self.availability_changed
+            self.added or self.removed or self.metadata_changed or self.availability_changed
         )
 
 
@@ -65,25 +62,17 @@ def compare_catalogues(
         raise CatalogueStateError("invalid_catalogue_snapshot")
     if previous is not None and previous.gateway_id != current.gateway_id:
         raise CatalogueStateError("catalogue_gateway_mismatch")
-    if (
-        previous is not None
-        and previous.revision == current.revision
-        and previous != current
-    ):
+    if previous is not None and previous.revision == current.revision and previous != current:
         raise CatalogueStateError("catalogue_revision_collision")
 
     before_routes: dict[RouteIdentity, DiscoveredRoute] = (
         {r.identity: r for r in previous.routes} if previous else {}
     )
-    after_routes: dict[RouteIdentity, DiscoveredRoute] = {
-        r.identity: r for r in current.routes
-    }
+    after_routes: dict[RouteIdentity, DiscoveredRoute] = {r.identity: r for r in current.routes}
     before_models: dict[ModelIdentity, ModelMetadata] = (
         {m.identity: m for m in previous.models} if previous else {}
     )
-    after_models: dict[ModelIdentity, ModelMetadata] = {
-        m.identity: m for m in current.models
-    }
+    after_models: dict[ModelIdentity, ModelMetadata] = {m.identity: m for m in current.models}
     added = set(after_routes) - set(before_routes)
     removed = set(before_routes) - set(after_routes)
     shared = set(before_routes) & set(after_routes)
