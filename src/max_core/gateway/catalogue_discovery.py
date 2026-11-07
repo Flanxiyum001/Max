@@ -113,7 +113,9 @@ def _availability(row: dict[str, Any], observed_at_epoch: int | None) -> Availab
         "needsKey": AvailabilityState.NEEDS_KEY,
         "exhausted": AvailabilityState.EXHAUSTED,
     }
-    state = states.get(status, AvailabilityState.UNKNOWN)
+    state = AvailabilityState.UNKNOWN
+    if status is not None:
+        state = states.get(status, AvailabilityState.UNKNOWN)
     if status is None and available is False:
         state = AvailabilityState.UNAVAILABLE
     # An inconsistent status is NOT proof of readiness.
