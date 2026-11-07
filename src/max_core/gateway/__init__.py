@@ -19,6 +19,17 @@ from max_core.gateway.catalogue import (
     SelectionMetadata,
     TrustedRoutePolicy,
 )
+from max_core.gateway.catalogue_discovery import (
+    CatalogueImport,
+    CatalogueImportError,
+    parse_freellmapi_models,
+)
+from max_core.gateway.catalogue_state import (
+    CatalogueChanges,
+    CatalogueStateError,
+    InMemoryCatalogue,
+    compare_catalogues,
+)
 from max_core.gateway.contracts import (
     ChatMessage,
     Dialect,
@@ -35,6 +46,13 @@ from max_core.gateway.contracts import (
 from max_core.gateway.router import Gateway
 
 __all__ = [
+    "CatalogueChanges",
+    "CatalogueImport",
+    "CatalogueImportError",
+    "CatalogueStateError",
+    "InMemoryCatalogue",
+    "compare_catalogues",
+    "parse_freellmapi_models",
     "ApprovalState",
     "AvailabilityObservation",
     "AvailabilityState",
