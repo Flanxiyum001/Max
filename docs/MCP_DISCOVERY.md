@@ -31,7 +31,8 @@ registry = MCPRegistry((
 ## Boundaries and limits
 
 - HTTPS port 443, no URL credentials, query or fragment, no redirects or ambient
-  proxies. Endpoint paths may be sensitive and are omitted from configuration repr.
+  proxies. Encoded/compressed responses are rejected before body decoding so a
+  server cannot bypass the byte limit with decompression. Endpoint paths may be sensitive and are omitted from configuration repr.
 - Host must enforce DNS/IP egress policy with a constrained network or trusted
   transport before exposing this library to remotely supplied configuration.
   Exact-URL checking does not by itself prevent DNS rebinding or a configured

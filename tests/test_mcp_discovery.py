@@ -194,3 +194,24 @@ def test_same_tool_name_is_qualified_by_server() -> None:
         )
     assert results[0].name == results[1].name
     assert results[0].connection_id != results[1].connection_id
+
+
+def test_compressed_response_is_rejected_before_decoding() -> None:
+    import gzip
+
+    def mutate(request: httpx.Request, message: dict[str, object]) -> httpx.Response:
+        assert request.headers["accept-encoding"] == "identity"
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/json", "content-encoding": "gzip"},
+            content=gzip.compress(b"x" * (MAX_BYTES * 2)),
+        )
+
+    transport, calls = fixture_transport([], mutate=mutate)
+    with pytest.raises(DiscoveryError, match="mcp_discovery_failed"):
+        asyncio.run(
+            discover_tools(
+                MCPConnection("test", "https://mcp.example/mcp", True), transport=transport
+            )
+        )
+    assert len(calls) == 1

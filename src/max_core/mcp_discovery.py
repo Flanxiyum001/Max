@@ -124,6 +124,11 @@ class _EndpointTransport(httpx.AsyncBaseTransport):
         if 300 <= response.status_code < 400:
             await response.aclose()
             raise DiscoveryError("mcp_redirect_denied")
+        # Bound bytes before HTTPX decoding: a server can ignore identity and
+        # otherwise expand a small compressed body beyond the response budget.
+        if response.headers.get("content-encoding", "identity").lower() != "identity":
+            await response.aclose()
+            raise DiscoveryError("mcp_compressed_response_denied")
         if not isinstance(response.stream, httpx.AsyncByteStream):
             await response.aclose()
             raise DiscoveryError("invalid_mcp_stream")
