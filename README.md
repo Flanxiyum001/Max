@@ -100,3 +100,13 @@ I'm adding my first **manually invoked, strictly allowlisted local task executio
 ## Milestone 8 — independent `dev.add` evidence observer (owner-review branch)
 
 I can now manually ask a **separate trusted, local arithmetic observer** to recompute the expected answer for a previously executed, non-sensitive `dev.add` task. Unlike the bounded worker, this observer independently reads the persisted input, recomputes the mathematical answer, and asks the existing `IndependentVerifier` to record a provenance-bound, idempotent verdict. A supported result may complete the task; mismatches and unavailable evidence do not. **This proves mathematical-answer correctness, not that the original worker actually ran or that any external effect occurred.** It adds no model, browser, shell, unrestricted files, remote listener or deployment. See [independent evidence observer](docs/INDEPENDENT_EVIDENCE_OBSERVER.md) for commands, constraints and migration precautions. This is review-only until the owner merges the separate PR.
+
+## Milestone 10 — MCP connections (review branch)
+
+A new [MCP discovery library](docs/MCP_DISCOVERY.md) initializes explicitly
+configured HTTPS MCP servers and lists bounded tool metadata using the official
+Python SDK. Multiple servers keep separate identities. Discovery does not grant
+permission to execute a tool. Plugin installation and the personal PC workflow
+(wake, isolated coding, PR/CI verification, safe shutdown and reporting) remain
+unimplemented; their implementation sequence and device prerequisites are in
+the milestone document. No live MCP account or personal device was accessed.
