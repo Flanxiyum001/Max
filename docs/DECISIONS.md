@@ -117,3 +117,14 @@ Decision owner: the user. Engineering worker recommends, explains and supplies e
 ## Milestone 9 Stage 2 — local HTTP is not local inference
 
 **Owner-confirmed:** `tashfeenahmed/freellmapi` is the intended project and both local and cloud inference must be supported. **Not confirmed:** running deployment topology, version, actual upstream egress/model routes, pricing, quota or provider format compatibility. Source selection is not runtime attestation. The narrowly scoped gateway policy therefore introduces explicit `InferenceDestination` values `VERIFIED_LOCAL`, `CLOUD` and default `UNKNOWN` (denied). A loopback proxy forwarding to cloud must be tagged `CLOUD` and pass cloud/privacy/price authorization; absence of a reviewed destination denies all requests. No live credentials or provider requests are in scope. The remote-vs-loopback HTTP validation and existing protocol adapters remain unchanged.
+
+## Milestone 10 — personal MCP and unattended device work
+
+Owner clarified that MAX is a personal assistant, separate from Aventas, and
+requested MCP/plugin connections and remotely initiated PC coding through PR/CI,
+followed by safe shutdown and reporting. This authorizes implementation work;
+it does not establish a deployed device identity, live endpoint or wake relay.
+Implement separate reviewed milestones, preserving the default owner-merge
+workflow. Start with [explicit MCP discovery](MCP_DISCOVERY.md); discovery never
+grants tool execution. PC control and live side effects require authentic device
+policy, isolation and independent completion evidence before activation.
