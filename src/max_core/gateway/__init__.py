@@ -24,6 +24,11 @@ from max_core.gateway.catalogue_discovery import (
     CatalogueImportError,
     parse_freellmapi_models,
 )
+from max_core.gateway.catalogue_reader import (
+    CatalogueFetchError,
+    ReadOnlyCatalogueReader,
+    ReadOnlyCatalogueScope,
+)
 from max_core.gateway.catalogue_state import (
     CatalogueChanges,
     CatalogueStateError,
@@ -43,9 +48,30 @@ from max_core.gateway.contracts import (
     TokenUsage,
     ToolProposal,
 )
+from max_core.gateway.evaluation import (
+    EvaluationError,
+    OfflineEvaluationBook,
+    QualityObservation,
+)
 from max_core.gateway.router import Gateway
+from max_core.gateway.task_planner import (
+    PlanningError,
+    RankedRoute,
+    TaskKind,
+    TaskPlan,
+)
 
 __all__ = [
+    "CatalogueFetchError",
+    "ReadOnlyCatalogueReader",
+    "ReadOnlyCatalogueScope",
+    "EvaluationError",
+    "OfflineEvaluationBook",
+    "QualityObservation",
+    "PlanningError",
+    "RankedRoute",
+    "TaskKind",
+    "TaskPlan",
     "CatalogueChanges",
     "CatalogueImport",
     "CatalogueImportError",

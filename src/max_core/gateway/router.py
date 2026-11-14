@@ -23,7 +23,14 @@ from max_core.gateway.contracts import (
     Privacy,
     StreamEvent,
 )
+from max_core.gateway.evaluation import OfflineEvaluationBook
 from max_core.gateway.normalize import actual_cost
+from max_core.gateway.task_planner import (
+    PlanningError,
+    TaskKind,
+    TaskPlan,
+    _rank_eligible_views,
+)
 
 
 def _worst_case_cost(spec: ModelSpec, request: GatewayRequest) -> Decimal | None:
@@ -96,6 +103,55 @@ class Gateway:
         if verified_capabilities is not None and set(verified_capabilities) - seen:
             raise ValueError("Capability evidence references an unknown route")
         return tuple(views)
+
+    def plan_task(
+        self,
+        request: GatewayRequest,
+        bindings: Sequence[tuple[RouteIdentity, TrustedRoutePolicy]],
+        *,
+        catalogue_revision: str,
+        task: TaskKind,
+        verified_capabilities: Mapping[RouteIdentity, CapabilityMetadata],
+        evaluations: OfflineEvaluationBook | None = None,
+        exact_route: RouteIdentity | None = None,
+    ) -> TaskPlan:
+        """Advisory only. Never executes or changes the execution route.
+
+        Revalidate against the original trusted execution-time eligible() gate;
+        only the resulting credential-free views reach the pure planner.
+        """
+        if not isinstance(request, GatewayRequest):
+            raise PlanningError("invalid_gateway_request")
+        if request.allowed_models:
+            # Legacy unqualified model IDs are ambiguous across providers.
+            raise PlanningError("unqualified_model_filter_forbidden")
+        views = self.selection_metadata(
+            bindings,
+            catalogue_revision=catalogue_revision,
+            verified_capabilities=verified_capabilities,
+        )
+        # Never transfer ModelSpec or its API key into task_planner.
+        admissible = {
+            (spec.provider_id, spec.model_id, spec.dialect) for spec in self.eligible(request)
+        }
+        safe_views = tuple(
+            view
+            for view in views
+            if (
+                view.identity.model.provider_id,
+                view.identity.model.model_id,
+                view.identity.dialect,
+            )
+            in admissible
+        )
+        return _rank_eligible_views(
+            request,
+            task=task,
+            catalogue_revision=catalogue_revision,
+            admitted=safe_views,
+            evaluations=evaluations if evaluations is not None else OfflineEvaluationBook(),
+            exact_route=exact_route,
+        )
 
     def eligible(self, request: GatewayRequest) -> tuple[ModelSpec, ...]:
         result: list[ModelSpec] = []
