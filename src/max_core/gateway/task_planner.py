@@ -71,11 +71,13 @@ _TASK_CAPABILITIES: dict[TaskKind, tuple[str, ...]] = {
 }
 # Existing adapters only process text and inert tool proposals. These task
 # classes must stay non-executable until explicit protocol and output validation.
-_UNSUPPORTED_TRANSPORTS = frozenset({
-    TaskKind.STRUCTURED_EXTRACTION,
-    TaskKind.VISION,
-    TaskKind.AUDIO,
-})
+_UNSUPPORTED_TRANSPORTS = frozenset(
+    {
+        TaskKind.STRUCTURED_EXTRACTION,
+        TaskKind.VISION,
+        TaskKind.AUDIO,
+    }
+)
 
 
 def _estimated_cost(view: SelectionMetadata, request: GatewayRequest) -> Decimal | None:
@@ -143,6 +145,7 @@ def _rank_eligible_views(
                 priority=view.priority,
             )
         )
+
     # Avoid fabricating quality for untested routes. Verified task-specific
     # evaluations come first; remaining candidates use stable owner priority.
     # Performance evidence never overrides admission/privacy/cost constraints.
@@ -158,5 +161,9 @@ def _rank_eligible_views(
         )
 
     ranked.sort(key=ranking)
-    reason = None if ranked else ("exact_route_not_eligible" if exact_route else "no_eligible_task_route")
+    reason = (
+        None
+        if ranked
+        else ("exact_route_not_eligible" if exact_route else "no_eligible_task_route")
+    )
     return TaskPlan(request.request_id, task, catalogue_revision, tuple(ranked), reason)

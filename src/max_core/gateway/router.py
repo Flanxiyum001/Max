@@ -132,8 +132,7 @@ class Gateway:
         )
         # Never transfer ModelSpec or its API key into task_planner.
         admissible = {
-            (spec.provider_id, spec.model_id, spec.dialect)
-            for spec in self.eligible(request)
+            (spec.provider_id, spec.model_id, spec.dialect) for spec in self.eligible(request)
         }
         safe_views = tuple(
             view
@@ -142,7 +141,8 @@ class Gateway:
                 view.identity.model.provider_id,
                 view.identity.model.model_id,
                 view.identity.dialect,
-            ) in admissible
+            )
+            in admissible
         )
         return _rank_eligible_views(
             request,

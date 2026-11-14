@@ -74,7 +74,9 @@ def test_reader_requires_explicit_owner_approval_before_auth_or_network() -> Non
         return "Bearer TEST_ONLY"
 
     with pytest.raises(CatalogueFetchError, match="catalogue_access_not_approved"):
-        invoke(httpx.MockTransport(handler), scope(enabled=False), authorization_factory=credentials)
+        invoke(
+            httpx.MockTransport(handler), scope(enabled=False), authorization_factory=credentials
+        )
     with pytest.raises(CatalogueFetchError, match="catalogue_access_not_approved"):
         invoke(
             httpx.MockTransport(handler),
@@ -168,11 +170,19 @@ def test_response_content_type_length_and_body_size_bound() -> None:
     cases = (
         (httpx.Response(200, text="hello"), "catalogue_invalid_content_type"),
         (
-            httpx.Response(200, headers={"content-type": "application/json", "content-length": "1000"}, content=b"{}"),
+            httpx.Response(
+                200,
+                headers={"content-type": "application/json", "content-length": "1000"},
+                content=b"{}",
+            ),
             "catalogue_too_large",
         ),
         (
-            httpx.Response(200, headers={"content-type": "application/json", "content-length": "NaN"}, content=b"{}"),
+            httpx.Response(
+                200,
+                headers={"content-type": "application/json", "content-length": "NaN"},
+                content=b"{}",
+            ),
             "catalogue_invalid_length",
         ),
         (httpx.Response(200, json=listing()), "catalogue_too_large"),
@@ -201,6 +211,4 @@ def test_transport_timeout_never_exposes_exception_context() -> None:
     with pytest.raises(CatalogueFetchError, match="catalogue_timeout") as error:
         invoke(httpx.MockTransport(handler), scope())
     assert error.value.__suppress_context__
-    assert "SENSITIVE_TIMEOUT_AND_HOST" not in "".join(
-        traceback.format_exception(error.value)
-    )
+    assert "SENSITIVE_TIMEOUT_AND_HOST" not in "".join(traceback.format_exception(error.value))

@@ -8,6 +8,7 @@ from decimal import Decimal
 import httpx
 import pytest
 
+from max_core.gateway.adapters import HTTPAdapter
 from max_core.gateway.catalogue import (
     ApprovalState,
     CapabilityEvidence,
@@ -29,7 +30,6 @@ from max_core.gateway.contracts import (
 from max_core.gateway.evaluation import OfflineEvaluationBook, QualityObservation
 from max_core.gateway.router import Gateway
 from max_core.gateway.task_planner import PlanningError, TaskKind
-from max_core.gateway.adapters import HTTPAdapter
 
 
 REVISION = "catalogue-verified-1"
@@ -91,7 +91,9 @@ def binding(
     )
 
 
-def evidence(*capabilities: str, source: EvidenceSource = EvidenceSource.PROTOCOL_TESTED) -> CapabilityMetadata:
+def evidence(
+    *capabilities: str, source: EvidenceSource = EvidenceSource.PROTOCOL_TESTED
+) -> CapabilityMetadata:
     return CapabilityMetadata(
         claims=tuple(
             CapabilityEvidence(name, CapabilitySupport.SUPPORTED, source)
@@ -132,8 +134,13 @@ def test_admitted_local_chat_and_coding_are_ranked_without_secrets() -> None:
     g = gateway(spec("a", priority=30), spec("b", priority=10))
     bindings = (binding("a"), binding("b"))
     caps = {route("a"): evidence("text"), route("b"): evidence("text")}
-    plan = g.plan_task(req(), bindings, catalogue_revision=REVISION,
-                       task=TaskKind.CODING, verified_capabilities=caps)
+    plan = g.plan_task(
+        req(),
+        bindings,
+        catalogue_revision=REVISION,
+        task=TaskKind.CODING,
+        verified_capabilities=caps,
+    )
     assert [c.identity.model.provider_id for c in plan.candidates] == ["b", "a"]
     assert plan.reason is None
     assert plan.task == TaskKind.CODING
@@ -143,8 +150,13 @@ def test_admitted_local_chat_and_coding_are_ranked_without_secrets() -> None:
 
 def test_no_implicit_capabilities_from_legacy_model_spec() -> None:
     g = gateway(spec("a"))
-    plan = g.plan_task(req(), (binding("a"),), catalogue_revision=REVISION,
-                       task=TaskKind.CHAT, verified_capabilities={})
+    plan = g.plan_task(
+        req(),
+        (binding("a"),),
+        catalogue_revision=REVISION,
+        task=TaskKind.CHAT,
+        verified_capabilities={},
+    )
     assert plan.candidates == ()
     assert plan.reason == "no_eligible_task_route"
 
@@ -157,8 +169,9 @@ def test_unreviewed_and_disabled_are_never_ranked() -> None:
         binding("c"),
     )
     caps = {route(p): evidence("text") for p in ("a", "b", "c")}
-    plan = g.plan_task(req(), bindings, catalogue_revision=REVISION,
-                       task=TaskKind.CHAT, verified_capabilities=caps)
+    plan = g.plan_task(
+        req(), bindings, catalogue_revision=REVISION, task=TaskKind.CHAT, verified_capabilities=caps
+    )
     assert tuple(x.identity for x in plan.candidates) == (route("c"),)
 
 
@@ -166,9 +179,13 @@ def test_unknown_destination_rejected_through_central_admission() -> None:
     g = gateway(spec("a", destination=InferenceDestination.UNKNOWN))
     identity = route("a")
     policy = TrustedRoutePolicy(identity)
-    plan = g.plan_task(req(cloud_allowed=True, max_cost_usd=Decimal("100")),
-                       ((identity, policy),), catalogue_revision=REVISION,
-                       task=TaskKind.CHAT, verified_capabilities={identity: evidence("text")})
+    plan = g.plan_task(
+        req(cloud_allowed=True, max_cost_usd=Decimal("100")),
+        ((identity, policy),),
+        catalogue_revision=REVISION,
+        task=TaskKind.CHAT,
+        verified_capabilities={identity: evidence("text")},
+    )
     assert plan.candidates == ()
 
 
@@ -184,12 +201,21 @@ def test_cloud_opt_in_cost_and_privacy_must_pass_gateway_eligible() -> None:
         req(privacy=Privacy.CONFIDENTIAL, cloud_allowed=True, max_cost_usd=Decimal("100")),
         req(privacy=Privacy.RESTRICTED, cloud_allowed=True, max_cost_usd=Decimal("100")),
     ):
-        plan = g.plan_task(request, (pair,), catalogue_revision=REVISION,
-                           task=TaskKind.CHAT, verified_capabilities=caps)
+        plan = g.plan_task(
+            request,
+            (pair,),
+            catalogue_revision=REVISION,
+            task=TaskKind.CHAT,
+            verified_capabilities=caps,
+        )
         assert plan.candidates == ()
-    allowed = g.plan_task(req(cloud_allowed=True, max_cost_usd=Decimal("100")), (pair,),
-                          catalogue_revision=REVISION, task=TaskKind.CHAT,
-                          verified_capabilities=caps)
+    allowed = g.plan_task(
+        req(cloud_allowed=True, max_cost_usd=Decimal("100")),
+        (pair,),
+        catalogue_revision=REVISION,
+        task=TaskKind.CHAT,
+        verified_capabilities=caps,
+    )
     assert len(allowed.candidates) == 1
     assert allowed.candidates[0].estimated_cost_usd is not None
 
@@ -199,7 +225,8 @@ def test_cloud_unknown_price_is_not_admitted_despite_approved_metadata() -> None
     plan = g.plan_task(
         req(cloud_allowed=True, max_cost_usd=Decimal("100")),
         (binding("cloud", destination=InferenceDestination.CLOUD),),
-        catalogue_revision=REVISION, task=TaskKind.CHAT,
+        catalogue_revision=REVISION,
+        task=TaskKind.CHAT,
         verified_capabilities={route("cloud"): evidence("text")},
     )
     assert plan.candidates == ()
@@ -209,15 +236,28 @@ def test_exact_route_override_is_qualified_and_does_not_trigger_fallback() -> No
     g = gateway(spec("a"), spec("b"))
     bindings = (binding("a"), binding("b"))
     caps = {route(p): evidence("text") for p in ("a", "b")}
-    plan = g.plan_task(req(), bindings, catalogue_revision=REVISION, task=TaskKind.CHAT,
-                       verified_capabilities=caps, exact_route=route("b"))
+    plan = g.plan_task(
+        req(),
+        bindings,
+        catalogue_revision=REVISION,
+        task=TaskKind.CHAT,
+        verified_capabilities=caps,
+        exact_route=route("b"),
+    )
     assert tuple(p.identity for p in plan.candidates) == (route("b"),)
     missing = RouteIdentity(
         ModelIdentity("other-gateway", "b", "shared-model"),
-        "route-b", Dialect.OPENAI_CHAT,
+        "route-b",
+        Dialect.OPENAI_CHAT,
     )
-    empty = g.plan_task(req(), bindings, catalogue_revision=REVISION, task=TaskKind.CHAT,
-                        verified_capabilities=caps, exact_route=missing)
+    empty = g.plan_task(
+        req(),
+        bindings,
+        catalogue_revision=REVISION,
+        task=TaskKind.CHAT,
+        verified_capabilities=caps,
+        exact_route=missing,
+    )
     assert empty.candidates == ()
     assert empty.reason == "exact_route_not_eligible"
 
@@ -225,32 +265,56 @@ def test_exact_route_override_is_qualified_and_does_not_trigger_fallback() -> No
 def test_unqualified_model_filter_is_rejected_for_planner() -> None:
     g = gateway(spec("a"))
     with pytest.raises(PlanningError, match="unqualified_model_filter_forbidden"):
-        g.plan_task(req(allowed_models=frozenset({"shared-model"})), (binding("a"),),
-                    catalogue_revision=REVISION, task=TaskKind.CHAT,
-                    verified_capabilities={route("a"): evidence("text")})
+        g.plan_task(
+            req(allowed_models=frozenset({"shared-model"})),
+            (binding("a"),),
+            catalogue_revision=REVISION,
+            task=TaskKind.CHAT,
+            verified_capabilities={route("a"): evidence("text")},
+        )
 
 
 def test_capability_evidence_must_be_verified_for_reasoning() -> None:
     g = gateway(spec("a"))
     weak = {route("a"): evidence("text", "reasoning", source=EvidenceSource.GATEWAY_REPORTED)}
-    empty = g.plan_task(req(), (binding("a"),), catalogue_revision=REVISION,
-                        task=TaskKind.REASONING, verified_capabilities=weak)
+    empty = g.plan_task(
+        req(),
+        (binding("a"),),
+        catalogue_revision=REVISION,
+        task=TaskKind.REASONING,
+        verified_capabilities=weak,
+    )
     assert empty.candidates == ()
     verified = {route("a"): evidence("text", "reasoning")}
-    planned = g.plan_task(req(), (binding("a"),), catalogue_revision=REVISION,
-                          task=TaskKind.REASONING, verified_capabilities=verified)
+    planned = g.plan_task(
+        req(),
+        (binding("a"),),
+        catalogue_revision=REVISION,
+        task=TaskKind.REASONING,
+        verified_capabilities=verified,
+    )
     assert len(planned.candidates) == 1
 
 
 def test_tools_require_capability_evidence_and_request_admission() -> None:
     g = gateway(spec("a", supports_tools=True))
     caps = {route("a"): evidence("text", "tools")}
-    no_tools = g.plan_task(req(), (binding("a"),), catalogue_revision=REVISION,
-                           task=TaskKind.TOOL_PLANNING, verified_capabilities=caps)
+    no_tools = g.plan_task(
+        req(),
+        (binding("a"),),
+        catalogue_revision=REVISION,
+        task=TaskKind.TOOL_PLANNING,
+        verified_capabilities=caps,
+    )
     assert no_tools.candidates == ()
     assert no_tools.reason == "tool_request_not_admitted"
-    yes = g.plan_task(req(tools=True), (binding("a"),), catalogue_revision=REVISION,
-                      task=TaskKind.TOOL_PLANNING, verified_capabilities=caps)
+    yes = g.plan_task(
+        req(tools=True),
+        (binding("a"),),
+        catalogue_revision=REVISION,
+        task=TaskKind.TOOL_PLANNING,
+        verified_capabilities=caps,
+    )
     assert len(yes.candidates) == 1
 
 
@@ -261,17 +325,22 @@ def test_tools_require_capability_evidence_and_request_admission() -> None:
 def test_unsupported_transport_modes_remain_blocked(task: TaskKind) -> None:
     g = gateway(spec("a", supports_tools=True))
     caps = {route("a"): evidence("text", "vision", "audio", "structured_output", "tools")}
-    plan = g.plan_task(req(), (binding("a"),), catalogue_revision=REVISION,
-                       task=task, verified_capabilities=caps)
+    plan = g.plan_task(
+        req(), (binding("a"),), catalogue_revision=REVISION, task=task, verified_capabilities=caps
+    )
     assert plan.candidates == ()
     assert plan.reason == "transport_capability_unavailable"
 
 
 def test_context_overflow_remains_ineligible() -> None:
     g = gateway(spec("a", context=400))
-    plan = g.plan_task(req(context=512), (binding("a"),),
-                       catalogue_revision=REVISION, task=TaskKind.CHAT,
-                       verified_capabilities={route("a"): evidence("text")})
+    plan = g.plan_task(
+        req(context=512),
+        (binding("a"),),
+        catalogue_revision=REVISION,
+        task=TaskKind.CHAT,
+        verified_capabilities={route("a"): evidence("text")},
+    )
     assert plan.candidates == ()
 
 
@@ -280,14 +349,34 @@ def test_evaluated_models_use_reviewed_quality_then_latency() -> None:
     caps = {route(p): evidence("text") for p in ("a", "b")}
     book = OfflineEvaluationBook(
         observations=(
-            QualityObservation(route("a"), "coding", REVISION, Decimal("0.6"), 10, 1200,
-                               EvidenceSource.OWNER_REVIEWED),
-            QualityObservation(route("b"), "coding", REVISION, Decimal("0.9"), 10, 3000,
-                               EvidenceSource.PROTOCOL_TESTED),
+            QualityObservation(
+                route("a"),
+                "coding",
+                REVISION,
+                Decimal("0.6"),
+                10,
+                1200,
+                EvidenceSource.OWNER_REVIEWED,
+            ),
+            QualityObservation(
+                route("b"),
+                "coding",
+                REVISION,
+                Decimal("0.9"),
+                10,
+                3000,
+                EvidenceSource.PROTOCOL_TESTED,
+            ),
         )
     )
-    plan = g.plan_task(req(), (binding("a"), binding("b")), catalogue_revision=REVISION,
-                       task=TaskKind.CODING, verified_capabilities=caps, evaluations=book)
+    plan = g.plan_task(
+        req(),
+        (binding("a"), binding("b")),
+        catalogue_revision=REVISION,
+        task=TaskKind.CODING,
+        verified_capabilities=caps,
+        evaluations=book,
+    )
     assert [x.identity.model.provider_id for x in plan.candidates] == ["b", "a"]
     assert plan.candidates[0].quality_score == Decimal("0.9")
     assert plan.candidates[1].p95_latency_ms == 1200
@@ -297,12 +386,26 @@ def test_stale_evaluation_data_never_changes_rank_order() -> None:
     g = gateway(spec("a", priority=1), spec("b", priority=100))
     caps = {route(p): evidence("text") for p in ("a", "b")}
     old = OfflineEvaluationBook(
-        (QualityObservation(route("b"), "chat", "old-revision", Decimal("1"), 100,
-                            50, EvidenceSource.OWNER_REVIEWED),)
+        (
+            QualityObservation(
+                route("b"),
+                "chat",
+                "old-revision",
+                Decimal("1"),
+                100,
+                50,
+                EvidenceSource.OWNER_REVIEWED,
+            ),
+        )
     )
-    result = g.plan_task(req(), (binding("a"), binding("b")),
-                         catalogue_revision=REVISION, task=TaskKind.CHAT,
-                         verified_capabilities=caps, evaluations=old)
+    result = g.plan_task(
+        req(),
+        (binding("a"), binding("b")),
+        catalogue_revision=REVISION,
+        task=TaskKind.CHAT,
+        verified_capabilities=caps,
+        evaluations=old,
+    )
     assert [x.identity.model.provider_id for x in result.candidates] == ["a", "b"]
     assert all(x.quality_score is None for x in result.candidates)
 
@@ -312,6 +415,10 @@ def test_dialect_and_approval_binding_mismatch_still_rejected() -> None:
     original = binding("a")
     wrong = replace(original[1], inference_destination=InferenceDestination.CLOUD)
     with pytest.raises(ValueError, match="destination"):
-        g.plan_task(req(), ((original[0], wrong),), catalogue_revision=REVISION,
-                    task=TaskKind.CHAT,
-                    verified_capabilities={route("a"): evidence("text")})
+        g.plan_task(
+            req(),
+            ((original[0], wrong),),
+            catalogue_revision=REVISION,
+            task=TaskKind.CHAT,
+            verified_capabilities={route("a"): evidence("text")},
+        )

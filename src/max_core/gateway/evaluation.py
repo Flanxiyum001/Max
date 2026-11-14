@@ -42,15 +42,17 @@ class QualityObservation:
             r"[A-Za-z0-9_.:-]{1,100}", self.catalogue_revision
         ):
             raise EvaluationError("invalid_evaluation_revision")
-        if not isinstance(self.quality, Decimal) or not self.quality.is_finite() or not (
-            Decimal(0) <= self.quality <= Decimal(1)
+        if (
+            not isinstance(self.quality, Decimal)
+            or not self.quality.is_finite()
+            or not (Decimal(0) <= self.quality <= Decimal(1))
         ):
             raise EvaluationError("invalid_evaluation_quality")
         if type(self.sample_count) is not int or not 5 <= self.sample_count <= 1_000_000:
             raise EvaluationError("insufficient_evaluation_samples")
         if type(self.p95_latency_ms) is not int or not 1 <= self.p95_latency_ms <= 3_600_000:
             raise EvaluationError("invalid_evaluation_latency")
-        if self.provenance not in {
+        if not isinstance(self.provenance, EvidenceSource) or self.provenance not in {
             EvidenceSource.OWNER_REVIEWED,
             EvidenceSource.PROTOCOL_TESTED,
         }:
@@ -68,10 +70,7 @@ class OfflineEvaluationBook:
             not isinstance(x, QualityObservation) for x in self.observations
         ):
             raise EvaluationError("invalid_evaluation_book")
-        ids = [
-            (x.route, x.task_id, x.catalogue_revision)
-            for x in self.observations
-        ]
+        ids = [(x.route, x.task_id, x.catalogue_revision) for x in self.observations]
         if len(ids) != len(set(ids)):
             raise EvaluationError("duplicate_evaluation_record")
 

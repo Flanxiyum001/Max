@@ -67,9 +67,7 @@ def test_reviewed_evidence_is_stable_immutable_and_qualified() -> None:
         (Decimal("0.5"), 50, 3_600_001),
     ],
 )
-def test_invalid_metrics_are_rejected(
-    quality: Decimal, samples: int, latency: int
-) -> None:
+def test_invalid_metrics_are_rejected(quality: Decimal, samples: int, latency: int) -> None:
     with pytest.raises(EvaluationError):
         measurement(quality=quality, samples=samples, latency=latency)
 
