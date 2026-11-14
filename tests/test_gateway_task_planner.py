@@ -31,7 +31,6 @@ from max_core.gateway.evaluation import OfflineEvaluationBook, QualityObservatio
 from max_core.gateway.router import Gateway
 from max_core.gateway.task_planner import PlanningError, TaskKind
 
-
 REVISION = "catalogue-verified-1"
 
 
