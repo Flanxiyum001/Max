@@ -128,3 +128,16 @@ Implement separate reviewed milestones, preserving the default owner-merge
 workflow. Start with [explicit MCP discovery](MCP_DISCOVERY.md); discovery never
 grants tool execution. PC control and live side effects require authentic device
 policy, isolation and independent completion evidence before activation.
+
+## Owner-requested specialist development team (2026-11-14)
+
+The owner explicitly requested implementing a development team inside MAX:
+implementation, independent code review, QA, security and conditional UI/UX review,
+with testing before release. This authorizes a focused runtime milestone beyond
+the historical Phase 0 documentation boundary. Build host-injected orchestration
+first, enforce budgets and revision-bound gates in code, and preserve the existing
+Trust and independent task-completion boundaries. Do not call fixture-based agent
+orchestration live coding, real model access, or production readiness. A separate
+implementation agent and independent reviewing agent are used for this change.
+The owner's later explicit merge authorization supersedes historical contributor
+instructions where it applies; it never removes validation or live release gates.
