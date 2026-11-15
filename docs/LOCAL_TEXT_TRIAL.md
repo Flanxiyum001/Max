@@ -31,7 +31,9 @@ $env:MAX_TRIAL_CLOUD_ALLOWED = 'yes'
 $env:MAX_TRIAL_MAX_COST_USD = '0.01'
 $env:MAX_TRIAL_INPUT_USD_PER_MILLION = '1'
 $env:MAX_TRIAL_OUTPUT_USD_PER_MILLION = '2'
-$env:MAX_TRIAL_API_KEY = Read-Host 'Provider API key'
+$secret = Read-Host 'Provider API key' -AsSecureString
+$env:MAX_TRIAL_API_KEY = [System.Net.NetworkCredential]::new('', $secret).Password
+Remove-Variable secret
 .\.venv\Scripts\python.exe -m max_core.gateway_trial
 ```
 
