@@ -90,15 +90,10 @@ class MemoryGatewayLoop:
             raise OrchestrationError("invalid_gateway_request")
         # Memory records currently have no privacy label. Restricted prompts may
         # still use verified-local models, but never be silently sent to the cloud.
-        found = self.memory.retrieve(
-            owner_id, scope=scope, minimum_confidence=400, limit=4
-        )
+        found = self.memory.retrieve(owner_id, scope=scope, minimum_confidence=400, limit=4)
         if not found:
             return request
-        items = [
-            {"key": item.memory.subject_key, "value": item.memory.content}
-            for item in found
-        ]
+        items = [{"key": item.memory.subject_key, "value": item.memory.content} for item in found]
         # Prefer fewer full facts over silently truncating a statement.
         while items:
             encoded = json.dumps(items, ensure_ascii=True, separators=(",", ":"))
