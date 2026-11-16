@@ -22,3 +22,7 @@ Google Drive is not the sole database or sole backup. Use versioning, retention,
 - Sensitive document contents should not be copied into ordinary conversational memory.
 - Support correction, export, retention controls, and deletion workflows.
 - Do not learn permanent preferences from a single ambiguous event without adequate evidence.
+
+## Implementation boundary — Milestone 12
+
+An owner-scoped, review-first PostgreSQL memory **library** is proposed on a separate review branch. It stores pending candidates and explicitly approved statements with source digests, timestamps, confidence decay, owner corrections and hard deletion. It has **no model-driven ingestion, connected identity/UI, pgvector, graph retrieval, background review digest or production deployment**. Implementation and controls: [Milestone 12](docs/M12_MEMORY_FOUNDATION.md).
