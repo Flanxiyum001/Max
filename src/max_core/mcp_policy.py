@@ -54,8 +54,9 @@ class ReviewedToolPolicy:
             or not isinstance(self.risk, RiskTier)
             or type(self.enabled) is not bool
             or not isinstance(self.allowed_arguments, frozenset)
-            or any(not isinstance(x, str) or _NAME.fullmatch(x) is None
-                   for x in self.allowed_arguments)
+            or any(
+                not isinstance(x, str) or _NAME.fullmatch(x) is None for x in self.allowed_arguments
+            )
         ):
             raise MCPPolicyError("invalid_reviewed_policy")
 
@@ -132,8 +133,12 @@ def _arguments_hash(
         valid = (
             (type_name == "string" and type(value) is str and len(value) <= 1024)
             or (type_name == "integer" and type(value) is int and abs(value) <= 1_000_000_000)
-            or (type_name == "number" and type(value) in (int, float)
-                and math.isfinite(value) and abs(value) <= 1_000_000_000)
+            or (
+                type_name == "number"
+                and type(value) in (int, float)
+                and math.isfinite(value)
+                and abs(value) <= 1_000_000_000
+            )
             or (type_name == "boolean" and type(value) is bool)
             or (type_name == "null" and value is None)
         )
@@ -164,9 +169,7 @@ def review_gateway_proposals(
         raise MCPPolicyError("invalid_batch")
     policies: dict[str, tuple[ObservedTool, ReviewedToolPolicy]] = {}
     for observation, policy in reviewed:
-        if not isinstance(policy, ReviewedToolPolicy) or not isinstance(
-            observation, ObservedTool
-        ):
+        if not isinstance(policy, ReviewedToolPolicy) or not isinstance(observation, ObservedTool):
             raise MCPPolicyError("invalid_registry")
         if policy.owner_id != context.owner_id or not policy.enabled:
             continue
@@ -188,20 +191,33 @@ def review_gateway_proposals(
         seen.add(proposal.call_id)
         binding = json.dumps(
             {
-                "owner": context.owner_id, "task": context.task_id,
-                "actor": context.actor_id, "session": context.session_id,
-                "device": context.device_id, "request": response.request_id,
-                "provider": response.provider_id, "model": response.model_id,
-                "call": proposal.call_id, "tool": policy.qualified_name,
-                "schema": policy.schema_sha256, "args": digest, "risk": policy.risk.value,
+                "owner": context.owner_id,
+                "task": context.task_id,
+                "actor": context.actor_id,
+                "session": context.session_id,
+                "device": context.device_id,
+                "request": response.request_id,
+                "provider": response.provider_id,
+                "model": response.model_id,
+                "call": proposal.call_id,
+                "tool": policy.qualified_name,
+                "schema": policy.schema_sha256,
+                "args": digest,
+                "risk": policy.risk.value,
                 "version": 1,
             },
-            sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
         ).encode("ascii")
         result.append(
             PendingToolIntent(
-                proposal.call_id, policy.qualified_name, policy.schema_sha256,
-                digest, hashlib.sha256(binding).hexdigest(), policy.risk,
+                proposal.call_id,
+                policy.qualified_name,
+                policy.schema_sha256,
+                digest,
+                hashlib.sha256(binding).hexdigest(),
+                policy.risk,
                 policy.risk != RiskTier.R0,
             )
         )
