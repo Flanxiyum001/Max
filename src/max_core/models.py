@@ -215,3 +215,47 @@ class MemoryEvent(Base):
     action: Mapped[str] = mapped_column(String(24), nullable=False)
     revision: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DeviceNode(Base):
+    """Owner-registered public key, not proof of physical hardware provenance."""
+
+    __tablename__ = "max_device_nodes"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "key_sha256", name="uq_node_owner_key"),
+        Index("ix_nodes_owner_state", "owner_id", "state"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    label: Mapped[str] = mapped_column(String(64), nullable=False)
+    platform: Mapped[str] = mapped_column(String(16), nullable=False)
+    public_key_b64url: Mapped[str] = mapped_column(String(512), nullable=False)
+    key_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class DeviceChallenge(Base):
+    """One-use hashed challenge, bound to owner, node and purpose."""
+
+    __tablename__ = "max_device_challenges"
+    __table_args__ = (
+        Index("ix_node_challenges_device", "owner_id", "device_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    device_id: Mapped[str] = mapped_column(
+        ForeignKey("max_device_nodes.id", ondelete="CASCADE"), nullable=False
+    )
+    purpose: Mapped[str] = mapped_column(String(16), nullable=False)
+    nonce_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
