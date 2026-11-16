@@ -110,3 +110,7 @@ permission to execute a tool. Plugin installation and the personal PC workflow
 (wake, isolated coding, PR/CI verification, safe shutdown and reporting) remain
 unimplemented; their implementation sequence and device prerequisites are in
 the milestone document. No live MCP account or personal device was accessed.
+
+## Milestone 12 — reviewed memory records (owner-review branch)
+
+A separate [provenance-first memory foundation](docs/M12_MEMORY_FOUNDATION.md) introduces SQL-backed **pending** suggestions, explicit owner approval, confidence decay and hard erasure. This is library-level work only: there is no automatic learning, graph/vector search, user-facing memory interface or deployed production database. Cloud/local model connections and MCP tool execution remain separate, unverified security gates.
