@@ -111,9 +111,7 @@ class HeartbeatRegistry:
         if (
             not device_keys
             or any(
-                not _DEVICE.fullmatch(device_id)
-                or not isinstance(key, bytes)
-                or len(key) < 32
+                not _DEVICE.fullmatch(device_id) or not isinstance(key, bytes) or len(key) < 32
                 for device_id, key in device_keys.items()
             )
             or type(skew_ms) is not int
