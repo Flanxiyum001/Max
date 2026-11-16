@@ -107,9 +107,7 @@ def test_only_approved_cloud_failure_falls_back_to_local(status: int) -> None:
             return httpx.Response(status)
         assert request.url.host == "127.0.0.1"
         assert "authorization" not in request.headers
-        assert json.loads(request.content)["messages"] == [
-            {"role": "user", "content": "hello"}
-        ]
+        assert json.loads(request.content)["messages"] == [{"role": "user", "content": "hello"}]
         return reply("local-model", "offline")
 
     assert perform(FallbackTrialSettings.from_env(settings_env()), handler) == (
