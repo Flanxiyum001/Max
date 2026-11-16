@@ -42,9 +42,7 @@ def test_orb_accepts_only_fresh_authenticated_ordered_event() -> None:
     "authenticated,device_id",
     [(False, "desktop"), (True, "other")],
 )
-def test_unauthorized_status_cannot_drive_visuals(
-    authenticated: bool, device_id: str
-) -> None:
+def test_unauthorized_status_cannot_drive_visuals(authenticated: bool, device_id: str) -> None:
     orb = OrbReducer("desktop")
     with pytest.raises(OrbError, match="unauthorized_orb_event"):
         orb.receive(
@@ -64,9 +62,7 @@ def test_unauthorized_status_cannot_drive_visuals(
         (FocusState.LOCKED_OR_ABSENT, OrbVisibility.PASSIVE),
     ],
 )
-def test_focus_suppresses_game_alerts(
-    focus: FocusState, expected: OrbVisibility
-) -> None:
+def test_focus_suppresses_game_alerts(focus: FocusState, expected: OrbVisibility) -> None:
     orb = OrbReducer("desktop")
     orb.receive(
         OrbEvent("desktop", 2, 100, OrbState.AWAITING_APPROVAL),
@@ -88,6 +84,7 @@ def test_focus_suppresses_game_alerts(
 def test_expired_or_hidden_events_are_never_visibly_stale() -> None:
     orb = OrbReducer("desktop", ttl_ms=1000)
     orb.receive(OrbEvent("desktop", 1, 100, OrbState.SPEAKING), authenticated=True, now_ms=100)
+
     def view(**kwargs: object):
         values = dict(
             now_ms=110,
