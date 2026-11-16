@@ -95,8 +95,10 @@ def _valid_names(names: tuple[str, ...]) -> bool:
     return (
         isinstance(names, tuple)
         and len(names) <= 16
+        and all(
+            isinstance(name, str) and _TOOL_NAME.fullmatch(name) is not None for name in names
+        )
         and len(names) == len(set(names))
-        and all(isinstance(name, str) and _TOOL_NAME.fullmatch(name) for name in names)
     )
 
 
