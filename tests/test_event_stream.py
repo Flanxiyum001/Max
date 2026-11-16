@@ -104,7 +104,7 @@ def test_authenticated_socket_emits_metadata_without_objective(store: TaskStore)
         token = ticket(client)
         with client.websocket_connect(
             "/v1/events/ws",
-            headers={"Origin": ORIGIN},
+            headers={"Host": "localhost:8765", "Origin": ORIGIN},
             subprotocols=["max-events-v1", f"max-ticket.{token}"],
         ) as socket:
             hello = socket.receive_json()
@@ -133,26 +133,26 @@ def test_socket_refuses_replay_bad_origin_and_missing_protocol(store: TaskStore)
         with pytest.raises(WebSocketDisconnect):
             with client.websocket_connect(
                 "/v1/events/ws",
-                headers={"Origin": "https://evil.test"},
+                headers={"Host": "localhost:8765", "Origin": "https://evil.test"},
                 subprotocols=["max-events-v1", f"max-ticket.{token}"],
             ):
                 pass
         # The bad-origin handshake cannot spend a token.
         with client.websocket_connect(
             "/v1/events/ws",
-            headers={"Origin": ORIGIN},
+            headers={"Host": "localhost:8765", "Origin": ORIGIN},
             subprotocols=["max-events-v1", f"max-ticket.{token}"],
         ) as socket:
             assert socket.receive_json()["type"] == "hello"
         with pytest.raises(WebSocketDisconnect):
             with client.websocket_connect(
                 "/v1/events/ws",
-                headers={"Origin": ORIGIN},
+                headers={"Host": "localhost:8765", "Origin": ORIGIN},
                 subprotocols=["max-events-v1", f"max-ticket.{token}"],
             ):
                 pass
         with pytest.raises(WebSocketDisconnect):
-            with client.websocket_connect("/v1/events/ws", headers={"Origin": ORIGIN}):
+            with client.websocket_connect("/v1/events/ws", headers={"Host": "localhost:8765", "Origin": ORIGIN}):
                 pass
 
 
@@ -164,7 +164,7 @@ def test_socket_cannot_be_used_as_command_channel(store: TaskStore) -> None:
         token = ticket(client)
         with client.websocket_connect(
             "/v1/events/ws",
-            headers={"Origin": ORIGIN},
+            headers={"Host": "localhost:8765", "Origin": ORIGIN},
             subprotocols=["max-events-v1", f"max-ticket.{token}"],
         ) as socket:
             assert socket.receive_json()["type"] == "hello"
