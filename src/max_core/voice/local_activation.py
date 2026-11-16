@@ -110,10 +110,7 @@ class LocalActivationGate:
         ):
             self._consecutive = 0
             return False
-        if (
-            wake_probability >= self.wake_threshold
-            and vad_probability >= self.vad_threshold
-        ):
+        if wake_probability >= self.wake_threshold and vad_probability >= self.vad_threshold:
             self._consecutive += 1
         else:
             self._consecutive = 0
@@ -126,9 +123,7 @@ class LocalActivationGate:
     def streaming_allowed(self, *, now_ms: int) -> bool:
         self._advance_clock(now_ms)
         return bool(
-            self._armed
-            and self._active_until_ms is not None
-            and now_ms <= self._active_until_ms
+            self._armed and self._active_until_ms is not None and now_ms <= self._active_until_ms
         )
 
     def stop_turn(self) -> None:
