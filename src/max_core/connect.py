@@ -11,7 +11,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from sqlalchemy import Engine, func, select, text
@@ -43,6 +43,11 @@ _TEMPLATES = {
 }
 
 
+def _as_utc(value: datetime) -> datetime:
+    """Normalize SQLite-naive and PostgreSQL-aware timestamps for stable API replies."""
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
 @dataclass(frozen=True, slots=True)
 class DraftView:
     id: str
@@ -65,8 +70,8 @@ class DraftView:
             title=record.title,
             draft=record.draft,
             state=record.state,
-            created_at=record.created_at,
-            reviewed_at=record.reviewed_at,
+            created_at=_as_utc(record.created_at),
+            reviewed_at=_as_utc(record.reviewed_at) if record.reviewed_at is not None else None,
         )
 
 
