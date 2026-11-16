@@ -50,9 +50,15 @@ class Presence:
             raise ValueError("invalid_device_state")
         if not isfinite(self.seen_monotonic) or self.seen_monotonic < 0:
             raise ValueError("invalid_presence_time")
-        if any(type(value) is not bool for value in (
-            self.foreground, self.owner_enabled, self.microphone_opt_in, self.quiet_mode
-        )):
+        if any(
+            type(value) is not bool
+            for value in (
+                self.foreground,
+                self.owner_enabled,
+                self.microphone_opt_in,
+                self.quiet_mode,
+            )
+        ):
             raise ValueError("invalid_presence_flags")
 
 
@@ -69,19 +75,25 @@ def notification_delivery(device: Presence, *, now: float, ttl: float = 30) -> D
     return Delivery.DISPLAY
 
 
-def choose_voice_device(devices: tuple[Presence, ...], *, now: float, ttl: float = 15) -> str | None:
+def choose_voice_device(
+    devices: tuple[Presence, ...], *, now: float, ttl: float = 15
+) -> str | None:
     """Pick at most one active desktop device; never assume background iOS microphone."""
     if not isfinite(now) or not 0 < ttl <= 300:
         raise ValueError("invalid_clock_or_ttl")
-    eligible = [device for device in devices if (
-        device.platform in {Platform.WINDOWS, Platform.HYPRLAND}
-        and device.owner_enabled
-        and device.microphone_opt_in
-        and device.foreground
-        and not device.quiet_mode
-        and device.focus == FocusState.ACCEPTS_NOTIFICATIONS
-        and 0 <= now - device.seen_monotonic <= ttl
-    )]
+    eligible = [
+        device
+        for device in devices
+        if (
+            device.platform in {Platform.WINDOWS, Platform.HYPRLAND}
+            and device.owner_enabled
+            and device.microphone_opt_in
+            and device.foreground
+            and not device.quiet_mode
+            and device.focus == FocusState.ACCEPTS_NOTIFICATIONS
+            and 0 <= now - device.seen_monotonic <= ttl
+        )
+    ]
     if len({device.device_id for device in eligible}) != len(eligible):
         raise ValueError("duplicate_presence_identity")
     if not eligible:
