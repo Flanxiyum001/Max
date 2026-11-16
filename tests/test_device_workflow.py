@@ -64,8 +64,15 @@ def test_wol_magic_packet_exact_payload_no_network() -> None:
 
 @pytest.mark.parametrize(
     "mac",
-    ["", "aa-bb-cc", "01:00:5e:00:00:01", "ff:ff:ff:ff:ff:ff",
-     "00:00:00:00:00:00", "02:11-22:33:44:55", "02:11:22:33:44:55\n"],
+    [
+        "",
+        "aa-bb-cc",
+        "01:00:5e:00:00:01",
+        "ff:ff:ff:ff:ff:ff",
+        "00:00:00:00:00:00",
+        "02:11-22:33:44:55",
+        "02:11:22:33:44:55\n",
+    ],
 )
 def test_invalid_wol_targets_denied(mac: str) -> None:
     with pytest.raises(DeviceWorkflowError, match="invalid_mac"):
@@ -88,8 +95,12 @@ def test_authenticated_heartbeat_recorded_and_replay_denied() -> None:
 
 @pytest.mark.parametrize(
     "changes",
-    [{"unsaved_work": True}, {"user_active": True}, {"active_jobs": 1},
-     {"suspend_supported": False}],
+    [
+        {"unsaved_work": True},
+        {"user_active": True},
+        {"active_jobs": 1},
+        {"suspend_supported": False},
+    ],
 )
 def test_heartbeat_cannot_authorize_unsafe_sleep(changes: dict[str, object]) -> None:
     r = registry()
@@ -161,11 +172,13 @@ def test_no_sleep_without_fresh_idle_heartbeat_and_separate_consent() -> None:
 
 @pytest.mark.parametrize(
     "url",
-    ["http://github.com/Flanxiyum001/Max/pull/1",
-     "https://github.com/Flanxiyum001/other/pull/1",
-     "https://github.com.evil.test/Flanxiyum001/Max/pull/1",
-     "https://github.com/Flanxiyum001/Max/pull/1?token=abc",
-     "https://github.com/Flanxiyum001/Max/pull/0"],
+    [
+        "http://github.com/Flanxiyum001/Max/pull/1",
+        "https://github.com/Flanxiyum001/other/pull/1",
+        "https://github.com.evil.test/Flanxiyum001/Max/pull/1",
+        "https://github.com/Flanxiyum001/Max/pull/1?token=abc",
+        "https://github.com/Flanxiyum001/Max/pull/0",
+    ],
 )
 def test_mismatched_pr_urls_rejected(url: str) -> None:
     w = PCWorkflow("task-3", DEVICE, "Flanxiyum001/Max")
