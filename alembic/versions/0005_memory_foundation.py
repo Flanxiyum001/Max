@@ -1,7 +1,7 @@
 """Add owner-scoped review-first MAX memories.
 
-Revision ID: 0004_memory_foundation
-Revises: 0003_independent_observer
+Revision ID: 0005_memory_foundation
+Revises: 0004_connect_drafts
 """
 
 from __future__ import annotations
@@ -9,8 +9,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0004_memory_foundation"
-down_revision: str | None = "0003_independent_observer"
+revision: str = "0005_memory_foundation"
+down_revision: str | None = "0004_connect_drafts"
 branch_labels: str | None = None
 depends_on: str | None = None
 

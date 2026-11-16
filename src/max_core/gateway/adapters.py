@@ -103,6 +103,10 @@ class HTTPAdapter:
                     if len(chunks) + len(chunk) > MAX_RESPONSE_BYTES:
                         raise GatewayError("response_too_large")
                     chunks.extend(chunk)
+        except (httpx.ConnectError, httpx.ConnectTimeout):
+            # Connection establishment failed before any HTTP request was sent.
+            # Never classify read/write timeouts or interrupted responses as safe.
+            raise GatewayError("provider_unavailable", fallback_safe=True) from None
         except httpx.TimeoutException:
             raise GatewayError("timeout") from None
         except httpx.RequestError:

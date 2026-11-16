@@ -25,7 +25,7 @@ Source hashes preserve a comparison handle, **not** reconstructable source evide
 
 ## Migration and validation
 
-The only schema change is additive revision `0004_memory_foundation`, following `0003_independent_observer`. The CI pipeline applies all migrations to ephemeral PostgreSQL and runs Ruff lint/format, mypy, unit/security/integration tests and pip-audit on Python 3.11 and 3.13. A passed CI does not prove live memory sync, retention on backups, data classification, or real devices.
+The only schema change is additive revision `0005_memory_foundation`, following `0004_connect_drafts`. The CI pipeline applies all migrations to ephemeral PostgreSQL and runs Ruff lint/format, mypy, unit/security/integration tests and pip-audit on Python 3.11 and 3.13. A passed CI does not prove live memory sync, retention on backups, data classification, or real devices.
 
 Do not run migrations against production until there is an owner-approved backup, restore drill and rollback plan. **Downgrade drops all memory tables and data.**
 

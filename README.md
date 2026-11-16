@@ -111,6 +111,11 @@ permission to execute a tool. Plugin installation and the personal PC workflow
 unimplemented; their implementation sequence and device prerequisites are in
 the milestone document. No live MCP account or personal device was accessed.
 
+
+## Milestone 13 — opt-in safe cloud-to-local text trial (review branch)
+
+An additional [cloud-to-local fallback trial](docs/M13_LOCAL_FALLBACK_TRIAL.md) can reuse the existing gateway with a separately owner-verified OpenAI-compatible loopback model. Safe failover covers cloud 429/503 and definite connection-establishment errors only. It does not infer real locality from a proxy URL, install models, execute tools or make MAX autonomous. Real-device smoke tests and owner approval remain required.
+
 ## Milestone 12 — reviewed memory records (owner-review branch)
 
 A separate [provenance-first memory foundation](docs/M12_MEMORY_FOUNDATION.md) introduces SQL-backed **pending** suggestions, explicit owner approval, confidence decay and hard erasure. This is library-level work only: there is no automatic learning, graph/vector search, user-facing memory interface or deployed production database. Cloud/local model connections and MCP tool execution remain separate, unverified security gates.
