@@ -62,9 +62,8 @@ class GoldenCase:
             raise GoldenReplayError("invalid_case_id")
         if not isinstance(self.task, TaskKind) or not isinstance(self.route, RouteIdentity):
             raise GoldenReplayError("invalid_case_scope")
-        if (
-            not isinstance(self.catalogue_revision, str)
-            or not _REVISION.fullmatch(self.catalogue_revision)
+        if not isinstance(self.catalogue_revision, str) or not _REVISION.fullmatch(
+            self.catalogue_revision
         ):
             raise GoldenReplayError("invalid_catalogue_revision")
         if self.expected_text_sha256 is not None and (
@@ -76,9 +75,8 @@ class GoldenCase:
             raise GoldenReplayError("invalid_expected_tools")
         if not _valid_names(self.prohibited_tool_names):
             raise GoldenReplayError("invalid_prohibited_tools")
-        if (
-            self.expected_tool_names is not None
-            and set(self.expected_tool_names) & set(self.prohibited_tool_names)
+        if self.expected_tool_names is not None and set(self.expected_tool_names) & set(
+            self.prohibited_tool_names
         ):
             raise GoldenReplayError("conflicting_tool_assertions")
         if (
@@ -95,9 +93,7 @@ def _valid_names(names: tuple[str, ...]) -> bool:
     return (
         isinstance(names, tuple)
         and len(names) <= 16
-        and all(
-            isinstance(name, str) and _TOOL_NAME.fullmatch(name) is not None for name in names
-        )
+        and all(isinstance(name, str) and _TOOL_NAME.fullmatch(name) is not None for name in names)
         and len(names) == len(set(names))
     )
 
