@@ -49,7 +49,8 @@
       const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
       let state = "idle";
       let visibility = "active";
-      let frame = 0;
+      let timer = 0;
+      let stopped = false;
       let lastFrame = -Infinity;
       let width = 320;
       let height = 320;
@@ -74,6 +75,7 @@
         canvas.height = Math.round(height * ratio);
         context.setTransform(ratio, 0, 0, ratio, 0, 0);
         painted = false;
+        restart();
       }
       const resizeObserver = new ResizeObserver(resize);
       resizeObserver.observe(canvas);
@@ -138,9 +140,15 @@
         }
         context.globalAlpha = 1;
       }
-      function tick(now) {
-        frame = window.requestAnimationFrame(tick);
-        if (context) draw(now);
+      function tick() {
+        if (stopped || document.hidden || visibility === "hidden") return;
+        if (context) draw(performance.now());
+        timer = window.setTimeout(tick, motion.matches || visibility !== "active" ? 1000 : 34);
+      }
+      function restart() {
+        clearTimeout(timer);
+        lastFrame = -Infinity;
+        if (!stopped) tick();
       }
       function refresh() {
         surface.className = visibility === "active" ? "" : visibility;
@@ -151,6 +159,7 @@
           "aria-label", "MAX assistant " + (visibility === "active" ? state : visibility)
         );
         painted = false;
+        restart();
       }
       window.MAXOrb = Object.freeze({
         setView(view) {
@@ -161,12 +170,12 @@
           refresh();
           return true;
         },
-        stop() { cancelAnimationFrame(frame); frame = 0; }
+        stop() { stopped = true; clearTimeout(timer); timer = 0; }
       });
-      document.addEventListener("visibilitychange", () => { painted = false; });
+      document.addEventListener("visibilitychange", () => { painted = false; restart(); });
+      motion.addEventListener("change", restart);
       resize();
       refresh();
-      frame = requestAnimationFrame(tick);
     })();
   </script>
 </body>
