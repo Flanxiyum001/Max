@@ -7,7 +7,16 @@ from secrets import token_hex
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi import status as http_status
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from starlette.middleware.base import RequestResponseEndpoint
