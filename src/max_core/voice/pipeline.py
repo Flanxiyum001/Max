@@ -139,7 +139,11 @@ class VoiceTurnPipeline:
                 while (sentence := await queue.get()) is not None:
                     chunks += 1
                     async for frame in tts.stream(sentence):
-                        if not isinstance(frame, bytes) or not frame or len(frame) > MAX_OUTPUT_FRAME_BYTES:
+                        if (
+                            not isinstance(frame, bytes)
+                            or not frame
+                            or len(frame) > MAX_OUTPUT_FRAME_BYTES
+                        ):
                             raise VoiceError("invalid_speech_frame")
                         await sink.play(frame)
                         frames += 1
@@ -162,7 +166,9 @@ class VoiceTurnPipeline:
         active = asyncio.create_task(work())
         interrupt_waiter = asyncio.create_task(interrupt.wait())
         try:
-            done, _ = await asyncio.wait({active, interrupt_waiter}, return_when=asyncio.FIRST_COMPLETED)
+            done, _ = await asyncio.wait(
+                {active, interrupt_waiter}, return_when=asyncio.FIRST_COMPLETED
+            )
             if interrupt_waiter in done and interrupt.is_set():
                 active.cancel()
                 await asyncio.gather(active, return_exceptions=True)
