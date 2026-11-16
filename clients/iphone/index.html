@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#071624">
+  <meta name="color-scheme" content="dark">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="stylesheet" href="./app.css">
+  <script src="./app.js" defer></script>
+  <title>MAX — Mobile Command</title>
+</head>
+<body>
+  <main class="shell">
+    <header class="top">
+      <div class="brand"><div class="mark" aria-hidden="true">✦</div><div><strong>MAX</strong><span>PERSONAL ASSISTANT</span></div></div>
+      <div class="connection" id="connection" role="status" aria-live="polite">Not connected</div>
+    </header>
+    <div class="headline">
+      <p class="eyebrow">MOBILE COMMAND</p>
+      <h1>Keep MAX close.</h1>
+      <p class="lede">Voice, memory, and trusted decisions — one focused space.</p>
+    </div>
+
+    <section class="panel" data-view="voice" aria-labelledby="voice-title">
+      <div class="panel-head"><span class="eyebrow">01 / VOICE</span><h2 id="voice-title">Speak naturally.</h2></div>
+      <div class="voice-stage">
+        <div class="voice-orb" aria-hidden="true"><div class="voice-core"></div></div>
+        <button id="ptt" class="ptt" type="button" aria-describedby="mic-note">Hold to test microphone</button>
+        <p id="mic-state" class="muted" role="status" aria-live="polite">Microphone is off</p>
+        <p id="mic-note" class="fine">This prototype tests local capture only. It never sends or saves recordings.</p>
+      </div>
+    </section>
+
+    <section class="panel" data-view="memory" aria-labelledby="memory-title" hidden>
+      <div class="panel-head"><span class="eyebrow">02 / MEMORY</span><h2 id="memory-title">Your memory, your call.</h2></div>
+      <p class="muted">Review suggestions one at a time. No memory changes happen here yet.</p>
+      <div class="queue" id="memory-card" aria-live="polite"><div class="empty">Connect an authenticated MAX Core to review suggestions.</div></div>
+      <div class="queue-controls"><button id="previous" type="button" disabled>Previous</button><span id="queue-count">0 / 0</span><button id="next" type="button" disabled>Next</button></div>
+    </section>
+
+    <section class="panel" data-view="approvals" aria-labelledby="approvals-title" hidden>
+      <div class="panel-head"><span class="eyebrow">03 / TRUST</span><h2 id="approvals-title">Every action, accountable.</h2></div>
+      <p class="muted">Pending actions can be viewed here when the secure mobile API is connected. Approvals require a separate, fresh MAX Trust challenge.</p>
+      <div class="approval-list" id="approvals-list" aria-live="polite"><div class="empty">No authenticated approval feed connected.</div></div>
+      <p class="fine">Notifications never approve actions, and this client does not store approval secrets.</p>
+    </section>
+
+    <nav class="nav" aria-label="Sections">
+      <button class="tab selected" type="button" data-tab="voice" aria-current="page"><span aria-hidden="true">◉</span>Voice</button>
+      <button class="tab" type="button" data-tab="memory"><span aria-hidden="true">◇</span>Memory</button>
+      <button class="tab" type="button" data-tab="approvals"><span aria-hidden="true">⬡</span>Trust</button>
+    </nav>
+  </main>
+</body>
+</html>
