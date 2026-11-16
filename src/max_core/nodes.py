@@ -89,10 +89,13 @@ def _public_key(encoded: str) -> ec.EllipticCurvePublicKey:
             loaded.curve, ec.SECP256R1
         ):
             raise NodeError("unsupported_device_key")
-        if loaded.public_bytes(
-            encoding=serialization.Encoding.DER,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo,
-        ) != raw:
+        if (
+            loaded.public_bytes(
+                encoding=serialization.Encoding.DER,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo,
+            )
+            != raw
+        ):
             raise NodeError("noncanonical_device_key")
         return loaded
     except (ValueError, TypeError):
@@ -106,17 +109,14 @@ def challenge_payload(
     _owner(owner_id)
     if purpose not in {"enroll", "authenticate"}:
         raise NodeError("invalid_challenge_purpose")
-    if not all(isinstance(x, str) and re.fullmatch(r"[0-9a-f-]{36}", x) for x in
-               (device_id, challenge_id)):
+    if not all(
+        isinstance(x, str) and re.fullmatch(r"[0-9a-f-]{36}", x) for x in (device_id, challenge_id)
+    ):
         raise NodeError("invalid_challenge_identity")
     if len(_decode(nonce, ceiling=64)) != 32:
         raise NodeError("invalid_challenge_nonce")
-    return (
-        b"MAX-NODE-P256-V1\x00"
-        + b"\x00".join(
-            part.encode("ascii")
-            for part in (owner_id, device_id, challenge_id, purpose, nonce)
-        )
+    return b"MAX-NODE-P256-V1\x00" + b"\x00".join(
+        part.encode("ascii") for part in (owner_id, device_id, challenge_id, purpose, nonce)
     )
 
 
@@ -226,9 +226,7 @@ class NodeRegistry:
             digest = hashlib.sha256(ticket.nonce.encode("ascii")).hexdigest()
             if not compare_digest(challenge.nonce_sha256, digest):
                 raise NodeError("challenge_binding_mismatch")
-            payload = challenge_payload(
-                owner_id, node.id, challenge.id, purpose, ticket.nonce
-            )
+            payload = challenge_payload(owner_id, node.id, challenge.id, purpose, ticket.nonce)
             try:
                 _public_key(node.public_key_b64url).verify(
                     signature, payload, ec.ECDSA(hashes.SHA256())

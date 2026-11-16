@@ -34,17 +34,13 @@ def new_key() -> tuple[ec.EllipticCurvePrivateKey, str]:
     return private, b64(public)
 
 
-def sign(
-    private: ec.EllipticCurvePrivateKey, owner: str, ticket: object, purpose: str
-) -> str:
+def sign(private: ec.EllipticCurvePrivateKey, owner: str, ticket: object, purpose: str) -> str:
     from max_core.nodes import ChallengeTicket
 
     assert isinstance(ticket, ChallengeTicket)
     return b64(
         private.sign(
-            challenge_payload(
-                owner, ticket.device_id, ticket.challenge_id, purpose, ticket.nonce
-            ),
+            challenge_payload(owner, ticket.device_id, ticket.challenge_id, purpose, ticket.nonce),
             ec.ECDSA(hashes.SHA256()),
         )
     )
@@ -60,13 +56,14 @@ def test_enroll_authenticate_and_replay_deny(registry: NodeRegistry) -> None:
     with pytest.raises(NodeError, match="challenge_not_pending"):
         registry.finish_enrollment("owner", ticket, sign(private, "owner", ticket, "enroll"))
     auth = registry.begin_authentication("owner", node.id)
-    assert registry.verify_authentication(
-        "owner", auth, sign(private, "owner", auth, "authenticate")
-    ).state == "active"
-    with pytest.raises(NodeError, match="challenge_not_pending"):
+    assert (
         registry.verify_authentication(
             "owner", auth, sign(private, "owner", auth, "authenticate")
-        )
+        ).state
+        == "active"
+    )
+    with pytest.raises(NodeError, match="challenge_not_pending"):
+        registry.verify_authentication("owner", auth, sign(private, "owner", auth, "authenticate"))
 
 
 def test_forged_key_wrong_owner_and_purpose_denied(registry: NodeRegistry) -> None:
@@ -76,16 +73,13 @@ def test_forged_key_wrong_owner_and_purpose_denied(registry: NodeRegistry) -> No
     with pytest.raises(NodeError, match="node_not_found"):
         registry.finish_enrollment("other", ticket, sign(private, "other", ticket, "enroll"))
     with pytest.raises(NodeError, match="invalid_device_signature"):
-        registry.finish_enrollment(
-            "owner", ticket, sign(wrong_private, "owner", ticket, "enroll")
-        )
+        registry.finish_enrollment("owner", ticket, sign(wrong_private, "owner", ticket, "enroll"))
     with pytest.raises(NodeError, match="invalid_device_signature"):
-        registry.finish_enrollment(
-            "owner", ticket, sign(private, "owner", ticket, "authenticate")
-        )
-    assert registry.finish_enrollment(
-        "owner", ticket, sign(private, "owner", ticket, "enroll")
-    ).state == "active"
+        registry.finish_enrollment("owner", ticket, sign(private, "owner", ticket, "authenticate"))
+    assert (
+        registry.finish_enrollment("owner", ticket, sign(private, "owner", ticket, "enroll")).state
+        == "active"
+    )
 
 
 def test_revoke_invalidates_pending_authentication(registry: NodeRegistry) -> None:
@@ -95,9 +89,7 @@ def test_revoke_invalidates_pending_authentication(registry: NodeRegistry) -> No
     auth = registry.begin_authentication("owner", node.id)
     registry.revoke("owner", node.id)
     with pytest.raises(NodeError, match="device_inactive"):
-        registry.verify_authentication(
-            "owner", auth, sign(private, "owner", auth, "authenticate")
-        )
+        registry.verify_authentication("owner", auth, sign(private, "owner", auth, "authenticate"))
     with pytest.raises(NodeError, match="device_inactive"):
         registry.begin_authentication("owner", node.id)
 

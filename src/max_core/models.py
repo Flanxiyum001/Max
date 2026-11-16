@@ -243,9 +243,7 @@ class DeviceChallenge(Base):
     """One-use hashed challenge, bound to owner, node and purpose."""
 
     __tablename__ = "max_device_challenges"
-    __table_args__ = (
-        Index("ix_node_challenges_device", "owner_id", "device_id"),
-    )
+    __table_args__ = (Index("ix_node_challenges_device", "owner_id", "device_id"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     owner_id: Mapped[str] = mapped_column(String(64), nullable=False)
