@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from secrets import token_hex
+from typing import Literal
 from typing import Annotated
 from uuid import UUID
 
@@ -14,6 +15,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import JSONResponse, Response
 
 from max_core.config import Settings
+from max_core.connect import ConnectService, DraftView
 from max_core.observability import configure_access_logger
 from max_core.security import BootstrapBearerAuth
 from max_core.store import StoreError, TaskStore, TaskView, create_store
@@ -26,6 +28,16 @@ class OwnerApprovalDecision(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     approve: StrictBool
+
+
+class NewConnectEvent(BaseModel):
+    """Only fixed metadata; no arbitrary instructions, URLs, tokens or webhook bodies."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    source: Literal["github_ci", "calendar", "local_build"]
+    kind: Literal["ci.failed", "calendar.upcoming", "build.finished"]
+    event_key: str = Field(min_length=8, max_length=100, pattern=r"^[A-Za-z0-9._:-]+$")
+    resource_key: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9._:/#-]+$")
 
 
 class NewTask(BaseModel):
@@ -68,6 +80,16 @@ def require_timeline(request: Request) -> TaskTimeline:
     return timeline
 
 
+def require_connect(request: Request) -> ConnectService:
+    service: ConnectService | None = request.app.state.connect_service
+    if service is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Connect persistence is not configured",
+        )
+    return service
+
+
 def create_app(settings: Settings | None = None, store: TaskStore | None = None) -> FastAPI:
     """Fail configuration validation before constructing a service."""
     config = settings if settings is not None else Settings.from_env()
@@ -95,6 +117,7 @@ def create_app(settings: Settings | None = None, store: TaskStore | None = None)
         TaskTimeline(task_store, config.bearer_token) if task_store is not None else None
     )
     app.state.trust_service = TrustService(task_store.engine) if task_store is not None else None
+    app.state.connect_service = ConnectService(task_store.engine) if task_store is not None else None
 
     @app.middleware("http")
     async def safe_access_log(request: Request, call_next: RequestResponseEndpoint) -> Response:
@@ -215,5 +238,42 @@ def create_app(settings: Settings | None = None, store: TaskStore | None = None)
             return trust.decide("owner", str(approval_id), decision.approve)
         except TrustError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.code) from None
+
+    @app.post("/v1/connect/events", status_code=201, dependencies=[Depends(auth)])
+    def ingest_connect_event(
+        payload: NewConnectEvent,
+        response: Response,
+        connect_service: Annotated[ConnectService, Depends(require_connect)],
+    ) -> DraftView:
+        try:
+            draft, created = connect_service.ingest(
+                "owner",
+                payload.source,
+                payload.kind,
+                payload.event_key,
+                payload.resource_key,
+            )
+        except StoreError as exc:
+            raise _error(exc) from None
+        if not created:
+            response.status_code = 200
+        return draft
+
+    @app.get("/v1/connect/drafts", dependencies=[Depends(auth)])
+    def pending_connect_drafts(
+        connect_service: Annotated[ConnectService, Depends(require_connect)],
+        limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    ) -> list[DraftView]:
+        return connect_service.list_pending("owner", limit)
+
+    @app.post("/v1/connect/drafts/{draft_id}/dismiss", dependencies=[Depends(auth)])
+    def dismiss_connect_draft(
+        draft_id: UUID,
+        connect_service: Annotated[ConnectService, Depends(require_connect)],
+    ) -> DraftView:
+        try:
+            return connect_service.dismiss("owner", str(draft_id))
+        except StoreError as exc:
+            raise _error(exc) from None
 
     return app
