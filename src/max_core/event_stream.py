@@ -124,8 +124,8 @@ class LocalEventBus:
             while not queue.empty():
                 queue.get_nowait()
             queue.put_nowait(None)
-        elif queue.empty() or queue._queue[0] is not None:
-            # Never recover silently after overflow.
+        else:
+            # A preceding overflow sentinel stays ahead of later events.
             queue.put_nowait(event)
 
     def publish(self, kind: str, task_id: str, state: str, revision: int) -> int:
