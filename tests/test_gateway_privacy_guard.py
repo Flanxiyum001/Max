@@ -9,12 +9,7 @@ from decimal import Decimal
 import httpx
 import pytest
 
-from max_core.gateway import (
-    ChatMessage,
-    Gateway,
-    GatewayError,
-    HTTPAdapter,
-)
+from max_core.gateway import ChatMessage, Gateway, GatewayError, HTTPAdapter
 from max_core.gateway.privacy_guard import contains_high_confidence_secret
 from tests.test_gateway import cloud, local, request, run_complete
 
