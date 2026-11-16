@@ -87,16 +87,20 @@ class SemanticMemoryIndex:
         self._postgres()
         try:
             with self.engine.begin() as connection:
-                row = connection.execute(
-                    text(
-                        "SELECT revision FROM max_memories "
-                        "WHERE id=:id AND owner_id=:owner AND scope=:scope "
-                        "AND state='approved' "
-                        "AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP) "
-                        "FOR UPDATE"
-                    ),
-                    {"id": memory_id, "owner": owner_id, "scope": scope},
-                ).mappings().first()
+                row = (
+                    connection.execute(
+                        text(
+                            "SELECT revision FROM max_memories "
+                            "WHERE id=:id AND owner_id=:owner AND scope=:scope "
+                            "AND state='approved' "
+                            "AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP) "
+                            "FOR UPDATE"
+                        ),
+                        {"id": memory_id, "owner": owner_id, "scope": scope},
+                    )
+                    .mappings()
+                    .first()
+                )
                 if row is None or row["revision"] != expected_revision:
                     raise SemanticMemoryError("memory_not_approved_or_stale")
                 connection.execute(
@@ -139,28 +143,32 @@ class SemanticMemoryIndex:
         self._postgres()
         try:
             with self.engine.connect() as connection:
-                rows = connection.execute(
-                    text(
-                        "SELECT m.id, m.subject_key, m.content, "
-                        "(1 - (e.embedding <=> CAST(:vector AS vector(384)))) AS similarity "
-                        "FROM max_memory_embeddings e "
-                        "JOIN max_memories m ON m.id=e.memory_id "
-                        "WHERE m.owner_id=:owner AND m.scope=:scope "
-                        "AND e.owner_id=m.owner_id AND e.scope=m.scope "
-                        "AND e.embedding_model=:model AND e.revision=m.revision "
-                        "AND m.state='approved' "
-                        "AND (m.expires_at IS NULL OR m.expires_at > CURRENT_TIMESTAMP) "
-                        "ORDER BY e.embedding <=> CAST(:vector AS vector(384)), m.id "
-                        "LIMIT :limit"
-                    ),
-                    {
-                        "owner": owner_id,
-                        "scope": scope,
-                        "model": embedding_model,
-                        "vector": vector,
-                        "limit": limit,
-                    },
-                ).mappings().all()
+                rows = (
+                    connection.execute(
+                        text(
+                            "SELECT m.id, m.subject_key, m.content, "
+                            "(1 - (e.embedding <=> CAST(:vector AS vector(384)))) AS similarity "
+                            "FROM max_memory_embeddings e "
+                            "JOIN max_memories m ON m.id=e.memory_id "
+                            "WHERE m.owner_id=:owner AND m.scope=:scope "
+                            "AND e.owner_id=m.owner_id AND e.scope=m.scope "
+                            "AND e.embedding_model=:model AND e.revision=m.revision "
+                            "AND m.state='approved' "
+                            "AND (m.expires_at IS NULL OR m.expires_at > CURRENT_TIMESTAMP) "
+                            "ORDER BY e.embedding <=> CAST(:vector AS vector(384)), m.id "
+                            "LIMIT :limit"
+                        ),
+                        {
+                            "owner": owner_id,
+                            "scope": scope,
+                            "model": embedding_model,
+                            "vector": vector,
+                            "limit": limit,
+                        },
+                    )
+                    .mappings()
+                    .all()
+                )
                 return tuple(
                     SemanticMemoryHit(
                         memory_id=row["id"],

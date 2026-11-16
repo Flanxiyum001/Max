@@ -42,13 +42,19 @@ def test_non_postgres_backend_never_executes_semantic_queries() -> None:
     index = SemanticMemoryIndex(create_engine("sqlite+pysqlite:///:memory:"))
     with pytest.raises(SemanticMemoryError, match="postgresql_required"):
         index.search(
-            owner_id="owner", scope="personal", embedding_model="local-384",
+            owner_id="owner",
+            scope="personal",
+            embedding_model="local-384",
             query_embedding=values(),
         )
     with pytest.raises(SemanticMemoryError, match="postgresql_required"):
         index.upsert(
-            owner_id="owner", scope="personal", memory_id="id",
-            expected_revision=2, embedding_model="local-384", embedding=values(),
+            owner_id="owner",
+            scope="personal",
+            memory_id="id",
+            expected_revision=2,
+            embedding_model="local-384",
+            embedding=values(),
         )
 
 
@@ -56,11 +62,16 @@ def test_invalid_owner_and_limits_fail_before_db_io() -> None:
     index = SemanticMemoryIndex(create_engine("sqlite+pysqlite:///:memory:"))
     with pytest.raises(SemanticMemoryError, match="invalid_memory_scope"):
         index.search(
-            owner_id="../owner", scope="personal", embedding_model="local-384",
+            owner_id="../owner",
+            scope="personal",
+            embedding_model="local-384",
             query_embedding=values(),
         )
     with pytest.raises(SemanticMemoryError, match="invalid_search_limit"):
         index.search(
-            owner_id="owner", scope="personal", embedding_model="local-384",
-            query_embedding=values(), limit=1000,
+            owner_id="owner",
+            scope="personal",
+            embedding_model="local-384",
+            query_embedding=values(),
+            limit=1000,
         )
