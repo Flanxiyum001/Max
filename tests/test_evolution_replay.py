@@ -170,7 +170,7 @@ def test_malformed_observations_fail_closed_with_sanitized_errors() -> None:
     base = observed()
     malformed = (
         replace(base, case_id=["not-a-string"]),
-        replace(base, response=replace(base.response, content="\\ud800")),
+        replace(base, response=replace(base.response, content=chr(0xD800))),
         replace(
             base,
             response=replace(
