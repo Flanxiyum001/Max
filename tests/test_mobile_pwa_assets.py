@@ -48,7 +48,7 @@ def test_private_snapshots_are_read_only_and_never_offline_cached() -> None:
     assert 'cache: "no-store"' in js
     assert "document.hidden" in js
     assert "clearPrivateData();" in js
-    assert 'audio: { echoCancellation: true, noiseSuppression: true }' in js
+    assert "audio: { echoCancellation: true, noiseSuppression: true }" in js
     assert "getTracks()" in js and "track.stop()" in js
     for forbidden in ("localStorage", "sessionStorage", "innerHTML", "eval(", "postMessage("):
         assert forbidden not in js
