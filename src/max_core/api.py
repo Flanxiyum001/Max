@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from starlette.middleware.base import RequestResponseEndpoint
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import JSONResponse, Response
+from starlette.types import Message
 
 from max_core.config import Settings
 from max_core.connect import ConnectService, DraftView
@@ -336,7 +337,7 @@ def create_app(settings: Settings | None = None, store: TaskStore | None = None)
         except EventStreamError:
             await socket.close(code=1013)
             return
-        inbound: asyncio.Task[dict[str, object]] | None = None
+        inbound: asyncio.Task[Message] | None = None
         try:
             await socket.accept(subprotocol="max-events-v1")
             await socket.send_json(
