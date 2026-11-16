@@ -152,7 +152,9 @@ def test_socket_refuses_replay_bad_origin_and_missing_protocol(store: TaskStore)
             ):
                 pass
         with pytest.raises(WebSocketDisconnect):
-            with client.websocket_connect("/v1/events/ws", headers={"Host": "localhost:8765", "Origin": ORIGIN}):
+            with client.websocket_connect(
+                "/v1/events/ws", headers={"Host": "localhost:8765", "Origin": ORIGIN}
+            ):
                 pass
 
 
