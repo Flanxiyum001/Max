@@ -106,7 +106,7 @@ class HTTPAdapter:
         except (httpx.ConnectError, httpx.ConnectTimeout):
             # Connection establishment failed before any HTTP request was sent.
             # Never classify read/write timeouts or interrupted responses as safe.
-            raise GatewayError("connection_failed", fallback_safe=True) from None
+            raise GatewayError("provider_unavailable", fallback_safe=True) from None
         except httpx.TimeoutException:
             raise GatewayError("timeout") from None
         except httpx.RequestError:
