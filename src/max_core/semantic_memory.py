@@ -41,7 +41,10 @@ def vector_literal(values: Sequence[float]) -> str:
         or any(type(value) not in (int, float) for value in values)
     ):
         raise SemanticMemoryError("invalid_embedding")
-    floats = [float(value) for value in values]
+    try:
+        floats = [float(value) for value in values]
+    except (ValueError, OverflowError):
+        raise SemanticMemoryError("invalid_embedding") from None
     if not all(math.isfinite(value) for value in floats) or not any(floats):
         raise SemanticMemoryError("invalid_embedding")
     return json.dumps(floats, ensure_ascii=True, separators=(",", ":"), allow_nan=False)

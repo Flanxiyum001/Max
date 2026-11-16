@@ -75,3 +75,9 @@ def test_invalid_owner_and_limits_fail_before_db_io() -> None:
             query_embedding=values(),
             limit=1000,
         )
+
+
+def test_huge_integer_vector_is_safely_rejected() -> None:
+    values = [0.5] * 383 + [10**400]
+    with pytest.raises(SemanticMemoryError, match="invalid_embedding"):
+        vector_literal(values)

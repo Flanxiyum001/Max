@@ -142,8 +142,12 @@ def _arguments_hash(
             or (type_name == "boolean" and type(value) is bool)
             or (type_name == "null" and value is None)
         )
-        if not valid or ("enum" in descriptor and value not in descriptor["enum"]):
+        if not valid:
             raise MCPPolicyError("unreviewed_arguments")
+        if "enum" in descriptor:
+            choices = descriptor["enum"]
+            if not isinstance(choices, list) or value not in choices:
+                raise MCPPolicyError("unreviewed_arguments")
     try:
         canonical = json.dumps(
             proposal.arguments, sort_keys=True, separators=(",", ":"), allow_nan=False
