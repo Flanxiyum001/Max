@@ -88,8 +88,9 @@ def test_ticket_api_requires_bearer_and_accepted_origin(store: TaskStore) -> Non
     ) as client:
         assert client.post("/v1/events/ticket").status_code == 401
         assert (
-            client.post("/v1/events/ticket", headers={**AUTH, "Origin": "https://evil.test"})
-            .status_code
+            client.post(
+                "/v1/events/ticket", headers={**AUTH, "Origin": "https://evil.test"}
+            ).status_code
             == 403
         )
         assert ticket(client)
@@ -151,9 +152,7 @@ def test_socket_refuses_replay_bad_origin_and_missing_protocol(store: TaskStore)
             ):
                 pass
         with pytest.raises(WebSocketDisconnect):
-            with client.websocket_connect(
-                "/v1/events/ws", headers={"Origin": ORIGIN}
-            ):
+            with client.websocket_connect("/v1/events/ws", headers={"Origin": ORIGIN}):
                 pass
 
 
