@@ -163,7 +163,7 @@ def test_postgres_readiness_and_historical_legacy_rows_preserved(postgres_store:
     assert postgres_store.ready()
     with postgres_store.engine.connect() as connection:
         assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
-            "0005_memory_foundation"
+            "0006_device_nodes"
         )
     columns = {
         item["name"]
