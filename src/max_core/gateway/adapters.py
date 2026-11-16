@@ -13,10 +13,12 @@ from max_core.gateway.contracts import (
     GatewayError,
     GatewayRequest,
     GatewayResponse,
+    InferenceDestination,
     ModelSpec,
     StreamEvent,
 )
 from max_core.gateway.normalize import normalize_anthropic, normalize_openai
+from max_core.gateway.privacy_guard import contains_high_confidence_secret
 from max_core.gateway.streaming import anthropic_events, openai_events, sse_frames
 
 MAX_RESPONSE_BYTES = 1_000_000
@@ -88,6 +90,13 @@ class HTTPAdapter:
         self.client = client
 
     async def complete(self, spec: ModelSpec, request: GatewayRequest) -> GatewayResponse:
+        # Defence in depth: even a direct adapter call must not leak known
+        # credential patterns. This is not an exhaustive secret classifier.
+        if (
+            spec.inference_destination == InferenceDestination.CLOUD
+            and contains_high_confidence_secret(request.messages)
+        ):
+            raise GatewayError("cloud_sensitive_content_blocked")
         try:
             async with self.client.stream(
                 "POST",
@@ -124,6 +133,11 @@ class HTTPAdapter:
         return normalize_anthropic(data, request.request_id, spec)
 
     async def stream(self, spec: ModelSpec, request: GatewayRequest) -> AsyncIterator[StreamEvent]:
+        if (
+            spec.inference_destination == InferenceDestination.CLOUD
+            and contains_high_confidence_secret(request.messages)
+        ):
+            raise GatewayError("cloud_sensitive_content_blocked")
         try:
             async with self.client.stream(
                 "POST",
