@@ -152,13 +152,15 @@ def test_unknown_duplicate_and_ambiguous_fail_closed() -> None:
 
 
 def test_malformed_remote_enum_is_a_sanitized_denial() -> None:
-    tool = observed({
-        "type": "object",
-        "properties": {
-            "task_id": {"type": "string", "enum": 123},
-            "quiet": {"type": "boolean"},
-        },
-        "required": ["task_id"],
-    })
+    tool = observed(
+        {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "enum": 123},
+                "quiet": {"type": "boolean"},
+            },
+            "required": ["task_id"],
+        }
+    )
     with pytest.raises(MCPPolicyError, match="unreviewed_arguments"):
         review_gateway_proposals(context(), response(), [(tool, policy(tool))])
