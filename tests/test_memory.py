@@ -68,9 +68,12 @@ def test_decay_and_expiry_never_strengthen_inferences(memory: MemoryStore) -> No
     memory.review("owner-a", ident, expected_revision=1, approve=True, now=NOW)
     month = memory.retrieve("owner-a", scope="personal", now=NOW + timedelta(days=30))
     assert month[0].effective_confidence == 500
-    assert memory.retrieve(
-        "owner-a", scope="personal", minimum_confidence=501, now=NOW + timedelta(days=30)
-    ) == ()
+    assert (
+        memory.retrieve(
+            "owner-a", scope="personal", minimum_confidence=501, now=NOW + timedelta(days=30)
+        )
+        == ()
+    )
     assert memory.retrieve("owner-a", scope="personal", now=NOW + timedelta(days=90)) == ()
 
 
@@ -78,8 +81,12 @@ def test_explicit_user_correction_does_not_decay(memory: MemoryStore) -> None:
     ident = propose(memory)
     memory.review("owner-a", ident, expected_revision=1, approve=True, now=NOW)
     changed = memory.correct(
-        "owner-a", ident, expected_revision=2, content="Arch Linux",
-        source_sha256=SOURCE, now=NOW + timedelta(days=4)
+        "owner-a",
+        ident,
+        expected_revision=2,
+        content="Arch Linux",
+        source_sha256=SOURCE,
+        now=NOW + timedelta(days=4),
     )
     assert changed.revision == 3
     assert changed.source_kind == "explicit_user_correction"
@@ -90,7 +97,9 @@ def test_explicit_user_correction_does_not_decay(memory: MemoryStore) -> None:
     assert result[0].memory.content == "Arch Linux"
     assert "Linux" not in repr(changed)
     assert [event.action for event in memory.audit("owner-a", ident)] == [
-        "proposed", "approved", "corrected"
+        "proposed",
+        "approved",
+        "corrected",
     ]
 
 
@@ -126,8 +135,7 @@ def test_optimistic_revision_and_uniqueness(memory: MemoryStore) -> None:
     memory.review("owner-a", ident, expected_revision=1, approve=True, now=NOW)
     with pytest.raises(MemoryStoreError, match="stale_memory_correction"):
         memory.correct(
-            "owner-a", ident, expected_revision=1, content="wrong",
-            source_sha256=SOURCE, now=NOW
+            "owner-a", ident, expected_revision=1, content="wrong", source_sha256=SOURCE, now=NOW
         )
     with pytest.raises(MemoryStoreError, match="stale_memory_delete"):
         memory.delete("owner-a", ident, expected_revision=1)
@@ -149,16 +157,21 @@ def test_hard_deletion_erases_content_and_revision_audit(memory: MemoryStore) ->
 def test_review_queue_returns_five_recent_candidates(memory: MemoryStore) -> None:
     for index in range(7):
         propose(
-            memory, key=f"learned.fact{index}", value=f"fact{index}",
-            when=NOW + timedelta(days=index)
+            memory,
+            key=f"learned.fact{index}",
+            value=f"fact{index}",
+            when=NOW + timedelta(days=index),
         )
     queue = memory.review_queue(
         "owner-a", scope="personal", now=NOW + timedelta(days=7), days=7, limit=5
     )
     assert len(queue) == 5
     assert [x.subject_key for x in queue] == [
-        "learned.fact6", "learned.fact5", "learned.fact4", "learned.fact3",
-        "learned.fact2"
+        "learned.fact6",
+        "learned.fact5",
+        "learned.fact4",
+        "learned.fact3",
+        "learned.fact2",
     ]
 
 
@@ -175,9 +188,7 @@ def test_review_queue_returns_five_recent_candidates(memory: MemoryStore) -> Non
         ({"confidence": 1001}, "invalid_memory_confidence"),
     ],
 )
-def test_invalid_input_fail_closed(
-    memory: MemoryStore, bad: dict[str, object], code: str
-) -> None:
+def test_invalid_input_fail_closed(memory: MemoryStore, bad: dict[str, object], code: str) -> None:
     kwargs: dict[str, object] = {
         "owner_id": "owner-a",
         "scope": "personal",
