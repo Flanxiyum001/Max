@@ -134,7 +134,6 @@ class HeartbeatRegistry:
             raise DeviceWorkflowError("invalid_clock")
         if self._last_clock is not None and now_ms < self._last_clock:
             raise DeviceWorkflowError("clock_regressed")
-        self._last_clock = now_ms
         key = self._keys.get(heartbeat.device_id)
         if (
             key is None
@@ -162,6 +161,7 @@ class HeartbeatRegistry:
             raise DeviceWorkflowError("replayed_heartbeat")
         self._nonces[identity] = now_ms
         self._records[heartbeat.device_id] = VerifiedHeartbeat(heartbeat, now_ms)
+        self._last_clock = now_ms
 
     def current(self, device_id: str, *, now_ms: int) -> VerifiedHeartbeat | None:
         if type(now_ms) is not int or now_ms < 0:
@@ -291,7 +291,10 @@ class PCWorkflow:
         if (
             len(names) != len(set(names))
             or not _REQUIRED.issubset(names)
-            or any(item.revision != self.head_sha or item.status != CheckStatus.PASSED for item in evidence)
+            or any(
+                item.revision != self.head_sha or item.status != CheckStatus.PASSED
+                for item in evidence
+            )
         ):
             raise DeviceWorkflowError("ci_not_verified")
         self.phase = Phase.CI_VERIFIED
