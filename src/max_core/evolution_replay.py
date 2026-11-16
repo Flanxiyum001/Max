@@ -149,18 +149,27 @@ class OfflineGoldenSuite:
         for observation in observations:
             if (
                 not isinstance(observation, ReplayObservation)
+                or not isinstance(observation.case_id, str)
                 or observation.case_id not in known_ids
                 or not isinstance(observation.route, RouteIdentity)
+                or not isinstance(observation.catalogue_revision, str)
+                or len(observation.catalogue_revision) > 100
                 or not isinstance(observation.response, GatewayResponse)
                 or not isinstance(observation.response.content, str)
                 or len(observation.response.content) > 128_000
                 or not isinstance(observation.response.tool_proposals, tuple)
                 or any(
                     not isinstance(proposal, ToolProposal)
+                    or not isinstance(proposal.name, str)
+                    or _TOOL_NAME.fullmatch(proposal.name) is None
                     for proposal in observation.response.tool_proposals
                 )
             ):
                 raise GoldenReplayError("invalid_observation")
+            try:
+                observation.response.content.encode("utf-8")
+            except UnicodeEncodeError:
+                raise GoldenReplayError("invalid_observation") from None
             if observation.case_id in by_id:
                 raise GoldenReplayError("duplicate_observation")
             by_id[observation.case_id] = observation
