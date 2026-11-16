@@ -108,11 +108,7 @@ class OrbReducer:
             raise OrbError("invalid_orb_visibility_flags")
         if not owner_enabled:
             return OrbView(OrbState.IDLE, OrbVisibility.HIDDEN)
-        if (
-            not foreground
-            or quiet_mode
-            or focus != FocusState.ACCEPTS_NOTIFICATIONS
-        ):
+        if not foreground or quiet_mode or focus != FocusState.ACCEPTS_NOTIFICATIONS:
             return OrbView(OrbState.IDLE, OrbVisibility.PASSIVE)
         if self._last_event_ms is None or not 0 <= now_ms - self._last_event_ms <= self.ttl_ms:
             return OrbView(OrbState.IDLE, OrbVisibility.PASSIVE)
