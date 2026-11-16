@@ -138,6 +138,7 @@ class MemoryGatewayLoop:
         response = await self.gateway.complete(prepared)
         pending_id: str | None = None
         if candidate is not None:
+            assert trusted_owner_note is not None
             key, content = candidate
             try:
                 suggestion = self.memory.propose(
