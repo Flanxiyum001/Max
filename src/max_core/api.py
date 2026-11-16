@@ -286,7 +286,6 @@ def create_app(settings: Settings | None = None, store: TaskStore | None = None)
         except StoreError as exc:
             raise _error(exc) from None
 
-
     @app.post("/v1/events/ticket", dependencies=[Depends(auth)])
     def issue_event_ticket(request: Request) -> dict[str, str | int]:
         """Local bearer-authenticated one-use ticket; never expose in a URL."""
@@ -357,9 +356,7 @@ def create_app(settings: Settings | None = None, store: TaskStore | None = None)
                         return
                     await asyncio.wait_for(socket.send_json(event.payload()), timeout=5.0)
                 else:
-                    await asyncio.wait_for(
-                        socket.send_json({"type": "keepalive"}), timeout=5.0
-                    )
+                    await asyncio.wait_for(socket.send_json({"type": "keepalive"}), timeout=5.0)
         except (RuntimeError, TimeoutError):
             return
         finally:
