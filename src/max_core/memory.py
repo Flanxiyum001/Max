@@ -97,7 +97,9 @@ def _scope_args(owner_id: str, scope: str) -> None:
         raise MemoryStoreError("invalid_scope")
 
 
-def _content_args(key: str, content: str, source_kind: str, source_sha256: str, confidence: int) -> None:
+def _content_args(
+    key: str, content: str, source_kind: str, source_sha256: str, confidence: int
+) -> None:
     if not isinstance(key, str) or _KEY.fullmatch(key) is None:
         raise MemoryStoreError("invalid_subject_key")
     if not isinstance(content, str) or not 1 <= len(content.strip()) <= 2000:
@@ -284,7 +286,13 @@ class MemoryStore:
             session.delete(record)
 
     def review_queue(
-        self, owner_id: str, *, scope: str, days: int = 7, limit: int = 5, now: datetime | None = None
+        self,
+        owner_id: str,
+        *,
+        scope: str,
+        days: int = 7,
+        limit: int = 5,
+        now: datetime | None = None,
     ) -> tuple[MemoryView, ...]:
         _scope_args(owner_id, scope)
         if type(days) is not int or not 1 <= days <= 31:
@@ -341,9 +349,7 @@ class MemoryStore:
             selected = [
                 item for item in selected if item.effective_confidence >= minimum_confidence
             ]
-            selected.sort(
-                key=lambda item: (-item.effective_confidence, item.memory.subject_key)
-            )
+            selected.sort(key=lambda item: (-item.effective_confidence, item.memory.subject_key))
             return tuple(selected[:limit])
 
     def audit(self, owner_id: str, memory_id: str) -> tuple[MemoryAuditView, ...]:
