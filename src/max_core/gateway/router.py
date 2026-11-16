@@ -25,6 +25,7 @@ from max_core.gateway.contracts import (
 )
 from max_core.gateway.evaluation import OfflineEvaluationBook
 from max_core.gateway.normalize import actual_cost
+from max_core.gateway.privacy_guard import contains_high_confidence_secret
 from max_core.gateway.task_planner import (
     PlanningError,
     TaskKind,
@@ -155,6 +156,7 @@ class Gateway:
 
     def eligible(self, request: GatewayRequest) -> tuple[ModelSpec, ...]:
         result: list[ModelSpec] = []
+        blocked_cloud_text = contains_high_confidence_secret(request.messages)
         for spec in self._models:
             if request.allowed_models and spec.model_id not in request.allowed_models:
                 continue
@@ -172,7 +174,8 @@ class Gateway:
                 continue
             if spec.inference_destination == InferenceDestination.CLOUD:
                 if (
-                    not request.cloud_allowed
+                    blocked_cloud_text
+                    or not request.cloud_allowed
                     or request.local_only
                     or request.privacy in {Privacy.CONFIDENTIAL, Privacy.RESTRICTED}
                     or request.max_cost_usd is None
