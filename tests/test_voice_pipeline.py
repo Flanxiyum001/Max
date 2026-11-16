@@ -54,9 +54,15 @@ class Gateway:
 
 def test_voice_pipeline_committed_stt_and_streamed_speech() -> None:
     async def check() -> None:
-        gateway = Gateway([("start", ""), ("content_delta", "Good morning. Next"),
-                           ("content_delta", " sentence!"), ("tool_proposal", "ignored"),
-                           ("complete", "")])
+        gateway = Gateway(
+            [
+                ("start", ""),
+                ("content_delta", "Good morning. Next"),
+                ("content_delta", " sentence!"),
+                ("tool_proposal", "ignored"),
+                ("complete", ""),
+            ]
+        )
         tts, sink = TTS(), Sink()
         result = await VoiceTurnPipeline(gateway).run(
             audio(), STT(), lambda text: f"approved:{text}", tts, sink, asyncio.Event()
@@ -67,6 +73,7 @@ def test_voice_pipeline_committed_stt_and_streamed_speech() -> None:
         assert result.audio_frames == 2 and result.speech_chunks == 2
         assert result.first_audio_ms_after_transcript is not None
         assert sink.stops == 0
+
     asyncio.run(check())
 
 
@@ -78,6 +85,7 @@ def test_unfinished_gateway_stream_fails_closed_and_stops_audio() -> None:
                 audio(), STT(), lambda text: text, TTS(), sink, asyncio.Event()
             )
         assert sink.stops == 1
+
     asyncio.run(check())
 
 
@@ -90,15 +98,18 @@ def test_cancellation_during_stalled_gateway_closes_turn() -> None:
 
     async def check() -> None:
         stop, sink = asyncio.Event(), Sink()
-        turn = asyncio.create_task(VoiceTurnPipeline(StalledGateway()).run(
-            audio(), STT(), lambda text: text, TTS(), sink, stop
-        ))
+        turn = asyncio.create_task(
+            VoiceTurnPipeline(StalledGateway()).run(
+                audio(), STT(), lambda text: text, TTS(), sink, stop
+            )
+        )
         await asyncio.sleep(0)
         stop.set()
         result = await asyncio.wait_for(turn, timeout=0.5)
         assert result.interrupted
         assert sink.stops == 1
         assert sink.frames == []
+
     asyncio.run(check())
 
 
@@ -109,6 +120,7 @@ def test_limited_audio_rejects_oversized_frame() -> None:
     async def check() -> None:
         with pytest.raises(VoiceError, match="invalid_audio_frame"):
             _ = [part async for part in bounded_microphone(oversized())]
+
     asyncio.run(check())
 
 
@@ -121,6 +133,7 @@ def test_sentence_chunking_caps_unpunctuated_output() -> None:
         parts = [part async for part in sentence_chunks(chunks())]
         assert len(parts) >= 2
         assert " ".join(parts).replace("  ", " ") == ("A " * 105).strip()
+
     asyncio.run(check())
 
 
@@ -136,4 +149,5 @@ def test_already_interrupted_does_not_start_microphone_or_model() -> None:
             unavailable(), STT(), lambda text: text, TTS(), sink, event
         )
         assert result.interrupted and sink.stops == 1
+
     asyncio.run(check())
