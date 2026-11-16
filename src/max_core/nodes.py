@@ -98,6 +98,8 @@ def _public_key(encoded: str) -> ec.EllipticCurvePublicKey:
         ):
             raise NodeError("noncanonical_device_key")
         return loaded
+    except NodeError:
+        raise
     except (ValueError, TypeError):
         raise NodeError("invalid_device_key") from None
 
@@ -204,7 +206,7 @@ class NodeRegistry:
         signature = _decode(signature_b64url, ceiling=512)
         with self.sessions.begin() as session:
             node = self._locked(session, owner_id, ticket.device_id)
-            if node.state != ("pending" if purpose == "enroll" else "active"):
+            if node.state == "revoked":
                 raise NodeError("device_inactive")
             challenge = session.scalar(
                 select(DeviceChallenge)
@@ -218,6 +220,8 @@ class NodeRegistry:
             )
             if challenge is None or challenge.state != "pending":
                 raise NodeError("challenge_not_pending")
+            if node.state != ("pending" if purpose == "enroll" else "active"):
+                raise NodeError("device_inactive")
             expiry = challenge.expires_at
             if expiry.tzinfo is None:
                 expiry = expiry.replace(tzinfo=UTC)
