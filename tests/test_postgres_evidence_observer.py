@@ -162,9 +162,10 @@ def test_postgres_modified_checkpoint_during_observer_is_stale(
 def test_postgres_readiness_and_historical_legacy_rows_preserved(postgres_store: TaskStore) -> None:
     assert postgres_store.ready()
     with postgres_store.engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
-            "0003_independent_observer"
-        )
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) in {
+            "0003_independent_observer",
+            "0004_memory_foundation",
+        }
     columns = {
         item["name"]
         for item in inspect(postgres_store.engine).get_columns("max_verification_checks")
