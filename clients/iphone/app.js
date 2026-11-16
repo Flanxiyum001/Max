@@ -132,6 +132,7 @@
           data.memory_suggestions.length > 100 || data.pending_approvals.length > 100) {
         throw new Error("invalid_backend_snapshot");
       }
+      if (document.hidden || !document.hasFocus()) throw new Error("background_snapshot");
       // Whitelist display-only fields. Never render arbitrary HTML or links.
       suggestions = data.memory_suggestions.filter(x => x && typeof x.summary === "string");
       pending = data.pending_approvals.filter(x => x && typeof x.action === "string");
@@ -209,7 +210,11 @@
       stopCapture();
     }
   });
-  window.addEventListener("blur", stopCapture);
+  window.addEventListener("blur", () => {
+    stopCapture();
+    clearPrivateData();
+  });
+  window.addEventListener("focus", refresh);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       stopCapture();
