@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -174,3 +174,44 @@ class ConnectDraft(Base):
         DateTime(timezone=True), nullable=False, default=utc_now
     )
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class MemoryRecord(Base):
+    """Owner-scoped review candidate or approved fact, not a model instruction."""
+
+    __tablename__ = "max_memories"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "scope", "subject_key", name="uq_memory_owner_scope_key"),
+        Index("ix_max_memories_lookup", "owner_id", "scope", "state", "updated_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    scope: Mapped[str] = mapped_column(String(64), nullable=False)
+    subject_key: Mapped[str] = mapped_column(String(96), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    source_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    confidence: Mapped[int] = mapped_column(Integer, nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class MemoryEvent(Base):
+    """Metadata-only revision audit. Deleted memories erase their audit metadata."""
+
+    __tablename__ = "max_memory_events"
+    __table_args__ = (Index("ix_max_memory_events_owner", "owner_id", "memory_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    memory_id: Mapped[str] = mapped_column(
+        ForeignKey("max_memories.id", ondelete="CASCADE"), nullable=False
+    )
+    owner_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    action: Mapped[str] = mapped_column(String(24), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
