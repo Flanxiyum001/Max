@@ -64,8 +64,15 @@ def test_draft_created_deduplicated_and_not_dispatched(
     assert first.status_code == 201
     assert first.json()["state"] == "pending"
     assert set(first.json()) == {
-        "id", "source", "kind", "resource_key", "title", "draft",
-        "state", "created_at", "reviewed_at",
+        "id",
+        "source",
+        "kind",
+        "resource_key",
+        "title",
+        "draft",
+        "state",
+        "created_at",
+        "reviewed_at",
     }
     duplicate = connect_client.post("/v1/connect/events", headers=auth(), json=event())
     assert duplicate.status_code == 200
@@ -76,7 +83,9 @@ def test_draft_created_deduplicated_and_not_dispatched(
 
 
 def test_conflicting_event_key_cannot_overwrite_draft(connect_client: TestClient) -> None:
-    assert connect_client.post("/v1/connect/events", headers=auth(), json=event()).status_code == 201
+    assert (
+        connect_client.post("/v1/connect/events", headers=auth(), json=event()).status_code == 201
+    )
     conflict = connect_client.post(
         "/v1/connect/events",
         headers=auth(),
@@ -102,8 +111,7 @@ def test_invalid_untrusted_events_are_denied(
     connect_client: TestClient, payload: dict[str, str]
 ) -> None:
     assert (
-        connect_client.post("/v1/connect/events", headers=auth(), json=payload).status_code
-        == 422
+        connect_client.post("/v1/connect/events", headers=auth(), json=payload).status_code == 422
     )
     assert connect_client.get("/v1/connect/drafts", headers=auth()).json() == []
 
@@ -116,9 +124,7 @@ def test_invalid_untrusted_events_are_denied(
         ("local_build", "build.finished"),
     ],
 )
-def test_only_fixed_review_templates(
-    connect_client: TestClient, source: str, kind: str
-) -> None:
+def test_only_fixed_review_templates(connect_client: TestClient, source: str, kind: str) -> None:
     result = connect_client.post(
         "/v1/connect/events",
         headers=auth(),
@@ -191,7 +197,10 @@ def test_queue_budget_refuses_new_events_until_review(
 
 def test_bounded_list_and_no_approval_execution_routes(connect_client: TestClient) -> None:
     connect_client.post("/v1/connect/events", headers=auth(), json=event())
-    assert connect_client.get("/v1/connect/drafts", headers=auth(), params={"limit": 51}).status_code == 422
+    assert (
+        connect_client.get("/v1/connect/drafts", headers=auth(), params={"limit": 51}).status_code
+        == 422
+    )
     assert connect_client.post("/v1/connect/drafts/approve", headers=auth()).status_code == 404
     assert connect_client.post("/v1/connect/drafts/execute", headers=auth()).status_code == 404
 

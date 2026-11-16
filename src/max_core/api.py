@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from secrets import token_hex
-from typing import Literal
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
@@ -14,8 +13,8 @@ from starlette.middleware.base import RequestResponseEndpoint
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import JSONResponse, Response
 
-from max_core.config import Settings
 from max_core.connect import ConnectService, DraftView
+from max_core.config import Settings
 from max_core.observability import configure_access_logger
 from max_core.security import BootstrapBearerAuth
 from max_core.store import StoreError, TaskStore, TaskView, create_store
@@ -117,7 +116,9 @@ def create_app(settings: Settings | None = None, store: TaskStore | None = None)
         TaskTimeline(task_store, config.bearer_token) if task_store is not None else None
     )
     app.state.trust_service = TrustService(task_store.engine) if task_store is not None else None
-    app.state.connect_service = ConnectService(task_store.engine) if task_store is not None else None
+    app.state.connect_service = (
+        ConnectService(task_store.engine) if task_store is not None else None
+    )
 
     @app.middleware("http")
     async def safe_access_log(request: Request, call_next: RequestResponseEndpoint) -> Response:
