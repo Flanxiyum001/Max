@@ -7,7 +7,7 @@ from secrets import token_hex
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi import status as http_status
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from starlette.middleware.base import RequestResponseEndpoint
@@ -336,21 +336,23 @@ def create_app(settings: Settings | None = None, store: TaskStore | None = None)
         except EventStreamError:
             await socket.close(code=1013)
             return
+        inbound: asyncio.Task[dict[str, object]] | None = None
         try:
             await socket.accept(subprotocol="max-events-v1")
             await socket.send_json(
                 {"type": "hello", "last_sequence": sequence, "recovery": "refetch"}
             )
+            # Keep ONE receive task alive. Repeatedly cancelling socket.receive()
+            # can lose disconnect notifications on some ASGI transports.
+            inbound = asyncio.create_task(socket.receive())
             while True:
                 outbound = asyncio.create_task(queue.get())
-                inbound = asyncio.create_task(socket.receive())
-                done, pending = await asyncio.wait(
+                done, _ = await asyncio.wait(
                     {outbound, inbound}, timeout=15.0, return_when=asyncio.FIRST_COMPLETED
                 )
-                for task in pending:
-                    task.cancel()
-                if pending:
-                    await asyncio.gather(*pending, return_exceptions=True)
+                if outbound not in done:
+                    outbound.cancel()
+                    await asyncio.gather(outbound, return_exceptions=True)
                 if inbound in done:
                     message = inbound.result()
                     if message["type"] != "websocket.disconnect":
@@ -364,9 +366,12 @@ def create_app(settings: Settings | None = None, store: TaskStore | None = None)
                     await asyncio.wait_for(socket.send_json(event.payload()), timeout=5.0)
                 else:
                     await asyncio.wait_for(socket.send_json({"type": "keepalive"}), timeout=5.0)
-        except (RuntimeError, TimeoutError):
+        except (RuntimeError, TimeoutError, WebSocketDisconnect):
             return
         finally:
+            if inbound is not None and not inbound.done():
+                inbound.cancel()
+                await asyncio.gather(inbound, return_exceptions=True)
             event_bus.unsubscribe(identifier)
 
     return app
