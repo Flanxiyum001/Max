@@ -287,9 +287,15 @@ def create_app(settings: Settings | None = None, store: TaskStore | None = None)
             raise _error(exc) from None
 
     @app.post("/v1/events/ticket", dependencies=[Depends(auth)])
-    def issue_event_ticket(request: Request) -> dict[str, str | int]:
+    def issue_event_ticket(request: Request, response: Response) -> dict[str, str | int]:
         """Local bearer-authenticated one-use ticket; never expose in a URL."""
-        origin = request.headers.get("origin")
+        origins = [v for k, v in request.scope["headers"] if k.lower() == b"origin"]
+        if len(origins) > 1:
+            raise HTTPException(status_code=403, detail="Origin denied")
+        try:
+            origin = origins[0].decode("ascii") if origins else None
+        except UnicodeDecodeError:
+            raise HTTPException(status_code=403, detail="Origin denied") from None
         if origin is not None and origin not in allowed_event_origins:
             raise HTTPException(status_code=403, detail="Origin denied")
         # Non-browser local clients must explicitly use the localhost origin.
@@ -298,6 +304,7 @@ def create_app(settings: Settings | None = None, store: TaskStore | None = None)
             token = event_tickets.issue(chosen)
         except EventStreamError:
             raise HTTPException(status_code=503, detail="Event tickets unavailable") from None
+        response.headers["Cache-Control"] = "no-store"
         return {"ticket": token, "expires_in_seconds": event_tickets.ttl}
 
     @app.websocket("/v1/events/ws")
