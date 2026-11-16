@@ -163,3 +163,22 @@ def test_synthetic_http_mock_normalization_can_feed_offline_golden_comparator() 
     )
     observation = replace(observed(), response=result)
     assert suite.compare((observation,)).all_passed
+
+
+def test_malformed_observations_fail_closed_with_sanitized_errors() -> None:
+    suite = OfflineGoldenSuite((golden(),))
+    base = observed()
+    malformed = (
+        replace(base, case_id=["not-a-string"]),
+        replace(base, response=replace(base.response, content="\\ud800")),
+        replace(
+            base,
+            response=replace(
+                base.response,
+                tool_proposals=(ToolProposal("fake-call", ["not-a-tool-name"], {}),),
+            ),
+        ),
+    )
+    for value in malformed:
+        with pytest.raises(GoldenReplayError, match="invalid_observation"):
+            suite.compare((value,))
