@@ -1,0 +1,11 @@
+{
+  "name": "MAX Mobile Command",
+  "short_name": "MAX",
+  "id": "/clients/iphone/",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#050d19",
+  "theme_color": "#071624",
+  "description": "Owner-focused MAX mobile command shell"
+}
