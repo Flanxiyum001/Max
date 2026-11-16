@@ -19,7 +19,11 @@ class BargeInGate:
     _consecutive: int = 0
 
     def __post_init__(self) -> None:
-        if self.minimum_voice_frames < 1 or not isfinite(self.threshold) or not 0 < self.threshold <= 1:
+        if (
+            self.minimum_voice_frames < 1
+            or not isfinite(self.threshold)
+            or not 0 < self.threshold <= 1
+        ):
             raise ValueError("invalid_barge_in_configuration")
 
     def observe(
