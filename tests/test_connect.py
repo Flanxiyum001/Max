@@ -48,9 +48,7 @@ def test_auth_and_no_persistence_default(client: TestClient, connect_client: Tes
     assert connect_client.post("/v1/connect/events", json=event()).status_code == 401
     assert connect_client.get("/v1/connect/drafts").status_code == 401
     assert (
-        connect_client.post(
-            f"/v1/connect/drafts/{uuid4()}/dismiss", headers=auth()
-        ).status_code
+        connect_client.post(f"/v1/connect/drafts/{uuid4()}/dismiss", headers=auth()).status_code
         == 404
     )
     assert client.post("/v1/connect/events", headers=auth(), json=event()).status_code == 503
@@ -166,9 +164,7 @@ def test_queue_budget_refuses_new_events_until_review(
     service = ConnectService(store.engine)
     first_id = ""
     for n in range(50):
-        draft, created = service.ingest(
-            "owner", **event(event_key=f"run-{n:08d}")
-        )
+        draft, created = service.ingest("owner", **event(event_key=f"run-{n:08d}"))
         assert created
         if n == 0:
             first_id = draft.id

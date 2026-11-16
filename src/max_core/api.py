@@ -13,8 +13,8 @@ from starlette.middleware.base import RequestResponseEndpoint
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import JSONResponse, Response
 
-from max_core.connect import ConnectService, DraftView
 from max_core.config import Settings
+from max_core.connect import ConnectService, DraftView
 from max_core.observability import configure_access_logger
 from max_core.security import BootstrapBearerAuth
 from max_core.store import StoreError, TaskStore, TaskView, create_store
