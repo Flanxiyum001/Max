@@ -110,3 +110,8 @@ permission to execute a tool. Plugin installation and the personal PC workflow
 (wake, isolated coding, PR/CI verification, safe shutdown and reporting) remain
 unimplemented; their implementation sequence and device prerequisites are in
 the milestone document. No live MCP account or personal device was accessed.
+
+
+## Milestone 13 — opt-in safe cloud-to-local text trial (review branch)
+
+An additional [cloud-to-local fallback trial](docs/M13_LOCAL_FALLBACK_TRIAL.md) can reuse the existing gateway with a separately owner-verified OpenAI-compatible loopback model. Safe failover covers cloud 429/503 and definite connection-establishment errors only. It does not infer real locality from a proxy URL, install models, execute tools or make MAX autonomous. Real-device smoke tests and owner approval remain required.
