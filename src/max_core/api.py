@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 from secrets import token_hex
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket
 from fastapi import status as http_status
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from starlette.middleware.base import RequestResponseEndpoint
@@ -15,6 +16,7 @@ from starlette.responses import JSONResponse, Response
 
 from max_core.config import Settings
 from max_core.connect import ConnectService, DraftView
+from max_core.event_stream import EventStreamError, LocalEventBus, OneUseTickets, loopback_origins
 from max_core.observability import configure_access_logger
 from max_core.security import BootstrapBearerAuth
 from max_core.store import StoreError, TaskStore, TaskView, create_store
@@ -106,6 +108,9 @@ def create_app(settings: Settings | None = None, store: TaskStore | None = None)
         allowed_hosts=["127.0.0.1", "localhost"],
     )
     auth = BootstrapBearerAuth(config.bearer_token)
+    event_bus = LocalEventBus()
+    event_tickets = OneUseTickets()
+    allowed_event_origins = loopback_origins(config.bind_port)
     task_store = (
         store
         if store is not None
@@ -188,6 +193,8 @@ def create_app(settings: Settings | None = None, store: TaskStore | None = None)
             raise _error(exc) from None
         if not created:
             response.status_code = 200
+        else:
+            event_bus.publish("task.created", task.id, task.state, task.revision)
         return task
 
     @app.get("/v1/tasks", dependencies=[Depends(auth)])
@@ -219,9 +226,11 @@ def create_app(settings: Settings | None = None, store: TaskStore | None = None)
         task_id: UUID, storage: Annotated[TaskStore, Depends(require_store)]
     ) -> TaskView:
         try:
-            return storage.cancel("owner", str(task_id))
+            task = storage.cancel("owner", str(task_id))
         except StoreError as exc:
             raise _error(exc) from None
+        event_bus.publish("task.cancel_requested", task.id, task.state, task.revision)
+        return task
 
     @app.get("/v1/approvals", dependencies=[Depends(auth)])
     def pending_approvals(
@@ -276,5 +285,84 @@ def create_app(settings: Settings | None = None, store: TaskStore | None = None)
             return connect_service.dismiss("owner", str(draft_id))
         except StoreError as exc:
             raise _error(exc) from None
+
+
+    @app.post("/v1/events/ticket", dependencies=[Depends(auth)])
+    def issue_event_ticket(request: Request) -> dict[str, str | int]:
+        """Local bearer-authenticated one-use ticket; never expose in a URL."""
+        origin = request.headers.get("origin")
+        if origin is not None and origin not in allowed_event_origins:
+            raise HTTPException(status_code=403, detail="Origin denied")
+        # Non-browser local clients must explicitly use the localhost origin.
+        chosen = origin or f"http://localhost:{config.bind_port}"
+        try:
+            token = event_tickets.issue(chosen)
+        except EventStreamError:
+            raise HTTPException(status_code=503, detail="Event tickets unavailable") from None
+        return {"ticket": token, "expires_in_seconds": event_tickets.ttl}
+
+    @app.websocket("/v1/events/ws")
+    async def event_socket(socket: WebSocket) -> None:
+        """Local metadata stream only; no commands, grants, or remote device auth."""
+        headers = socket.scope["headers"]
+        origins = [v for k, v in headers if k.lower() == b"origin"]
+        protocols = [v for k, v in headers if k.lower() == b"sec-websocket-protocol"]
+        if len(origins) != 1 or len(protocols) != 1:
+            await socket.close(code=1008)
+            return
+        try:
+            origin_value = origins[0].decode("ascii")
+            offered = [part.strip() for part in protocols[0].decode("ascii").split(",")]
+        except UnicodeDecodeError:
+            await socket.close(code=1008)
+            return
+        if (
+            origin_value not in allowed_event_origins
+            or len(offered) != 2
+            or offered[0] != "max-events-v1"
+            or not offered[1].startswith("max-ticket.")
+            or not event_tickets.consume(offered[1][len("max-ticket.") :], origin_value)
+        ):
+            await socket.close(code=1008)
+            return
+        try:
+            identifier, queue, sequence = event_bus.subscribe()
+        except EventStreamError:
+            await socket.close(code=1013)
+            return
+        try:
+            await socket.accept(subprotocol="max-events-v1")
+            await socket.send_json(
+                {"type": "hello", "last_sequence": sequence, "recovery": "refetch"}
+            )
+            while True:
+                outbound = asyncio.create_task(queue.get())
+                inbound = asyncio.create_task(socket.receive())
+                done, pending = await asyncio.wait(
+                    {outbound, inbound}, timeout=15.0, return_when=asyncio.FIRST_COMPLETED
+                )
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    await asyncio.gather(*pending, return_exceptions=True)
+                if inbound in done:
+                    message = inbound.result()
+                    if message["type"] != "websocket.disconnect":
+                        await socket.close(code=1008)
+                    return
+                if outbound in done:
+                    event = outbound.result()
+                    if event is None:
+                        await socket.close(code=1013)
+                        return
+                    await asyncio.wait_for(socket.send_json(event.payload()), timeout=5.0)
+                else:
+                    await asyncio.wait_for(
+                        socket.send_json({"type": "keepalive"}), timeout=5.0
+                    )
+        except (RuntimeError, TimeoutError):
+            return
+        finally:
+            event_bus.unsubscribe(identifier)
 
     return app
