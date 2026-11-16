@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>MAX Orb — Desktop Surface</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent; }
+    body { display: grid; place-items: center; pointer-events: none; user-select: none; }
+    #surface {
+      position: relative; width: min(92vmin, 360px); aspect-ratio: 1;
+      display: grid; place-items: center; transition: opacity .25s ease;
+      filter: drop-shadow(0 0 24px rgba(18,196,255,.16));
+    }
+    #surface.passive { opacity: .22; filter: none; }
+    #surface.hidden { opacity: 0; visibility: hidden; }
+    canvas { display: block; width: 100%; height: 100%; }
+    #info { position: absolute; inset: auto 0 7%; text-align: center; }
+    #name {
+      color: #e6f9ff; font-size: 11px; font-weight: 700;
+      letter-spacing: .5em; text-indent: .5em; text-shadow: 0 0 12px #26d6ff;
+    }
+    #state {
+      display: block; margin-top: 8px; color: #85d8ef; opacity: .87;
+      font-size: 10px; letter-spacing: .2em; text-transform: uppercase;
+    }
+    @media (prefers-reduced-motion: reduce) { #surface { transition: none; } }
+  </style>
+</head>
+<body>
+  <div id="surface" role="img" aria-label="MAX assistant idle">
+    <canvas id="orb" aria-hidden="true"></canvas>
+    <div id="info"><div id="name">MAX</div><span id="state">Idle</span></div>
+  </div>
+  <script>
+    (() => {
+      "use strict";
+      // Native host must pass only the sanitized result of the trusted reducer.
+      // This surface never opens sockets, records audio or performs approvals.
+      const valid = new Set([
+        "idle", "listening", "thinking", "speaking", "awaiting_approval"
+      ]);
+      const surface = document.getElementById("surface");
+      const label = document.getElementById("state");
+      const canvas = document.getElementById("orb");
+      const context = canvas.getContext("2d", { alpha: true });
+      const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+      let state = "idle";
+      let visibility = "active";
+      let timer = 0;
+      let stopped = false;
+      let lastFrame = -Infinity;
+      let width = 320;
+      let height = 320;
+      let ratio = 1;
+      let painted = false;
+      const speeds = {
+        idle: .5, listening: 1.3, thinking: 1, speaking: 1.9, awaiting_approval: .75
+      };
+      const colors = {
+        idle: ["#38a2ff", "#00e5ff"],
+        listening: ["#00c8ff", "#6deaff"],
+        thinking: ["#447bff", "#21d6ff"],
+        speaking: ["#00e9e8", "#86f6ff"],
+        awaiting_approval: ["#657dff", "#26bfff"]
+      };
+      function resize() {
+        const rect = canvas.getBoundingClientRect();
+        ratio = Math.min(window.devicePixelRatio || 1, 2);
+        width = Math.max(1, rect.width);
+        height = Math.max(1, rect.height);
+        canvas.width = Math.round(width * ratio);
+        canvas.height = Math.round(height * ratio);
+        context.setTransform(ratio, 0, 0, ratio, 0, 0);
+        painted = false;
+        restart();
+      }
+      const resizeObserver = new ResizeObserver(resize);
+      resizeObserver.observe(canvas);
+      function draw(now) {
+        if (!context || document.hidden || visibility === "hidden") return;
+        const reduced = motion.matches || visibility === "passive";
+        const fps = reduced ? 1 : 30;
+        if (now - lastFrame < 1000 / fps && painted) return;
+        lastFrame = now;
+        painted = true;
+        const time = reduced ? 0 : now * .001 * speeds[state];
+        const cx = width / 2;
+        const cy = height / 2 - height * .045;
+        const radius = Math.min(width, height) * .26;
+        const [outer, inner] = colors[state];
+        const pulse = reduced ? 0 : Math.sin(time * 2.3) * 5;
+        context.clearRect(0, 0, width, height);
+        const glow = context.createRadialGradient(cx, cy, radius * .09, cx, cy, radius * 1.55);
+        glow.addColorStop(0, "rgba(1,23,67,.90)");
+        glow.addColorStop(.53, "rgba(0,81,133,.24)");
+        glow.addColorStop(1, "rgba(0,44,86,0)");
+        context.fillStyle = glow;
+        context.beginPath();
+        context.arc(cx, cy, radius * 1.55, 0, Math.PI * 2);
+        context.fill();
+        const core = context.createRadialGradient(
+          cx - radius * .28, cy - radius * .28, 0, cx, cy, radius
+        );
+        core.addColorStop(0, "rgba(96,236,255,.96)");
+        core.addColorStop(.16, "rgba(8,164,221,.48)");
+        core.addColorStop(.7, "rgba(12,53,132,.64)");
+        core.addColorStop(1, "rgba(0,16,49,.96)");
+        context.fillStyle = core;
+        context.beginPath();
+        context.arc(cx, cy, radius + pulse * .25, 0, Math.PI * 2);
+        context.fill();
+        context.save();
+        context.shadowColor = inner;
+        context.shadowBlur = 12;
+        for (let ring = 0; ring < 4; ring++) {
+          context.beginPath();
+          context.lineWidth = ring === 0 ? 1.8 : 1;
+          context.strokeStyle = ring % 2 ? outer : inner;
+          context.globalAlpha = .82 - ring * .14;
+          context.ellipse(
+            cx, cy, radius * (1.02 + ring * .11),
+            radius * (.41 + ring * .075),
+            time * (ring % 2 ? -.2 : .22) + ring * .7,
+            .2, Math.PI * (1.4 + .08 * Math.sin(time + ring))
+          );
+          context.stroke();
+        }
+        context.restore();
+        context.globalAlpha = .65;
+        for (let i = 0; i < 28; i++) {
+          const angle = i * 2.39996 + time * (i % 2 ? -.09 : .12);
+          const r = radius * (1.22 + (i % 5) * .075);
+          const x = cx + Math.cos(angle) * r;
+          const y = cy + Math.sin(angle) * r * .73;
+          context.fillStyle = i % 3 ? outer : inner;
+          context.fillRect(x, y, i % 4 === 0 ? 2 : 1, i % 4 === 0 ? 2 : 1);
+        }
+        context.globalAlpha = 1;
+      }
+      function tick() {
+        if (stopped || document.hidden || visibility === "hidden") return;
+        if (context) draw(performance.now());
+        timer = window.setTimeout(tick, motion.matches || visibility !== "active" ? 1000 : 34);
+      }
+      function restart() {
+        clearTimeout(timer);
+        lastFrame = -Infinity;
+        if (!stopped) tick();
+      }
+      function refresh() {
+        surface.className = visibility === "active" ? "" : visibility;
+        label.textContent = visibility === "active"
+          ? state.replaceAll("_", " ")
+          : visibility === "passive" ? "Quiet mode" : "";
+        surface.setAttribute(
+          "aria-label", "MAX assistant " + (visibility === "active" ? state : visibility)
+        );
+        painted = false;
+        restart();
+      }
+      window.MAXOrb = Object.freeze({
+        setView(view) {
+          if (!view || typeof view !== "object" || !valid.has(view.state)) return false;
+          if (!["active", "passive", "hidden"].includes(view.visibility)) return false;
+          state = view.state;
+          visibility = view.visibility;
+          refresh();
+          return true;
+        },
+        stop() { stopped = true; clearTimeout(timer); timer = 0; }
+      });
+      document.addEventListener("visibilitychange", () => { painted = false; restart(); });
+      motion.addEventListener("change", restart);
+      resize();
+      refresh();
+    })();
+  </script>
+</body>
+</html>
