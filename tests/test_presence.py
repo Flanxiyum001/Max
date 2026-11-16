@@ -16,17 +16,27 @@ from max_core.presence import (
 
 
 def device(**changes: object) -> Presence:
-    fields = dict(device_id="desktop", platform=Platform.WINDOWS, seen_monotonic=100.0,
-                  foreground=True, owner_enabled=True, microphone_opt_in=True,
-                  focus=FocusState.ACCEPTS_NOTIFICATIONS)
+    fields = dict(
+        device_id="desktop",
+        platform=Platform.WINDOWS,
+        seen_monotonic=100.0,
+        foreground=True,
+        owner_enabled=True,
+        microphone_opt_in=True,
+        focus=FocusState.ACCEPTS_NOTIFICATIONS,
+    )
     fields.update(changes)
     return Presence(**fields)
 
 
 def test_notification_fails_closed_for_games_and_unknown_state() -> None:
     assert notification_delivery(device(), now=105) == Delivery.DISPLAY
-    for state in (FocusState.GAME_OR_FULLSCREEN, FocusState.UNKNOWN,
-                  FocusState.PRESENTATION, FocusState.LOCKED_OR_ABSENT):
+    for state in (
+        FocusState.GAME_OR_FULLSCREEN,
+        FocusState.UNKNOWN,
+        FocusState.PRESENTATION,
+        FocusState.LOCKED_OR_ABSENT,
+    ):
         assert notification_delivery(device(focus=state), now=105) == Delivery.DEFER
     assert notification_delivery(device(quiet_mode=True), now=105) == Delivery.DEFER
     assert notification_delivery(device(owner_enabled=False), now=105) == Delivery.DEFER
@@ -68,6 +78,7 @@ def test_windows_probe_mapping_and_error_fallback() -> None:
         def run(ptr: object) -> int:
             ctypes.cast(ptr, ctypes.POINTER(ctypes.c_int))[0] = value
             return status
+
         return run
 
     assert windows_focus_state(probe(5)) == FocusState.ACCEPTS_NOTIFICATIONS
