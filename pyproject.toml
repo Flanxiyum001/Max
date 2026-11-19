@@ -25,6 +25,9 @@ dev = [
     "mypy>=1.15,<2",
     "pip-audit>=2.8,<4",
 ]
+desktop = [
+    "PySide6>=6.8,<7",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
