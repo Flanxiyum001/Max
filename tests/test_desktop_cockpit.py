@@ -73,10 +73,10 @@ def test_ui_is_honest_and_does_not_persist_credentials_or_render_api_html() -> N
         'api("/v1/tasks", { method: "POST"',
         'credentials: "omit"',
         'cache: "no-store"',
-        'getUserMedia',
-        'stopMic',
-        'disconnect',
-        'textContent',
+        "getUserMedia",
+        "stopMic",
+        "disconnect",
+        "textContent",
     ):
         assert required in script
     for forbidden in (
