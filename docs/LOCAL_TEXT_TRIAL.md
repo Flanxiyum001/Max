@@ -46,7 +46,7 @@ genuinely local model, use a reviewed loopback endpoint, set
 does not proxy inference to the cloud. A loopback FreeLLMAPI proxy is not proof
 of local inference. Omit cloud opt-in and pricing if the local model is free.
 
-The prompt is entered with terminal echo disabled, but it is still sent to the
+Optional original MAX conversational style: set `MAX_TRIAL_PERSONA=yes` in the same session before running the text trial. This adds only a fixed system instruction; no tools or real assistant session become active. By default the flag is `no`. The real voice remains unselected. See [M20 persona design](M20_PERSONA_IDENTITY.md).\n\nThe prompt is entered with terminal echo disabled, but it is still sent to the
 configured provider, and its reply is printed to the terminal. Do not use
 confidential information or assume shell history, terminal scrollback or the
 provider retains nothing. The command makes at most one model request; errors

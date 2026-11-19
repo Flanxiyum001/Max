@@ -24,6 +24,7 @@ from max_core.gateway import (
     ModelSpec,
     Privacy,
 )
+from max_core.persona import with_persona
 
 
 class TrialConfigurationError(ValueError):
@@ -38,6 +39,7 @@ class TrialConfigurationError(ValueError):
 class TrialSettings:
     spec: ModelSpec
     max_cost_usd: Decimal | None
+    persona_enabled: bool = False
 
     @classmethod
     def from_env(cls, source: Mapping[str, str] | None = None) -> TrialSettings:
@@ -83,9 +85,12 @@ class TrialSettings:
                 raise TrialConfigurationError("context_too_small_for_trial")
             if destination == InferenceDestination.CLOUD and spec.api_key is None:
                 raise TrialConfigurationError("cloud_key_required")
+            persona = env.get("MAX_TRIAL_PERSONA", "no")
+            if persona not in {"yes", "no"}:
+                raise TrialConfigurationError("invalid_persona_toggle")
             if budget is not None and (not budget.is_finite() or budget < 0):
                 raise TrialConfigurationError("invalid_budget")
-            return cls(spec, budget)
+            return cls(spec, budget, persona == "yes")
         except (KeyError, ValueError, TypeError, InvalidOperation) as exc:
             if isinstance(exc, TrialConfigurationError):
                 raise
@@ -107,6 +112,8 @@ async def ask_once(
         local_only=settings.spec.inference_destination == InferenceDestination.VERIFIED_LOCAL,
         allow_fallback=False,
     )
+    if settings.persona_enabled:
+        request = with_persona(request)
     if client is not None:
         return (await Gateway((settings.spec,), HTTPAdapter(client)).complete(request)).content
     async with httpx.AsyncClient(trust_env=False) as owned_client:
