@@ -71,6 +71,9 @@ def test_voice_is_feminine_preference_with_no_unapproved_provider() -> None:
     assert default.presentation == "feminine" and default.locale == "en-GB"
     assert not default.selected and default.provider_id is None and default.voice_id is None
     assert VoicePreference(provider_id="licensed", voice_id="owner-selected").selected
+    assert VoicePreference(locale="en-US").locale == "en-US"
+    with pytest.raises(PersonaError, match="invalid_voice_locale"):
+        VoicePreference(locale="en-GB\\nunsafe")
     with pytest.raises(PersonaError, match="incomplete_voice_selection"):
         VoicePreference(provider_id="licensed")
     with pytest.raises(PersonaError, match="invalid_voice_selection"):
