@@ -1,0 +1,14 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "MAX Desktop (Native)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "max_core.native_desktop",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ]
+}
