@@ -1,0 +1,1 @@
+"""Packaged, static localhost-only MAX desktop command surface."""
