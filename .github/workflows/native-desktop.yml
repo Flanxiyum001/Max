@@ -24,6 +24,10 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install 'setuptools>=84.1.0,<85'
           python -m pip install -e '.[desktop,dev]'
+      - name: Install Ubuntu Qt runtime libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libegl1 libopengl0 libxkbcommon0 libxcb-cursor0 libdbus-1-3
       - name: Offscreen native window smoke
         run: python -m max_core.native_desktop --smoke-test
       - name: Native backend and window tests

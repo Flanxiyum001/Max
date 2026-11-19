@@ -11,17 +11,27 @@ import sys
 from collections.abc import Callable
 from typing import Any
 
-from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, QRunnable, Qt, QThreadPool, QTimer, Signal
+from PySide6.QtCore import (
+    QEvent,
+    QObject,
+    QPointF,
+    QRectF,
+    QRunnable,
+    Qt,
+    QThreadPool,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import (
     QColor,
     QFont,
     QIcon,
+    QKeySequence,
     QPainter,
     QPen,
     QPixmap,
     QRadialGradient,
     QShortcut,
-    QKeySequence,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -84,6 +94,7 @@ QScrollArea { background: transparent; border: none; }
 QScrollBar:vertical { background: #12111c; width: 9px; }
 QScrollBar::handle:vertical { background: #544260; border-radius: 4px; min-height: 20px; }
 """
+
 
 def _label(text: str, style: str = "", *, wrap: bool = True) -> QLabel:
     label = QLabel(text)
@@ -173,12 +184,12 @@ class Orb(QWidget):
             pen.setWidthF(1.9)
             painter.setPen(pen)
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawEllipse(QRectF(-radius * 1.56, -radius * 0.58,
-                                       radius * 3.12, radius * 1.16))
+            painter.drawEllipse(
+                QRectF(-radius * 1.56, -radius * 0.58, radius * 3.12, radius * 1.16)
+            )
             painter.restore()
 
-        sphere = QRadialGradient(QPointF(cx - radius * 0.5, cy - radius * 0.5),
-                                 radius * 1.95)
+        sphere = QRadialGradient(QPointF(cx - radius * 0.5, cy - radius * 0.5), radius * 1.95)
         sphere.setColorAt(0, QColor("#f5e7ff"))
         sphere.setColorAt(0.20, QColor("#bf9dff"))
         sphere.setColorAt(0.47, QColor("#7455c2"))
@@ -189,8 +200,11 @@ class Orb(QWidget):
         painter.drawEllipse(QPointF(cx, cy), radius, radius)
         painter.setPen(QColor("#b9a0d9"))
         painter.setFont(QFont("Segoe UI", 9))
-        painter.drawText(QRectF(0, self.height() - 28, self.width(), 22),
-                         Qt.AlignmentFlag.AlignCenter, "MAX / STANDBY")
+        painter.drawText(
+            QRectF(0, self.height() - 28, self.width(), 22),
+            Qt.AlignmentFlag.AlignCenter,
+            "MAX / STANDBY",
+        )
         painter.end()
 
 
@@ -266,9 +280,13 @@ class MaxWindow(QMainWindow):
             self.nav.append(button)
         side.addStretch(1)
         side.addWidget(_label("✦  PRIVATE LOCAL PREVIEW", "eyebrow"))
-        side.addWidget(_label(
-            "No remote listener. No computer-control permissions. "
-            "No model or voice provider activated.", "sidebarNote"))
+        side.addWidget(
+            _label(
+                "No remote listener. No computer-control permissions. "
+                "No model or voice provider activated.",
+                "sidebarNote",
+            )
+        )
         side.addSpacing(15)
         side.addWidget(_label("MAX CORE  •  NATIVE DEV BUILD", "sidebarNote"))
         frame.addWidget(sidebar)
@@ -314,16 +332,18 @@ class MaxWindow(QMainWindow):
         form.addWidget(send)
         footer_layout.addLayout(form)
         body.addWidget(footer)
-        self.notice = _label("Local command deck only. AI chat and microphone are not connected.",
-                             "sidebarNote")
+        self.notice = _label(
+            "Local command deck only. AI chat and microphone are not connected.", "sidebarNote"
+        )
         self.notice.setContentsMargins(20, 3, 15, 12)
         body.addWidget(self.notice)
         frame.addWidget(right, 1)
 
         QShortcut(QKeySequence("Ctrl+K"), self, activated=self.command.setFocus)
         for i in range(4):
-            QShortcut(QKeySequence(f"Alt+{i + 1}"), self,
-                      activated=lambda number=i: self.switch(number))
+            QShortcut(
+                QKeySequence(f"Alt+{i + 1}"), self, activated=lambda number=i: self.switch(number)
+            )
         QTimer.singleShot(50, self.refresh)
 
     def _scroll(self, page: QWidget) -> QScrollArea:
@@ -344,8 +364,9 @@ class MaxWindow(QMainWindow):
 
     def build_overview(self) -> QWidget:
         page, layout = self._base_page(
-            "YOUR PERSONAL COMMAND CENTRE", "Good to have you here.",
-            "Your assistant's real state. No pretend task execution or fictional abilities."
+            "YOUR PERSONAL COMMAND CENTRE",
+            "Good to have you here.",
+            "Your assistant's real state. No pretend task execution or fictional abilities.",
         )
         hero = QFrame()
         hero.setObjectName("hero")
@@ -355,10 +376,14 @@ class MaxWindow(QMainWindow):
         hero_text.setSpacing(11)
         hero_text.addWidget(_label("✦  MAX PRESENCE  /  LOCAL MODE", "eyebrow"))
         hero_text.addWidget(_label("Ready to organise.\nNot pretending to automate.", "heroTitle"))
-        hero_text.addWidget(_label(
-            "This desktop companion is a native application. "
-            "You can inspect task records and Trust requests; AI and computer-control "
-            "features are still gated.", "subtle"))
+        hero_text.addWidget(
+            _label(
+                "This desktop companion is a native application. "
+                "You can inspect task records and Trust requests; AI and computer-control "
+                "features are still gated.",
+                "subtle",
+            )
+        )
         actions = QHBoxLayout()
         open_tasks = _button("Open task queue ↗", "primary")
         open_tasks.clicked.connect(lambda: self.switch(1))
@@ -392,8 +417,9 @@ class MaxWindow(QMainWindow):
         trust_layout.addWidget(_label("MAX TRUST", "eyebrow"))
         self.recent_trust = _label("Checking Core…", "subtle")
         trust_layout.addWidget(self.recent_trust)
-        trust_layout.addWidget(_label(
-            "Model suggestions are never treated as owner approval.", "subtle"))
+        trust_layout.addWidget(
+            _label("Model suggestions are never treated as owner approval.", "subtle")
+        )
         trust_layout.addStretch(1)
         sections.addWidget(trust_box, 1)
         layout.addLayout(sections)
@@ -414,8 +440,9 @@ class MaxWindow(QMainWindow):
 
     def build_tasks(self) -> QWidget:
         page, layout = self._base_page(
-            "WORKSPACE  /  TRACKING", "Your task journal.",
-            "Queue a tracked objective, not an AI command. Nothing runs automatically."
+            "WORKSPACE  /  TRACKING",
+            "Your task journal.",
+            "Queue a tracked objective, not an AI command. Nothing runs automatically.",
         )
         composer, compose_layout = _panel()
         compose_layout.addWidget(_label("NEW TRACKED TASK", "eyebrow"))
@@ -446,8 +473,9 @@ class MaxWindow(QMainWindow):
         row.addWidget(panel, 1)
         panel2, box2 = _panel()
         box2.addWidget(_label("SELECTED TASK TIMELINE", "eyebrow"))
-        box2.addWidget(_label(
-            "Metadata only. Events are not proof that a model or tool ran.", "subtle"))
+        box2.addWidget(
+            _label("Metadata only. Events are not proof that a model or tool ran.", "subtle")
+        )
         self.events_list = QListWidget()
         self.events_list.setMinimumHeight(220)
         box2.addWidget(self.events_list, 1)
@@ -458,17 +486,22 @@ class MaxWindow(QMainWindow):
 
     def build_trust(self) -> QWidget:
         page, layout = self._base_page(
-            "OWNER CONTROL  /  TRUST", "Every action accountable.",
-            "Review pending requests. This screen cannot approve actions."
+            "OWNER CONTROL  /  TRUST",
+            "Every action accountable.",
+            "Review pending requests. This screen cannot approve actions.",
         )
         box = QFrame()
         box.setObjectName("warning")
         warning = QVBoxLayout(box)
         warning.setContentsMargins(20, 15, 20, 15)
         warning.addWidget(_label("⬡  REVIEW ONLY — NEVER AN APPROVAL SURFACE", "eyebrow"))
-        warning.addWidget(_label(
-            "High-impact actions need independent, owner-verified authorization. "
-            "The native preview does not send approval decisions.", "subtle"))
+        warning.addWidget(
+            _label(
+                "High-impact actions need independent, owner-verified authorization. "
+                "The native preview does not send approval decisions.",
+                "subtle",
+            )
+        )
         layout.addWidget(box)
         panel, inside = _panel()
         inside.addWidget(_label("PENDING TRUST REQUESTS", "eyebrow"))
@@ -481,8 +514,9 @@ class MaxWindow(QMainWindow):
 
     def build_system(self) -> QWidget:
         page, layout = self._base_page(
-            "LOCAL OPERATIONS  /  STATUS", "Know what really works.",
-            "Status is separated from promises, demos and future features."
+            "LOCAL OPERATIONS  /  STATUS",
+            "Know what really works.",
+            "Status is separated from promises, demos and future features.",
         )
         panel, content = _panel()
         self.system_core = _label("Core: starting…", "sectionTitle")
@@ -525,8 +559,8 @@ class MaxWindow(QMainWindow):
         self.focus_button.setText("Quiet mode: on" if self._quiet else "Quiet mode: off")
         self.notice.setText(
             "Quiet mode limits animation in this window; it does not control OS notifications."
-            if self._quiet else
-            "Local command deck only. AI chat and microphone are not connected."
+            if self._quiet
+            else "Local command deck only. AI chat and microphone are not connected."
         )
 
     def eventFilter(self, watched: QObject, event: Any) -> bool:
@@ -653,30 +687,23 @@ class MaxWindow(QMainWindow):
         self._store_ready = snapshot.storage_status == "Local PostgreSQL ready"
         self.queue_button.setEnabled(self._store_ready)
         self.stat_core.setText("ONLINE")
-        self.stat_tasks.setText(
-            str(len(snapshot.tasks)) if self._store_ready else "—"
-        )
-        self.stat_trust.setText(
-            str(len(snapshot.approvals)) if self._store_ready else "—"
-        )
+        self.stat_tasks.setText(str(len(snapshot.tasks)) if self._store_ready else "—")
+        self.stat_trust.setText(str(len(snapshot.approvals)) if self._store_ready else "—")
         self.task_list.clear()
         if not self._store_ready:
             self.recent_tasks.setText(
                 "No database configured. Explore the interface without creating tasks."
             )
-            self.recent_trust.setText(
-                "Trust storage unavailable until PostgreSQL is configured."
-            )
+            self.recent_trust.setText("Trust storage unavailable until PostgreSQL is configured.")
             self.task_list.addItem("Task journal disabled: configure local PostgreSQL.")
             self.trust_list.clear()
             self.trust_list.addItem("No Trust database connected.")
             return
         tasks = snapshot.tasks[:30]
         self.recent_tasks.setText(
-            "\n".join(
-                f"• {str(task.get('objective', 'Task'))[:70]}"
-                for task in tasks[:3]
-            ) if tasks else "No recorded tasks yet."
+            "\n".join(f"• {str(task.get('objective', 'Task'))[:70]}" for task in tasks[:3])
+            if tasks
+            else "No recorded tasks yet."
         )
         for task in tasks:
             objective = str(task.get("objective", "Task"))[:130]
@@ -687,9 +714,7 @@ class MaxWindow(QMainWindow):
         if not tasks:
             self.task_list.addItem("No tracked tasks yet.")
         self.trust_list.clear()
-        self.recent_trust.setText(
-            f"{len(snapshot.approvals)} pending request(s), read-only."
-        )
+        self.recent_trust.setText(f"{len(snapshot.approvals)} pending request(s), read-only.")
         for approval in snapshot.approvals[:50]:
             tool = str(approval.get("tool_name", "Unknown tool"))[:80]
             state = str(approval.get("state", "pending"))[:30]

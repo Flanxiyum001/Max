@@ -64,9 +64,7 @@ class DesktopSnapshot:
 class NativeDesktopCore:
     """Private TestClient ASGI transport, not an HTTP server or public desktop API."""
 
-    def __init__(
-        self, *, database_url: str | None = None, store: TaskStore | None = None
-    ) -> None:
+    def __init__(self, *, database_url: str | None = None, store: TaskStore | None = None) -> None:
         safe_db = local_database_url(database_url)
         self._owner_token = token_hex(32)
         self._client = TestClient(
@@ -82,7 +80,11 @@ class NativeDesktopCore:
         return cls(database_url=os.environ.get("MAX_DATABASE_URL"))
 
     def _call(
-        self, method: str, path: str, *, payload: dict[str, str] | None = None,
+        self,
+        method: str,
+        path: str,
+        *,
+        payload: dict[str, str] | None = None,
         idempotency_key: str | None = None,
     ) -> dict[str, Any] | list[dict[str, Any]]:
         headers = {"Authorization": "Bearer " + self._owner_token}
@@ -137,7 +139,9 @@ class NativeDesktopCore:
         if self._pending_task is None or self._pending_task[0] != cleaned:
             self._pending_task = (cleaned, str(uuid4()))
         result = self._call(
-            "POST", "/v1/tasks", payload={"objective": cleaned},
+            "POST",
+            "/v1/tasks",
+            payload={"objective": cleaned},
             idempotency_key=self._pending_task[1],
         )
         if not isinstance(result, dict) or not isinstance(result.get("id"), str):
