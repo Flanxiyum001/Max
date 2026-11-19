@@ -26,6 +26,7 @@ from starlette.types import Message
 
 from max_core.config import Settings
 from max_core.connect import ConnectService, DraftView
+from max_core.desktop.assets import desktop_asset
 from max_core.event_stream import EventStreamError, LocalEventBus, OneUseTickets, loopback_origins
 from max_core.observability import configure_access_logger
 from max_core.security import BootstrapBearerAuth
@@ -166,6 +167,18 @@ def create_app(settings: Settings | None = None, store: TaskStore | None = None)
             },
         )
         return response
+
+    @app.get("/desktop", include_in_schema=False)
+    def desktop_index() -> Response:
+        return desktop_asset("index.html")
+
+    @app.get("/desktop/app.css", include_in_schema=False)
+    def desktop_styles() -> Response:
+        return desktop_asset("app.css")
+
+    @app.get("/desktop/app.js", include_in_schema=False)
+    def desktop_script() -> Response:
+        return desktop_asset("app.js")
 
     @app.get("/health/live")
     async def live() -> dict[str, str]:

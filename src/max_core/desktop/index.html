@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-ancestors 'none'">
+  <meta name="referrer" content="no-referrer">
+  <link rel="stylesheet" href="/desktop/app.css">
+  <script src="/desktop/app.js" defer></script>
+  <title>MAX — Command Deck</title>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" aria-label="Primary navigation">
+      <div class="identity"><div class="logo" aria-hidden="true">M<span>✦</span></div><div><strong>MAX</strong><small>PERSONAL INTELLIGENCE</small></div></div>
+      <div class="nav-caption">WORKSPACE</div>
+      <nav class="navigation" aria-label="Workspace">
+        <button class="nav-item selected" data-nav="home" aria-current="page" type="button"><span aria-hidden="true">◈</span> Overview <kbd>1</kbd></button>
+        <button class="nav-item" data-nav="tasks" type="button"><span aria-hidden="true">▤</span> Task queue <kbd>2</kbd></button>
+        <button class="nav-item" data-nav="trust" type="button"><span aria-hidden="true">⬡</span> Trust centre <kbd>3</kbd></button>
+        <button class="nav-item" data-nav="system" type="button"><span aria-hidden="true">⌘</span> System <kbd>4</kbd></button>
+      </nav>
+      <div class="sidebar-spacer"></div>
+      <div class="sidebar-note"><span class="tiny-glow" aria-hidden="true"></span><div><strong>Local-first by design</strong><small>No cloud connection or computer control is enabled by this interface.</small></div></div>
+      <p class="sidebar-foot">MAX CORE <span>v0.1 • DESKTOP PREVIEW</span></p>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <div class="crumb">MAX <span>/</span> <strong id="breadcrumb">Overview</strong></div>
+        <div class="top-actions">
+          <span class="chip" id="core-indicator" role="status" aria-live="polite"><span class="led"></span> Disconnected</span>
+          <button class="btn btn-outline" type="button" id="connect-toggle">Connect Core</button>
+        </div>
+      </header>
+      <section class="connect-panel" id="connect-panel" aria-labelledby="connect-title">
+        <div><p class="overline">OWNER SESSION</p><h2 id="connect-title">Connect to your local MAX Core</h2><p>Your bootstrap token stays in this tab's memory and is never saved. Use only your own trusted computer.</p></div>
+        <form id="connect-form" autocomplete="off">
+          <label for="owner-token">Local bearer token</label>
+          <div class="connect-form-row"><input id="owner-token" type="password" autocomplete="off" spellcheck="false" placeholder="Paste local token" required minlength="32"><button class="btn btn-primary" type="submit">Connect securely</button></div>
+          <p class="field-note" id="connection-message" role="status" aria-live="polite">No authenticated session yet.</p>
+        </form>
+      </section>
+
+      <main id="main-content">
+        <section data-page="home" class="page">
+          <div class="section-head"><div><p class="overline">YOUR PERSONAL COMMAND CENTRE</p><h1>Good to have you here<span class="punct">.</span></h1><p class="subtle">One place to see what's real, what's queued, and what needs your decision.</p></div><div class="keyboard-hint">Press <kbd>Ctrl</kbd> + <kbd>K</kbd> for commands</div></div>
+          <div class="hero">
+            <div class="hero-copy"><div class="hero-tag"><span class="star">✦</span> MAX PRESENCE / LOCAL MODE</div><h2>Ready to organise.<br><em>Not pretending to automate.</em></h2><p id="hero-description">Connect MAX Core to view task state, check Trust requests and queue work. AI chat and computer control are not connected in this milestone.</p><div class="hero-buttons"><button class="btn btn-primary" data-goto="tasks" type="button">Open task queue <span aria-hidden="true">↗</span></button><button class="btn btn-muted" data-goto="system" type="button">View system status</button></div></div>
+            <div class="orb-scene" aria-label="Decorative MAX presence visual"><div class="orb-aura"></div><div class="orb-ring ring-one"></div><div class="orb-ring ring-two"></div><div class="orb-core"><div class="orb-inner"></div></div><div class="orb-caption">MAX / STANDBY</div></div>
+          </div>
+          <div class="stat-row">
+            <div class="stat"><span>CORE CONNECTION</span><strong id="stat-connection">OFFLINE</strong><small id="stat-connection-note">Authentication required</small></div>
+            <div class="stat"><span>TRACKED TASKS</span><strong id="stat-tasks">—</strong><small>Recent queue entries</small></div>
+            <div class="stat"><span>PENDING TRUST</span><strong id="stat-approvals">—</strong><small>Read-only review</small></div>
+            <div class="stat"><span>MODEL EXECUTION</span><strong>NOT WIRED</strong><small>No AI completion from this UI</small></div>
+          </div>
+          <div class="two-panel">
+            <section class="surface"><div class="surface-head"><div><p class="overline">RECENT ACTIVITY</p><h3>Task queue</h3></div><button class="text-link" data-goto="tasks" type="button">View all ↗</button></div><div id="home-tasks" class="items"><div class="empty-state">Connect Core to view tracked tasks.</div></div></section>
+            <section class="surface"><div class="surface-head"><div><p class="overline">MAX TRUST</p><h3>Decisions & guardrails</h3></div><button class="text-link" data-goto="trust" type="button">Review ↗</button></div><div id="home-trust" class="items"><div class="empty-state">Pending approvals appear only after authentication.</div></div><div class="notice"><span aria-hidden="true">◇</span> MAX never treats a model's suggestion as your permission.</div></section>
+          </div>
+        </section>
+        <section data-page="tasks" class="page" hidden>
+          <div class="section-head"><div><p class="overline">WORKSPACE / TASKS</p><h1>Track the work<span class="punct">.</span></h1><p class="subtle">Queue a task for the Core journal. Creation does not execute a model or a tool.</p></div></div>
+          <section class="surface composer-panel"><p class="overline">NEW TRACKED TASK</p><form id="task-form"><label for="task-objective">What should MAX track?</label><textarea id="task-objective" maxlength="500" rows="3" placeholder="Describe the work to track (not an AI chat prompt)..." required></textarea><div class="form-bottom"><small>Explicitly queues metadata only • No autonomous execution</small><button class="btn btn-primary" id="task-submit" type="submit" disabled>Queue task ↗</button></div><p id="task-message" class="field-note" role="status" aria-live="polite"></p></form></section>
+          <div class="two-panel task-columns"><section class="surface"><div class="surface-head"><div><p class="overline">YOUR JOURNAL</p><h3>Recent tasks</h3></div><button class="text-link" type="button" id="refresh-tasks">Refresh ↻</button></div><div id="task-list" class="items"><div class="empty-state">Connect Core to load tasks.</div></div></section><section class="surface"><div class="surface-head"><div><p class="overline">VERIFIABLE HISTORY</p><h3>Selected task timeline</h3></div></div><p class="subtle detail-description" id="timeline-hint">Select a task to view signed, read-only metadata events. These events are not proof of external execution.</p><div id="task-timeline" class="items"><div class="empty-state">No task selected.</div></div></section></div>
+        </section>
+        <section data-page="trust" class="page" hidden>
+          <div class="section-head"><div><p class="overline">OWNER CONTROL / TRUST</p><h1>Nothing without consent<span class="punct">.</span></h1><p class="subtle">Review pending approvals. Decisions are deliberately unavailable in this preview.</p></div></div>
+          <div class="trust-banner"><span aria-hidden="true">⬡</span><div><strong>Review only — not an approval surface</strong><p>Consequential actions need a separate, fresh and verified authorization flow. This screen never sends approvals.</p></div></div>
+          <section class="surface"><div class="surface-head"><div><p class="overline">PENDING REQUESTS</p><h3>Trust inbox</h3></div><button class="text-link" type="button" id="refresh-trust">Refresh ↻</button></div><div id="trust-list" class="items"><div class="empty-state">Connect Core to check Trust requests.</div></div></section>
+        </section>
+        <section data-page="system" class="page" hidden>
+          <div class="section-head"><div><p class="overline">OPERATIONS / STATUS</p><h1>Know what works<span class="punct">.</span></h1><p class="subtle">A truthful view of what's available today—and what is still gated.</p></div></div>
+          <div class="system-grid">
+            <section class="surface"><p class="overline">LOCAL CORE</p><h3 id="system-health">Checking localhost…</h3><p id="system-detail" class="subtle">Readiness and storage are separate from AI capability.</p><button class="btn btn-muted" id="refresh-system" type="button">Recheck health</button></section>
+            <section class="surface"><p class="overline">CAPABILITY GATES</p><div class="capability"><span>Task state & journal</span><strong>Requires Core + database</strong></div><div class="capability"><span>Trust requests</span><strong>Read-only</strong></div><div class="capability"><span>Voice recognition & reply</span><strong>Not connected</strong></div><div class="capability"><span>Desktop control / MCP effects</span><strong>Not enabled</strong></div><div class="capability"><span>Real provider inference</span><strong>Not verified</strong></div></section>
+          </div>
+          <div class="notice wide"><span aria-hidden="true">ⓘ</span> A healthy Core process is not a production-ready assistant. Real model, security and OS tests are required before enabling personal computer actions.</div>
+        </section>
+      </main>
+      <footer class="command-bar">
+        <div class="command-icon" aria-hidden="true">⌘</div>
+        <form id="command-form"><label class="sr-only" for="command-input">Local command</label><input id="command-input" type="text" maxlength="520" autocomplete="off" spellcheck="false" placeholder="Try /status, /tasks, /trust or /help" aria-describedby="command-hint"><button class="command-send" type="submit">Run ↵</button></form>
+        <button type="button" id="mic-test" class="mic-button" aria-label="Hold to test microphone" title="Local microphone test only">◉</button>
+      </footer>
+      <p class="command-hint" id="command-hint" role="status" aria-live="polite">Command deck: explicit local actions only. No AI chat or recording upload.</p>
+    </div>
+  </div>
+</body>
+</html>
