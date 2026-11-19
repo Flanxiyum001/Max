@@ -103,8 +103,12 @@ class VoicePreference:
     voice_id: str | None = None
 
     def __post_init__(self) -> None:
-        if self.presentation != "feminine" or self.locale != "en-GB":
+        if self.presentation != "feminine":
             raise PersonaError("unsupported_voice_preference")
+        if not isinstance(self.locale, str) or not re.fullmatch(
+            r"[a-z]{2,3}(?:-[A-Z]{2})?", self.locale
+        ):
+            raise PersonaError("invalid_voice_locale")
         if (self.provider_id is None) != (self.voice_id is None):
             raise PersonaError("incomplete_voice_selection")
         if self.provider_id is not None and (
