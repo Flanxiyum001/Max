@@ -406,6 +406,9 @@
   get("mic-test").addEventListener("pointerdown", (event) => {
     if (event.button !== 0 || micPointer !== null) return;
     micPointer = event.pointerId;
+    if (typeof event.currentTarget.setPointerCapture === "function") {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
     startMic();
   });
   window.addEventListener("pointerup", (event) => {
@@ -413,6 +416,9 @@
   });
   window.addEventListener("pointercancel", (event) => {
     if (event.pointerId === micPointer) stopMic();
+  });
+  get("mic-test").addEventListener("lostpointercapture", () => {
+    if (micPointer !== null && micPointer !== "keyboard") stopMic();
   });
   get("mic-test").addEventListener("keydown", (event) => {
     if ((event.key === " " || event.key === "Enter") && !event.repeat && micPointer === null) {

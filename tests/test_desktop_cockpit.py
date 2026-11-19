@@ -75,6 +75,8 @@ def test_ui_is_honest_and_does_not_persist_credentials_or_render_api_html() -> N
         'cache: "no-store"',
         "getUserMedia",
         "stopMic",
+        "setPointerCapture",
+        "lostpointercapture",
         "disconnect",
         "textContent",
     ):
