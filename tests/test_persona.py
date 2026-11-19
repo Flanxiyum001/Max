@@ -126,7 +126,10 @@ def test_opted_in_mock_trial_sends_persona_but_never_executes_tools() -> None:
                                 {
                                     "id": "synthetic-call",
                                     "type": "function",
-                                    "function": {"name": "no_permitted_execution", "arguments": "{}"},
+                                    "function": {
+                                        "name": "no_permitted_execution",
+                                        "arguments": "{}",
+                                    },
                                 }
                             ],
                         },
