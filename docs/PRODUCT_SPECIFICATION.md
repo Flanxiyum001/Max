@@ -25,7 +25,7 @@ Any suitable programming language may be selected based on performance, reliabil
 - Wake-word activation and voice-first interaction.
 - Speech recognition and speech generation with low-latency conversational turn-taking.
 - Interruptible speech and natural pauses.
-- Original, appropriately licensed JARVIS-inspired British male voice character; exact actor voice reproduction is not assumed permitted.
+- Original, appropriately licensed **female-presenting voice** (owner's later 2026-11-19 update), with calm, intelligent conversational qualities inspired at a high level by JARVIS and FRIDAY. The owner will choose the specific voice later; no actor cloning or recognisable character imitation.
 - Inbound and outbound telephone calls, with authenticated callers, quiet hours, and task-context continuity.
 - WhatsApp and email integration for authorised messages, document delivery, instructions, and notifications.
 

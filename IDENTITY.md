@@ -25,7 +25,7 @@ The orb should be the centrepiece of the desktop companion, not a dashboard deco
 
 ## Voice direction
 
-Original, appropriately licensed voice with a refined British-English character, medium-low pitch, measured pace, precise pronunciation, natural pauses, warmth, and understated humour. Keep voice provider/model replaceable.
+The owner prefers an **original female-presenting voice** with a refined British-English character, measured pace, precise pronunciation, natural pauses, warmth and understated humour. **No provider, voice ID, timbre or accent implementation is chosen yet**; the owner will supply the final selection. Keep voice models replaceable, appropriately licensed and independent of MAX's name. Never imitate an actor's identifiable voice without rights.
 
 ## Interaction modes
 
