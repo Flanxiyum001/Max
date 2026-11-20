@@ -220,7 +220,7 @@ def _lookup_api_key(
     def _clean_secret(candidate: object) -> str | None:
         if not isinstance(candidate, str):
             return None
-        if "\r" in candidate or "\n" in candidate:
+        if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in candidate):
             return None
         trimmed = candidate.strip()
         return trimmed if trimmed else None
