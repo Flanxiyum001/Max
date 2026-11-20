@@ -209,6 +209,10 @@ def _lookup_str(
     return None
 
 
+def _has_control_chars(value: str) -> bool:
+    return any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in value)
+
+
 def _lookup_api_key(
     env_keys: tuple[str, ...],
     json_paths: tuple[tuple[str, ...], ...],
@@ -218,9 +222,7 @@ def _lookup_api_key(
     dotenv_map: Mapping[str, str],
 ) -> str | None:
     def _clean_secret(candidate: object) -> str | None:
-        if not isinstance(candidate, str):
-            return None
-        if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in candidate):
+        if not isinstance(candidate, str) or _has_control_chars(candidate):
             return None
         trimmed = candidate.strip()
         return trimmed if trimmed else None
@@ -228,16 +230,16 @@ def _lookup_api_key(
     for key in env_keys:
         if key in env_map:
             raw = env_map.get(key)
-            if isinstance(raw, str) and raw != "":
+            if isinstance(raw, str) and (raw.strip() != "" or _has_control_chars(raw)):
                 return _clean_secret(raw)
     for path in json_paths:
         leaf = _walk_json(json_cfg, path)
-        if isinstance(leaf, str) and leaf != "":
+        if isinstance(leaf, str) and (leaf.strip() != "" or _has_control_chars(leaf)):
             return _clean_secret(leaf)
     for key in env_keys:
         if key in dotenv_map:
             raw = dotenv_map.get(key)
-            if isinstance(raw, str) and raw != "":
+            if isinstance(raw, str) and (raw.strip() != "" or _has_control_chars(raw)):
                 return _clean_secret(raw)
     return None
 
@@ -354,11 +356,13 @@ def _db_from_mapping(
 ) -> tuple[str, bool] | None:
     for key in ("MAX_DATABASE_URL", "MAX_DESKTOP_DB_URL"):
         val = source.get(key)
-        if isinstance(val, str) and val.strip():
-            cleaned = val.strip()
-            return cleaned, cleaned.startswith("sqlite")
+        if isinstance(val, str) and (val.strip() or _has_control_chars(val)):
+            cleaned = val if _has_control_chars(val) else val.strip()
+            return cleaned, cleaned.lstrip().lower().startswith("sqlite")
     local_path = source.get("MAX_LOCAL_DB_PATH")
-    if isinstance(local_path, str) and local_path.strip():
+    if isinstance(local_path, str) and (local_path.strip() or _has_control_chars(local_path)):
+        if _has_control_chars(local_path):
+            return f"sqlite+pysqlite:///{local_path}", True
         db_path = Path(local_path.strip()).expanduser().resolve()
         return f"sqlite+pysqlite:///{db_path.as_posix()}", True
     return None
@@ -367,11 +371,13 @@ def _db_from_mapping(
 def _db_from_json(json_cfg: Mapping[str, Any]) -> tuple[str, bool] | None:
     for key in ("database_url", "desktop_db_url"):
         val = json_cfg.get(key)
-        if isinstance(val, str) and val.strip():
-            cleaned = val.strip()
-            return cleaned, cleaned.startswith("sqlite")
+        if isinstance(val, str) and (val.strip() or _has_control_chars(val)):
+            cleaned = val if _has_control_chars(val) else val.strip()
+            return cleaned, cleaned.lstrip().lower().startswith("sqlite")
     local_path = json_cfg.get("local_db_path")
-    if isinstance(local_path, str) and local_path.strip():
+    if isinstance(local_path, str) and (local_path.strip() or _has_control_chars(local_path)):
+        if _has_control_chars(local_path):
+            return f"sqlite+pysqlite:///{local_path}", True
         db_path = Path(local_path.strip()).expanduser().resolve()
         return f"sqlite+pysqlite:///{db_path.as_posix()}", True
     return None
