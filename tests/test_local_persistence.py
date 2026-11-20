@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from uuid import uuid4
 
@@ -24,7 +26,7 @@ from max_core.native_desktop.backend import (
     NativeDesktopError,
     desktop_database_url,
 )
-from max_core.trust import ActorContext, TrustService
+from max_core.trust import ActorContext, SafeTaskStatus, TrustError, TrustService
 
 
 def test_task_journal_persists_across_core_restart(tmp_path: Path) -> None:
@@ -402,3 +404,191 @@ def test_postgresql_override_preserved_and_remote_rejected(
     monkeypatch.setenv("MAX_DATABASE_URL", "postgresql+psycopg://u:p@remote.example.com:5432/max")
     with pytest.raises(NativeDesktopError, match="local_postgresql_required"):
         NativeDesktopCore.from_env()
+
+
+def test_clean_secret_rejects_all_ascii_control_characters(tmp_path: Path) -> None:
+    for control in ("\x00", "\t", "\n", "\r", "\x1f", "\x7f"):
+        cfg = load_desktop_config(
+            env={
+                "OPENAI_API_KEY": f"sk-bad{control}key",
+                "ANTHROPIC_API_KEY": f"sk-ant{control}key",
+            },
+            config_file=tmp_path / "missing.json",
+            data_dir=tmp_path,
+        )
+        assert cfg.openai is None
+        assert cfg.anthropic is None
+        assert cfg.active_provider is None
+
+
+def test_concurrent_decide_approval_allows_exactly_one_decision(tmp_path: Path) -> None:
+    cfg = load_desktop_config(
+        env={"MAX_LOCAL_DB_PATH": str(tmp_path / "concurrent_decide.sqlite3")},
+        data_dir=tmp_path,
+        config_file=tmp_path / "missing.json",
+    )
+    core = NativeDesktopCore.from_env(config=cfg)
+    try:
+        core.snapshot()
+        task = core.create_task("Concurrent trust decision test")
+        assert core.engine is not None
+        trust = TrustService(core.engine)
+        ctx = ActorContext(
+            owner_id="owner",
+            task_id=task["id"],
+            actor_id="desktop_owner",
+            session_id="sess-race-decide",
+            device_id="local-desktop",
+        )
+
+        for trial in range(15):
+            grant = trust.request(
+                ctx,
+                ToolProposal(
+                    call_id=f"decide-call-{trial}",
+                    name="task.status",
+                    arguments={"task_id": task["id"]},
+                ),
+            )
+            barrier = threading.Barrier(4)
+
+            def _attempt(
+                idx: int,
+                grant_id: str = grant.id,
+                sync: threading.Barrier = barrier,
+            ) -> tuple[str, str]:
+                sync.wait(timeout=5.0)
+                try:
+                    decided = core.decide_approval(grant_id, idx % 2 == 0)
+                    return ("ok", str(decided["state"]))
+                except NativeDesktopError as exc:
+                    return ("err", exc.code)
+
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                outcomes = list(pool.map(_attempt, range(4)))
+
+            successes = [item for item in outcomes if item[0] == "ok"]
+            failures = [item for item in outcomes if item[0] == "err"]
+            assert len(successes) == 1
+            assert successes[0][1] in {"approved", "denied"}
+            assert failures == [("err", "local_core_request_rejected")] * 3
+
+            with Session(core.engine) as session:
+                stored = session.scalar(select(ApprovalGrant).where(ApprovalGrant.id == grant.id))
+                assert stored is not None
+                assert stored.state == successes[0][1]
+                decision_audits = session.scalars(
+                    select(TrustAudit).where(
+                        TrustAudit.approval_id == grant.id,
+                        TrustAudit.action == "decision",
+                    )
+                ).all()
+                owner_decisions = [a for a in decision_audits if a.reason == "owner_decision"]
+                rejected_decisions = [
+                    a for a in decision_audits if a.reason == "approval_not_pending"
+                ]
+                assert len(owner_decisions) == 1
+                assert owner_decisions[0].decision == successes[0][1]
+                assert len(rejected_decisions) == 3
+                assert all(a.decision == "deny" for a in rejected_decisions)
+    finally:
+        core.close()
+
+
+def test_concurrent_trust_execute_consumes_single_use_grant_once(tmp_path: Path) -> None:
+    cfg = load_desktop_config(
+        env={"MAX_LOCAL_DB_PATH": str(tmp_path / "concurrent_execute.sqlite3")},
+        data_dir=tmp_path,
+        config_file=tmp_path / "missing.json",
+    )
+    core = NativeDesktopCore.from_env(config=cfg)
+    try:
+        core.snapshot()
+        task = core.create_task("Concurrent trust execute test")
+        assert core.engine is not None
+        trust = TrustService(core.engine)
+        ctx = ActorContext(
+            owner_id="owner",
+            task_id=task["id"],
+            actor_id="desktop_owner",
+            session_id="sess-race-exec",
+            device_id="local-desktop",
+        )
+
+        for trial in range(10):
+            proposal = ToolProposal(
+                call_id=f"exec-call-{trial}",
+                name="task.status",
+                arguments={"task_id": task["id"]},
+            )
+            grant = trust.request(ctx, proposal)
+            decided = core.decide_approval(grant.id, True)
+            assert decided["state"] == "approved"
+
+            barrier = threading.Barrier(4)
+
+            def _consume(
+                _idx: int,
+                grant_id: str = grant.id,
+                prop: ToolProposal = proposal,
+                sync: threading.Barrier = barrier,
+            ) -> tuple[str, str]:
+                sync.wait(timeout=5.0)
+                try:
+                    status = trust.execute(ctx, grant_id, prop)
+                    assert isinstance(status, SafeTaskStatus)
+                    return ("allow", status.task_id)
+                except TrustError as exc:
+                    return ("deny", exc.code)
+
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                outcomes = list(pool.map(_consume, range(4)))
+
+            allows = [item for item in outcomes if item[0] == "allow"]
+            denies = [item for item in outcomes if item[0] == "deny"]
+            assert allows == [("allow", task["id"])]
+            assert denies == [("deny", "approval_not_active")] * 3
+
+            with Session(core.engine) as session:
+                stored = session.scalar(select(ApprovalGrant).where(ApprovalGrant.id == grant.id))
+                assert stored is not None
+                assert stored.state == "consumed"
+                exec_audits = session.scalars(
+                    select(TrustAudit).where(
+                        TrustAudit.approval_id == grant.id,
+                        TrustAudit.action == "execute",
+                    )
+                ).all()
+                allowed_audits = [a for a in exec_audits if a.decision == "allow"]
+                denied_audits = [a for a in exec_audits if a.decision == "deny"]
+                assert len(allowed_audits) == 1
+                assert allowed_audits[0].reason == "single_use_read"
+                assert len(denied_audits) == 3
+                assert all(a.reason == "approval_not_active" for a in denied_audits)
+    finally:
+        core.close()
+
+
+def test_concurrent_create_task_is_thread_safe_and_isolated(tmp_path: Path) -> None:
+    cfg = load_desktop_config(
+        env={"MAX_LOCAL_DB_PATH": str(tmp_path / "concurrent_tasks.sqlite3")},
+        data_dir=tmp_path,
+        config_file=tmp_path / "missing.json",
+    )
+    core = NativeDesktopCore.from_env(config=cfg)
+    try:
+        barrier = threading.Barrier(8)
+
+        def _create(idx: int) -> tuple[str, str]:
+            barrier.wait(timeout=5.0)
+            created = core.create_task(f"Concurrent objective {idx}")
+            return str(created["id"]), str(created["objective"])
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            created_pairs = list(pool.map(_create, range(8)))
+
+        assert len({task_id for task_id, _ in created_pairs}) == 8
+        assert {obj for _, obj in created_pairs} == {f"Concurrent objective {i}" for i in range(8)}
+        assert len(core.snapshot().tasks) == 8
+    finally:
+        core.close()

@@ -7,6 +7,7 @@ The strong bootstrap token never leaves this Python process.
 from __future__ import annotations
 
 import re
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from secrets import token_hex
@@ -14,7 +15,7 @@ from typing import Any, TypeAlias
 from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, create_engine, event, text
+from sqlalchemy import Connection, Engine, create_engine, event, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError, SQLAlchemyError
 
@@ -70,10 +71,14 @@ def desktop_database_url(source: DesktopConfig | str | None) -> str | None:
     except (ValueError, TypeError, AttributeError, ArgumentError):
         raise NativeDesktopError("invalid_local_database_configuration") from None
     if url.drivername == "sqlite+pysqlite":
+        db_name = url.database or ""
+        db_stripped = db_name.strip()
         if (
             url.host
-            or not url.database
-            or url.database == ":memory:"
+            or not db_stripped
+            or db_stripped.lower() == ":memory:"
+            or db_stripped.lower().startswith("file:")
+            or bool(url.query)
             or not value.startswith("sqlite+pysqlite:///")
         ):
             raise NativeDesktopError("invalid_local_database_configuration")
@@ -85,8 +90,15 @@ def _create_local_sqlite_store(url_str: str) -> tuple[Engine, TaskStore]:
     """Initialize a thread-safe local SQLite engine and create missing tables."""
     engine: Engine | None = None
     try:
-        db_name = make_url(url_str).database
-        if not db_name or db_name == ":memory:":
+        url = make_url(url_str)
+        db_name = url.database or ""
+        db_stripped = db_name.strip()
+        if (
+            not db_stripped
+            or db_stripped.lower() == ":memory:"
+            or db_stripped.lower().startswith("file:")
+            or bool(url.query)
+        ):
             raise NativeDesktopError("invalid_local_database_configuration")
         Path(db_name).parent.mkdir(parents=True, exist_ok=True)
         engine = create_engine(
@@ -96,6 +108,7 @@ def _create_local_sqlite_store(url_str: str) -> tuple[Engine, TaskStore]:
 
         @event.listens_for(engine, "connect")
         def _configure_sqlite_connection(dbapi_connection: Any, _connection_record: Any) -> None:
+            dbapi_connection.isolation_level = None
             cursor = dbapi_connection.cursor()
             try:
                 cursor.execute("PRAGMA foreign_keys=ON")
@@ -103,6 +116,10 @@ def _create_local_sqlite_store(url_str: str) -> tuple[Engine, TaskStore]:
                 cursor.execute("PRAGMA busy_timeout=5000")
             finally:
                 cursor.close()
+
+        @event.listens_for(engine, "begin")
+        def _begin_immediate_transaction(conn: Connection) -> None:
+            conn.exec_driver_sql("BEGIN IMMEDIATE")
 
         Base.metadata.create_all(engine)
         return engine, TaskStore(engine)
@@ -147,6 +164,7 @@ class NativeDesktopCore:
         self._owned_engine: Engine | None = None
         self._is_sqlite_local = False
         self._pending_task: tuple[str, str] | None = None
+        self._task_lock = threading.Lock()
 
         effective_store = store
         settings_db = safe_db
@@ -271,18 +289,20 @@ class NativeDesktopCore:
         cleaned = objective.strip()
         if not 1 <= len(cleaned) <= 500:
             raise NativeDesktopError("invalid_task_description")
-        if self._pending_task is None or self._pending_task[0] != cleaned:
-            self._pending_task = (cleaned, str(uuid4()))
-        result = self._call(
-            "POST",
-            "/v1/tasks",
-            payload={"objective": cleaned},
-            idempotency_key=self._pending_task[1],
-        )
-        if not isinstance(result, dict) or not isinstance(result.get("id"), str):
-            raise NativeDesktopError("invalid_core_response")
-        self._pending_task = None
-        return result
+        with self._task_lock:
+            if self._pending_task is None or self._pending_task[0] != cleaned:
+                self._pending_task = (cleaned, str(uuid4()))
+            idempotency_key = self._pending_task[1]
+            result = self._call(
+                "POST",
+                "/v1/tasks",
+                payload={"objective": cleaned},
+                idempotency_key=idempotency_key,
+            )
+            if not isinstance(result, dict) or not isinstance(result.get("id"), str):
+                raise NativeDesktopError("invalid_core_response")
+            self._pending_task = None
+            return result
 
     def timeline(self, task_id: str) -> tuple[TimelineRecord, ...]:
         try:
@@ -329,7 +349,8 @@ class NativeDesktopCore:
         return result
 
     def close(self) -> None:
-        self._pending_task = None
+        with self._task_lock:
+            self._pending_task = None
         self._client.close()
         if self._owned_engine is not None:
             self._owned_engine.dispose()

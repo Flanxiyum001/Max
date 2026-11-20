@@ -52,13 +52,21 @@ def test_desktop_database_url_supports_local_sqlite_and_preserves_pg_guard(
 
     for bad_url in (
         "sqlite+pysqlite:///:memory:",
+        "sqlite+pysqlite:///   ",
+        "sqlite+pysqlite:///file::memory:?cache=shared",
+        "sqlite+pysqlite:///file:mem.sqlite3",
+        f"sqlite+pysqlite:///{(tmp_path / 'desk.sqlite3').as_posix()}?mode=memory&uri=true",
+        f"sqlite+pysqlite:///{(tmp_path / 'desk.sqlite3').as_posix()}?cache=shared",
         "sqlite+pysqlite://localhost/tmp/max.db",
         "sqlite+pysqlite://",
         "sqlite:///tmp/max.db",
         "postgresql+psycopg://u:p@db.example.com:5432/max",
         "not a url",
     ):
-        with pytest.raises(NativeDesktopError):
+        with pytest.raises(
+            NativeDesktopError,
+            match="invalid_local_database_configuration|local_postgresql_required",
+        ):
             desktop_database_url(bad_url)
 
 
