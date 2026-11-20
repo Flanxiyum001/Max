@@ -5,8 +5,10 @@ from __future__ import annotations
 import dataclasses
 import json
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -592,3 +594,154 @@ def test_concurrent_create_task_is_thread_safe_and_isolated(tmp_path: Path) -> N
         assert len(core.snapshot().tasks) == 8
     finally:
         core.close()
+
+
+def test_close_drains_in_flight_call_and_rejects_new_calls_deterministically(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "deterministic_drain.sqlite3"
+    cfg = load_desktop_config(
+        env={"MAX_LOCAL_DB_PATH": str(db_path)},
+        data_dir=tmp_path,
+        config_file=tmp_path / "missing.json",
+    )
+    core = NativeDesktopCore.from_env(config=cfg)
+    seed = core.create_task("In-flight drain seed")
+
+    original_call = core._call
+    in_flight_entered = threading.Event()
+    release_in_flight = threading.Event()
+    pause_lock = threading.Lock()
+    paused_once = False
+
+    def gated_call(
+        method: str,
+        path: str,
+        *,
+        payload: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any] | list[dict[str, Any]]:
+        nonlocal paused_once
+        should_pause = False
+        if method == "GET" and path == "/v1/tasks":
+            with pause_lock:
+                if not paused_once:
+                    paused_once = True
+                    should_pause = True
+        if should_pause:
+            in_flight_entered.set()
+            assert release_in_flight.wait(timeout=5.0)
+        return original_call(method, path, payload=payload, idempotency_key=idempotency_key)
+
+    core._call = gated_call  # type: ignore[method-assign]
+
+    close_finished = threading.Event()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        snapshot_future = pool.submit(core.snapshot)
+        assert in_flight_entered.wait(timeout=5.0)
+
+        close_future = pool.submit(lambda: (core.close(), close_finished.set()))
+
+        # Give close() a brief moment to mark _closed=True and enter wait().
+        deadline = time.monotonic() + 2.0
+        rejected = False
+        while time.monotonic() < deadline:
+            try:
+                core.timeline(seed["id"])
+            except NativeDesktopError as exc:
+                assert exc.code == "local_core_unavailable"
+                rejected = True
+                break
+            time.sleep(0.005)
+
+        assert rejected is True
+        assert not close_finished.is_set()
+
+        release_in_flight.set()
+        snap = snapshot_future.result(timeout=5.0)
+        assert len(snap.tasks) == 1
+        close_future.result(timeout=5.0)
+        assert close_finished.is_set()
+
+    for call in (
+        lambda: core.snapshot(),
+        lambda: core.create_task("after close"),
+        lambda: core.timeline(seed["id"]),
+        lambda: core.decide_approval(str(uuid4()), True),
+    ):
+        with pytest.raises(NativeDesktopError, match="local_core_unavailable"):
+            call()
+
+    moved = tmp_path / "moved_deterministic_drain.sqlite3"
+    db_path.rename(moved)
+    moved.unlink()
+    for suffix in ("-wal", "-shm"):
+        sidecar = Path(f"{db_path}{suffix}")
+        if sidecar.exists():
+            sidecar.unlink()
+
+
+def test_close_under_concurrent_load_releases_sqlite_handles_on_windows(
+    tmp_path: Path,
+) -> None:
+    for trial in range(10):
+        db_path = tmp_path / f"close_load_{trial}.sqlite3"
+        cfg = load_desktop_config(
+            env={"MAX_LOCAL_DB_PATH": str(db_path)},
+            data_dir=tmp_path,
+            config_file=tmp_path / "missing.json",
+        )
+        core = NativeDesktopCore.from_env(config=cfg)
+        seed = core.create_task(f"Seed task {trial}")
+        stop_event = threading.Event()
+        workers_active = threading.Barrier(5)
+
+        def _worker(
+            worker_id: int,
+            c: NativeDesktopCore = core,
+            seed_id: str = seed["id"],
+            stop: threading.Event = stop_event,
+            ready: threading.Barrier = workers_active,
+        ) -> int:
+            ready.wait(timeout=5.0)
+            iterations = 0
+            while not stop.is_set():
+                try:
+                    c.snapshot()
+                    created = c.create_task(f"Load task w{worker_id}-{iterations}")
+                    c.timeline(str(created["id"]))
+                    c.timeline(seed_id)
+                    iterations += 1
+                except NativeDesktopError as exc:
+                    assert exc.code == "local_core_unavailable"
+                    break
+            return iterations
+
+        with ThreadPoolExecutor(max_workers=5) as pool:
+            futures = [pool.submit(_worker, idx) for idx in range(4)]
+            workers_active.wait(timeout=5.0)
+            time.sleep(0.02)
+
+            close_futs = [pool.submit(core.close) for _ in range(2)]
+            stop_event.set()
+            for close_fut in close_futs:
+                close_fut.result(timeout=15.0)
+            for fut in futures:
+                fut.result(timeout=15.0)
+
+        with pytest.raises(NativeDesktopError, match="local_core_unavailable"):
+            core.snapshot()
+        with pytest.raises(NativeDesktopError, match="local_core_unavailable"):
+            core.create_task("Post close rejected")
+        with pytest.raises(NativeDesktopError, match="local_core_unavailable"):
+            core.timeline(seed["id"])
+        with pytest.raises(NativeDesktopError, match="local_core_unavailable"):
+            core.decide_approval(str(uuid4()), True)
+
+        moved = tmp_path / f"moved_close_load_{trial}.sqlite3"
+        db_path.rename(moved)
+        moved.unlink()
+        for suffix in ("-wal", "-shm"):
+            sidecar = Path(f"{db_path}{suffix}")
+            if sidecar.exists():
+                sidecar.unlink()
