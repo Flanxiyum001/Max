@@ -12,6 +12,7 @@ from max_core.gateway.contracts import ToolProposal
 from max_core.native_desktop.backend import (
     NativeDesktopCore,
     NativeDesktopError,
+    _create_local_sqlite_store,
     desktop_database_url,
     local_database_url,
 )
@@ -68,6 +69,82 @@ def test_desktop_database_url_supports_local_sqlite_and_preserves_pg_guard(
             match="invalid_local_database_configuration|local_postgresql_required",
         ):
             desktop_database_url(bad_url)
+
+
+def test_database_url_validators_reject_whitespace_and_control_characters(
+    tmp_path: Path,
+) -> None:
+    sqlite_base = f"sqlite+pysqlite:///{(tmp_path / 'desk.sqlite3').as_posix()}"
+    pg_base = "postgresql+psycopg://user:pw@127.0.0.1:5432/max"
+    shared_bad_urls = [
+        "   ",
+        "\t",
+        "\n",
+        f" {sqlite_base}",
+        f"{sqlite_base}   ",
+        f" {pg_base}",
+        f"{pg_base}   ",
+    ]
+    for control in ("\x00", "\t", "\n", "\r", "\r\n", "\x1f", "\x7f"):
+        shared_bad_urls.extend(
+            [
+                f"{sqlite_base}{control}",
+                f"{control}{sqlite_base}",
+                f"sqlite+pysqlite:///{(tmp_path / f'bad{control}desk.sqlite3').as_posix()}",
+                f"{pg_base}{control}",
+                f"{control}{pg_base}",
+                f"postgresql+psycopg://user:pw@127.0.0.1:5432/max{control}db",
+            ]
+        )
+
+    for bad_url in shared_bad_urls:
+        with pytest.raises(NativeDesktopError) as desk_exc:
+            desktop_database_url(bad_url)
+        assert desk_exc.value.code == "invalid_local_database_configuration"
+
+        with pytest.raises(NativeDesktopError) as pg_exc:
+            local_database_url(bad_url)
+        assert pg_exc.value.code == "invalid_local_database_configuration"
+
+        with pytest.raises(NativeDesktopError) as core_exc:
+            NativeDesktopCore(database_url=bad_url)
+        assert core_exc.value.code == "invalid_local_database_configuration"
+
+    sqlite_only_bad_urls = [
+        "sqlite+pysqlite:///   " + (tmp_path / "desk.sqlite3").as_posix(),
+        f"{sqlite_base}?",
+        f"{sqlite_base}?bad",
+    ]
+    for bad_sqlite in sqlite_only_bad_urls:
+        with pytest.raises(NativeDesktopError) as sqlite_exc:
+            desktop_database_url(bad_sqlite)
+        assert sqlite_exc.value.code == "invalid_local_database_configuration"
+
+        with pytest.raises(NativeDesktopError) as core_sqlite_exc:
+            NativeDesktopCore(database_url=bad_sqlite)
+        assert core_sqlite_exc.value.code == "invalid_local_database_configuration"
+
+        with pytest.raises(NativeDesktopError) as pg_sqlite_exc:
+            local_database_url(bad_sqlite)
+        assert pg_sqlite_exc.value.code == "local_postgresql_required"
+
+
+def test_create_local_sqlite_store_rejects_control_chars_and_wraps_value_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    sqlite_base = f"sqlite+pysqlite:///{(tmp_path / 'store.sqlite3').as_posix()}"
+    for bad in (f"{sqlite_base}\x00", f"{sqlite_base}\n", f"{sqlite_base} "):
+        with pytest.raises(NativeDesktopError) as exc_info:
+            _create_local_sqlite_store(bad)
+        assert exc_info.value.code == "invalid_local_database_configuration"
+
+    def _boom(*_args: Any, **_kwargs: Any) -> Any:
+        raise ValueError("simulated value error")
+
+    monkeypatch.setattr("max_core.native_desktop.backend.create_engine", _boom)
+    with pytest.raises(NativeDesktopError) as wrap_exc:
+        _create_local_sqlite_store(sqlite_base)
+    assert wrap_exc.value.code == "task_store_not_ready"
 
 
 def test_bootstrap_core_without_database_cannot_create_tasks() -> None:

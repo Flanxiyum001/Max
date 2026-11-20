@@ -40,10 +40,16 @@ class NativeDesktopError(RuntimeError):
         super().__init__(code)
 
 
+def _has_control_chars(value: str) -> bool:
+    return any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in value)
+
+
 def local_database_url(value: str | None) -> str | None:
     """This early-use desktop cannot silently connect to remote databases."""
     if not value:
         return None
+    if not isinstance(value, str) or value != value.strip() or _has_control_chars(value):
+        raise NativeDesktopError("invalid_local_database_configuration")
     try:
         url = make_url(value)
         if (
@@ -54,6 +60,8 @@ def local_database_url(value: str | None) -> str | None:
             or not url.database
         ):
             raise NativeDesktopError("local_postgresql_required")
+        if url.database != url.database.strip() or _has_control_chars(url.database):
+            raise NativeDesktopError("invalid_local_database_configuration")
     except NativeDesktopError:
         raise
     except (ValueError, TypeError, AttributeError, ArgumentError):
@@ -66,6 +74,8 @@ def desktop_database_url(source: DesktopConfig | str | None) -> str | None:
     value = source.database_url if isinstance(source, DesktopConfig) else source
     if not value:
         return None
+    if not isinstance(value, str) or value != value.strip() or _has_control_chars(value):
+        raise NativeDesktopError("invalid_local_database_configuration")
     try:
         url = make_url(value)
     except (ValueError, TypeError, AttributeError, ArgumentError):
@@ -76,9 +86,12 @@ def desktop_database_url(source: DesktopConfig | str | None) -> str | None:
         if (
             url.host
             or not db_stripped
+            or db_name != db_stripped
+            or _has_control_chars(db_name)
             or db_stripped.lower() == ":memory:"
             or db_stripped.lower().startswith("file:")
             or bool(url.query)
+            or "?" in value
             or not value.startswith("sqlite+pysqlite:///")
         ):
             raise NativeDesktopError("invalid_local_database_configuration")
@@ -90,14 +103,25 @@ def _create_local_sqlite_store(url_str: str) -> tuple[Engine, TaskStore]:
     """Initialize a thread-safe local SQLite engine and create missing tables."""
     engine: Engine | None = None
     try:
+        if (
+            not isinstance(url_str, str)
+            or url_str != url_str.strip()
+            or _has_control_chars(url_str)
+        ):
+            raise NativeDesktopError("invalid_local_database_configuration")
         url = make_url(url_str)
         db_name = url.database or ""
         db_stripped = db_name.strip()
         if (
-            not db_stripped
+            url.drivername != "sqlite+pysqlite"
+            or url.host
+            or not db_stripped
+            or db_name != db_stripped
+            or _has_control_chars(db_name)
             or db_stripped.lower() == ":memory:"
             or db_stripped.lower().startswith("file:")
             or bool(url.query)
+            or "?" in url_str
         ):
             raise NativeDesktopError("invalid_local_database_configuration")
         Path(db_name).parent.mkdir(parents=True, exist_ok=True)
@@ -127,7 +151,7 @@ def _create_local_sqlite_store(url_str: str) -> tuple[Engine, TaskStore]:
         if engine is not None:
             engine.dispose()
         raise
-    except (OSError, SQLAlchemyError):
+    except (OSError, ValueError, SQLAlchemyError):
         if engine is not None:
             engine.dispose()
         raise NativeDesktopError("task_store_not_ready") from None
@@ -177,6 +201,12 @@ class NativeDesktopCore:
             self._owned_engine, effective_store = _create_local_sqlite_store(safe_db)
             self._is_sqlite_local = True
             settings_db = None
+        elif (
+            store is not None
+            and settings_db is not None
+            and settings_db.startswith("sqlite+pysqlite:///")
+        ):
+            settings_db = None
 
         try:
             self._client = TestClient(
@@ -203,9 +233,11 @@ class NativeDesktopCore:
         """Load local desktop configuration (SQLite by default, or PostgreSQL via MAX_DATABASE_URL)."""
         try:
             resolved = config if config is not None else load_desktop_config()
+            return cls(database_url=resolved.database_url, config=resolved)
+        except NativeDesktopError:
+            raise
         except (OSError, ValueError):
             raise NativeDesktopError("invalid_local_database_configuration") from None
-        return cls(database_url=resolved.database_url, config=resolved)
 
     def _enter_call(self) -> None:
         with self._lifecycle_cond:

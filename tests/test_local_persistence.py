@@ -745,3 +745,97 @@ def test_close_under_concurrent_load_releases_sqlite_handles_on_windows(
             sidecar = Path(f"{db_path}{suffix}")
             if sidecar.exists():
                 sidecar.unlink()
+
+
+def test_from_env_rejects_control_chars_and_null_bytes_without_raw_value_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    sqlite_base = f"sqlite+pysqlite:///{(tmp_path / 'bad.sqlite3').as_posix()}"
+    pg_base = "postgresql+psycopg://u:p@127.0.0.1:5432/max"
+
+    # 1. config.json database_url and local_db_path containing NUL and ASCII control chars.
+    for idx, control in enumerate(("\x00", "\n", "\r", "\r\n", "\t", "\x1f", "\x7f")):
+        cfg_file = tmp_path / f"bad_url_{idx}.json"
+        cfg_file.write_text(
+            json.dumps({"database_url": f"{sqlite_base}{control}"}),
+            encoding="utf-8",
+        )
+        cfg = load_desktop_config(env={}, config_file=cfg_file, data_dir=tmp_path)
+        with pytest.raises(NativeDesktopError) as exc_info:
+            NativeDesktopCore.from_env(config=cfg)
+        assert exc_info.value.code == "invalid_local_database_configuration"
+
+        cfg_pg_file = tmp_path / f"bad_pg_{idx}.json"
+        cfg_pg_file.write_text(
+            json.dumps({"database_url": f"{pg_base}{control}"}),
+            encoding="utf-8",
+        )
+        cfg_pg = load_desktop_config(env={}, config_file=cfg_pg_file, data_dir=tmp_path)
+        with pytest.raises(NativeDesktopError) as pg_exc:
+            NativeDesktopCore.from_env(config=cfg_pg)
+        assert pg_exc.value.code == "invalid_local_database_configuration"
+
+        cfg_path_file = tmp_path / f"bad_path_{idx}.json"
+        cfg_path_file.write_text(
+            json.dumps({"local_db_path": str(tmp_path / f"bad{control}.sqlite3")}),
+            encoding="utf-8",
+        )
+        cfg_path = load_desktop_config(env={}, config_file=cfg_path_file, data_dir=tmp_path)
+        with pytest.raises(NativeDesktopError) as path_exc:
+            NativeDesktopCore.from_env(config=cfg_path)
+        assert path_exc.value.code == "invalid_local_database_configuration"
+
+    # 2. Explicit env mapping with NUL / control characters in MAX_DATABASE_URL / MAX_LOCAL_DB_PATH.
+    for control in ("\x00", "\n", "\r\n", "\t", "\x1f", "\x7f"):
+        cfg_env_url = load_desktop_config(
+            env={"MAX_DATABASE_URL": f"{sqlite_base}{control}"},
+            config_file=tmp_path / "missing.json",
+            data_dir=tmp_path,
+        )
+        with pytest.raises(NativeDesktopError) as env_exc:
+            NativeDesktopCore.from_env(config=cfg_env_url)
+        assert env_exc.value.code == "invalid_local_database_configuration"
+
+        cfg_env_path = load_desktop_config(
+            env={"MAX_LOCAL_DB_PATH": str(tmp_path / f"env{control}.sqlite3")},
+            config_file=tmp_path / "missing.json",
+            data_dir=tmp_path,
+        )
+        with pytest.raises(NativeDesktopError) as env_path_exc:
+            NativeDesktopCore.from_env(config=cfg_env_path)
+        assert env_path_exc.value.code == "invalid_local_database_configuration"
+
+    # 3. Direct os.environ via monkeypatch + NativeDesktopCore.from_env().
+    monkeypatch.delenv("MAX_DESKTOP_DB_URL", raising=False)
+    monkeypatch.delenv("MAX_LOCAL_DB_PATH", raising=False)
+    for control in ("\n", "\r\n", "\t", "\x1f", "\x7f"):
+        monkeypatch.setenv("MAX_DATABASE_URL", f"{sqlite_base}{control}")
+        with pytest.raises(NativeDesktopError) as direct_exc:
+            NativeDesktopCore.from_env()
+        assert direct_exc.value.code == "invalid_local_database_configuration"
+
+
+def test_whitespace_only_env_api_key_falls_through_while_control_chars_fail_closed(
+    tmp_path: Path,
+) -> None:
+    cfg_file = tmp_path / "keys.json"
+    cfg_file.write_text(
+        json.dumps({"openai": {"api_key": "sk-from-json-fallback"}}),
+        encoding="utf-8",
+    )
+
+    cfg_spaces = load_desktop_config(
+        env={"OPENAI_API_KEY": "   "},
+        config_file=cfg_file,
+        data_dir=tmp_path,
+    )
+    assert cfg_spaces.openai is not None
+    assert cfg_spaces.openai.api_key == "sk-from-json-fallback"
+
+    cfg_newline = load_desktop_config(
+        env={"OPENAI_API_KEY": "\n"},
+        config_file=cfg_file,
+        data_dir=tmp_path,
+    )
+    assert cfg_newline.openai is None
+    assert cfg_newline.active_provider is None
