@@ -191,6 +191,11 @@ class NativeDesktopCore:
         self._is_sqlite_local = False
         self._pending_task: tuple[str, str] | None = None
         self._task_lock = threading.Lock()
+        self._lifecycle_cond = threading.Condition()
+        self._close_lock = threading.Lock()
+        self._closed = False
+        self._resources_closed = False
+        self._active_calls = 0
 
         effective_store = store
         settings_db = safe_db
@@ -227,6 +232,18 @@ class NativeDesktopCore:
         except (OSError, ValueError):
             raise NativeDesktopError("invalid_local_database_configuration") from None
         return cls(database_url=resolved.database_url, config=resolved)
+
+    def _enter_call(self) -> None:
+        with self._lifecycle_cond:
+            if self._closed:
+                raise NativeDesktopError("local_core_unavailable")
+            self._active_calls += 1
+
+    def _exit_call(self) -> None:
+        with self._lifecycle_cond:
+            self._active_calls -= 1
+            if self._active_calls == 0:
+                self._lifecycle_cond.notify_all()
 
     def _call(
         self,
@@ -272,81 +289,93 @@ class NativeDesktopCore:
             raise NativeDesktopError("task_store_not_ready") from None
 
     def snapshot(self) -> DesktopSnapshot:
-        if self._is_sqlite_local:
-            live = self._call("GET", "/health/live")
-            if not isinstance(live, dict) or live.get("status") != "alive":
-                raise NativeDesktopError("local_core_unavailable")
-            status = self._call("GET", "/v1/status")
-            if not isinstance(status, dict) or status.get("assistant") != "MAX":
-                raise NativeDesktopError("local_core_unavailable")
-            self._verify_local_sqlite_ready()
-            storage_label = "Local SQLite ready"
-        else:
-            ready = self._call("GET", "/health/ready")
-            if not isinstance(ready, dict) or ready.get("status") != "ready":
-                raise NativeDesktopError("local_core_unavailable")
-            status = self._call("GET", "/v1/status")
-            if not isinstance(status, dict) or status.get("assistant") != "MAX":
-                raise NativeDesktopError("local_core_unavailable")
-            if ready.get("scope") != "durable-task-store":
-                return DesktopSnapshot(
-                    "Core online (in-process)", "Database not configured", (), ()
-                )
-            storage_label = "Local PostgreSQL ready"
+        self._enter_call()
+        try:
+            if self._is_sqlite_local:
+                live = self._call("GET", "/health/live")
+                if not isinstance(live, dict) or live.get("status") != "alive":
+                    raise NativeDesktopError("local_core_unavailable")
+                status = self._call("GET", "/v1/status")
+                if not isinstance(status, dict) or status.get("assistant") != "MAX":
+                    raise NativeDesktopError("local_core_unavailable")
+                self._verify_local_sqlite_ready()
+                storage_label = "Local SQLite ready"
+            else:
+                ready = self._call("GET", "/health/ready")
+                if not isinstance(ready, dict) or ready.get("status") != "ready":
+                    raise NativeDesktopError("local_core_unavailable")
+                status = self._call("GET", "/v1/status")
+                if not isinstance(status, dict) or status.get("assistant") != "MAX":
+                    raise NativeDesktopError("local_core_unavailable")
+                if ready.get("scope") != "durable-task-store":
+                    return DesktopSnapshot(
+                        "Core online (in-process)", "Database not configured", (), ()
+                    )
+                storage_label = "Local PostgreSQL ready"
 
-        tasks = self._call("GET", "/v1/tasks")
-        approvals = self._call("GET", "/v1/approvals")
-        if (
-            not isinstance(tasks, list)
-            or not isinstance(approvals, list)
-            or len(tasks) > 100
-            or len(approvals) > 100
-            or not all(isinstance(item, dict) for item in tasks + approvals)
-        ):
-            raise NativeDesktopError("invalid_core_response")
-        return DesktopSnapshot(
-            "Core online (in-process)",
-            storage_label,
-            tuple(tasks),
-            tuple(approvals),
-        )
+            tasks = self._call("GET", "/v1/tasks")
+            approvals = self._call("GET", "/v1/approvals")
+            if (
+                not isinstance(tasks, list)
+                or not isinstance(approvals, list)
+                or len(tasks) > 100
+                or len(approvals) > 100
+                or not all(isinstance(item, dict) for item in tasks + approvals)
+            ):
+                raise NativeDesktopError("invalid_core_response")
+            return DesktopSnapshot(
+                "Core online (in-process)",
+                storage_label,
+                tuple(tasks),
+                tuple(approvals),
+            )
+        finally:
+            self._exit_call()
 
     def create_task(self, objective: str) -> TaskRecord:
-        cleaned = objective.strip()
-        if not 1 <= len(cleaned) <= 500:
-            raise NativeDesktopError("invalid_task_description")
-        with self._task_lock:
-            if self._pending_task is None or self._pending_task[0] != cleaned:
-                self._pending_task = (cleaned, str(uuid4()))
-            idempotency_key = self._pending_task[1]
-            result = self._call(
-                "POST",
-                "/v1/tasks",
-                payload={"objective": cleaned},
-                idempotency_key=idempotency_key,
-            )
-            if not isinstance(result, dict) or not isinstance(result.get("id"), str):
-                raise NativeDesktopError("invalid_core_response")
-            self._pending_task = None
-            return result
+        self._enter_call()
+        try:
+            cleaned = objective.strip()
+            if not 1 <= len(cleaned) <= 500:
+                raise NativeDesktopError("invalid_task_description")
+            with self._task_lock:
+                if self._pending_task is None or self._pending_task[0] != cleaned:
+                    self._pending_task = (cleaned, str(uuid4()))
+                idempotency_key = self._pending_task[1]
+                result = self._call(
+                    "POST",
+                    "/v1/tasks",
+                    payload={"objective": cleaned},
+                    idempotency_key=idempotency_key,
+                )
+                if not isinstance(result, dict) or not isinstance(result.get("id"), str):
+                    raise NativeDesktopError("invalid_core_response")
+                self._pending_task = None
+                return result
+        finally:
+            self._exit_call()
 
     def timeline(self, task_id: str) -> tuple[TimelineRecord, ...]:
+        self._enter_call()
         try:
-            if (
-                not isinstance(task_id, str)
-                or not _UUID_LOWER_RE.fullmatch(task_id)
-                or str(UUID(task_id)) != task_id
-            ):
-                raise ValueError("bad id")
-        except (TypeError, ValueError):
-            raise NativeDesktopError("invalid_task_identifier") from None
-        page = self._call("GET", f"/v1/tasks/{task_id}/events?limit=20")
-        if not isinstance(page, dict) or not isinstance(page.get("events"), list):
-            raise NativeDesktopError("invalid_core_response")
-        events = page["events"]
-        if len(events) > 20 or not all(isinstance(item, dict) for item in events):
-            raise NativeDesktopError("invalid_core_response")
-        return tuple(events)
+            try:
+                if (
+                    not isinstance(task_id, str)
+                    or not _UUID_LOWER_RE.fullmatch(task_id)
+                    or str(UUID(task_id)) != task_id
+                ):
+                    raise ValueError("bad id")
+            except (TypeError, ValueError):
+                raise NativeDesktopError("invalid_task_identifier") from None
+            page = self._call("GET", f"/v1/tasks/{task_id}/events?limit=20")
+            if not isinstance(page, dict) or not isinstance(page.get("events"), list):
+                raise NativeDesktopError("invalid_core_response")
+            events = page["events"]
+            if len(events) > 20 or not all(isinstance(item, dict) for item in events):
+                raise NativeDesktopError("invalid_core_response")
+            return tuple(events)
+        finally:
+            self._exit_call()
 
     def activity(self, task_id: str) -> TaskActivity:
         """Read only authoritative task state and the bounded, owner-scoped journal.
@@ -426,34 +455,47 @@ class NativeDesktopCore:
 
     def decide_approval(self, approval_id: str, approve: bool) -> ApprovalRecord:
         """Record an explicit owner approval or denial against a pending Trust grant."""
+        self._enter_call()
         try:
+            try:
+                if (
+                    not isinstance(approval_id, str)
+                    or not _UUID_LOWER_RE.fullmatch(approval_id)
+                    or str(UUID(approval_id)) != approval_id
+                ):
+                    raise ValueError("bad id")
+            except (TypeError, ValueError):
+                raise NativeDesktopError("invalid_approval_identifier") from None
+            if type(approve) is not bool:
+                raise NativeDesktopError("invalid_approval_decision")
+            result = self._call(
+                "POST",
+                f"/v1/approvals/{approval_id}/decision",
+                payload={"approve": approve},
+            )
             if (
-                not isinstance(approval_id, str)
-                or not _UUID_LOWER_RE.fullmatch(approval_id)
-                or str(UUID(approval_id)) != approval_id
+                not isinstance(result, dict)
+                or result.get("id") != approval_id
+                or result.get("state") not in {"approved", "denied"}
             ):
-                raise ValueError("bad id")
-        except (TypeError, ValueError):
-            raise NativeDesktopError("invalid_approval_identifier") from None
-        if type(approve) is not bool:
-            raise NativeDesktopError("invalid_approval_decision")
-        result = self._call(
-            "POST",
-            f"/v1/approvals/{approval_id}/decision",
-            payload={"approve": approve},
-        )
-        if (
-            not isinstance(result, dict)
-            or result.get("id") != approval_id
-            or result.get("state") not in {"approved", "denied"}
-        ):
-            raise NativeDesktopError("invalid_core_response")
-        return result
+                raise NativeDesktopError("invalid_core_response")
+            return result
+        finally:
+            self._exit_call()
 
     def close(self) -> None:
-        with self._task_lock:
-            self._pending_task = None
-        self._client.close()
-        if self._owned_engine is not None:
-            self._owned_engine.dispose()
-            self._owned_engine = None
+        with self._lifecycle_cond:
+            self._closed = True
+            while self._active_calls > 0:
+                self._lifecycle_cond.wait()
+        with self._close_lock:
+            with self._task_lock:
+                self._pending_task = None
+            if not self._resources_closed:
+                self._resources_closed = True
+                try:
+                    self._client.close()
+                finally:
+                    if self._owned_engine is not None:
+                        self._owned_engine.dispose()
+                        self._owned_engine = None
