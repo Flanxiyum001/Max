@@ -50,10 +50,12 @@ from PySide6.QtWidgets import (
 )
 
 from max_core.activity_view import TaskActivity
+from max_core.agent_harness import ActivityEvent, ActivityKind
 from max_core.native_desktop.backend import (
     DesktopSnapshot,
     NativeDesktopCore,
     NativeDesktopError,
+    LocalModelReply,
 )
 
 STYLE = """
@@ -212,6 +214,7 @@ class Orb(QWidget):
 class JobSignals(QObject):
     done = Signal(int, str, object)
     failed = Signal(int, str, str)
+    progress = Signal(int, str, object)
 
 
 class WorkItem(QRunnable):
@@ -469,6 +472,43 @@ class MaxWindow(QMainWindow):
         compose_layout.addLayout(entry_row)
         layout.addWidget(composer)
 
+        trial_panel, trial = _panel()
+        trial.addWidget(_label("LIVE MODEL ACTIVITY  /  OWNER-OPTED LOCAL TRIAL", "eyebrow"))
+        trial.addWidget(
+            _label(
+                "One explicit local-only model turn. Shows real model requests and "
+                "tool suggestions; proposals are NEVER executed. No cloud routing.",
+                "subtle",
+            )
+        )
+        self.local_prompt = QPlainTextEdit()
+        self.local_prompt.setPlaceholderText("Ask an approved local model to explain or plan a task…")
+        self.local_prompt.setMaximumBlockCount(8)
+        self.local_prompt.setFixedHeight(65)
+        trial.addWidget(self.local_prompt)
+        trial_actions = QHBoxLayout()
+        self.local_state = _label("LOCAL MODEL IDLE", "status")
+        trial_actions.addWidget(self.local_state)
+        trial_actions.addStretch(1)
+        self.local_button = _button("Ask local MAX ↗", "primary")
+        self.local_button.clicked.connect(self.ask_local)
+        trial_actions.addWidget(self.local_button)
+        trial.addLayout(trial_actions)
+        trial.addWidget(_label("LIVE HARNESS EVENTS", "eyebrow"))
+        self.local_activity = QListWidget()
+        self.local_activity.setMinimumHeight(145)
+        self.local_activity.addItem("No model call started. Local configuration is required.")
+        trial.addWidget(self.local_activity)
+        trial.addWidget(_label("LOCAL MODEL RESPONSE  /  NOT VERIFIED TASK COMPLETION", "eyebrow"))
+        self.local_answer = QPlainTextEdit()
+        self.local_answer.setReadOnly(True)
+        self.local_answer.setPlaceholderText(
+            "Model text appears only after you manually start a configured local turn."
+        )
+        self.local_answer.setMinimumHeight(105)
+        trial.addWidget(self.local_answer)
+        layout.addWidget(trial_panel)
+
         row = QHBoxLayout()
         panel, box = _panel()
         box.addWidget(_label("RECENT TASKS", "eyebrow"))
@@ -546,7 +586,7 @@ class MaxWindow(QMainWindow):
             "Activity trace  —  Core metadata only, refreshes on selection",
             "Trust inbox  —  read-only; no owner decisions",
             "Voice / microphone  —  not connected",
-            "LLM conversations  —  not connected",
+            "LLM local trial  —  opt-in, reviewed loopback model only",
             "OS control and MCP effects  —  not enabled",
             "Global hotkeys and gaming overlay  —  not implemented",
         ):
@@ -589,7 +629,8 @@ class MaxWindow(QMainWindow):
         lower = raw.lower()
         if lower == "/help":
             self.notice.setText(
-                "Commands: /status, /tasks, /trust, /help, /task <objective>. No AI chat."
+                "Commands: /status, /tasks, /trust, /task <objective>, "
+                "/ask <text> (local-only, requires separate click)."
             )
         elif lower == "/status":
             self.switch(3)
@@ -598,6 +639,15 @@ class MaxWindow(QMainWindow):
             self.switch(1)
         elif lower == "/trust":
             self.switch(2)
+        elif lower.startswith("/ask "):
+            prompt = raw[5:].strip()
+            if not 1 <= len(prompt) <= 2000:
+                self.notice.setText("Local model prompts must contain 1–2000 characters.")
+                return
+            self.local_prompt.setPlainText(prompt)
+            self.switch(1)
+            self.local_prompt.setFocus()
+            self.notice.setText("Review the prompt and click Ask local MAX. No call started.")
         elif lower.startswith("/task "):
             objective = raw[6:].strip()
             if not 1 <= len(objective) <= 500:
@@ -609,6 +659,67 @@ class MaxWindow(QMainWindow):
             self.notice.setText("Review the text and choose Queue task. Nothing runs yet.")
         elif raw:
             self.notice.setText("No live AI chat yet. Type /help for local commands.")
+
+    def ask_local(self) -> None:
+        """A real model call begins only after this explicit owner click."""
+        if self._closing or any(work.action == "model" for work in self._running.values()):
+            return
+        prompt = self.local_prompt.toPlainText().strip()
+        if not 1 <= len(prompt) <= 2000:
+            self.local_state.setText("INVALID PROMPT  /  1–2000 CHARACTERS")
+            return
+        self.local_prompt.clear()
+        self.local_button.setEnabled(False)
+        self.local_state.setText("WAITING FOR LOCAL MODEL WORKER")
+        self.local_answer.clear()
+        self.local_activity.clear()
+        self.local_activity.addItem("Call requested by owner. No model response yet.")
+        self._sequence += 1
+        sequence = self._sequence
+        self._latest["model"] = sequence
+
+        def invoke() -> LocalModelReply:
+            return self.core.ask_local(
+                prompt,
+                on_activity=lambda item: work.signals.progress.emit(sequence, "model", item),
+            )
+
+        work = WorkItem(sequence, "model", invoke)
+        work.signals.done.connect(self._done)
+        work.signals.failed.connect(self._failed)
+        work.signals.progress.connect(self._progress)
+        self._running[sequence] = work
+        self._pool.start(work)
+
+    def _progress(self, sequence: int, action: str, value: Any) -> None:
+        if (
+            self._closing
+            or action != "model"
+            or self._latest.get(action) != sequence
+            or not isinstance(value, ActivityEvent)
+        ):
+            return
+        descriptions = {
+            ActivityKind.ACCEPTED: "Run accepted by local harness",
+            ActivityKind.MODEL_STARTED: "Local model request started",
+            ActivityKind.MODEL_RESPONDED: "Local model response received",
+            ActivityKind.REVIEW_REQUIRED: "Separate owner/Trust review required",
+            ActivityKind.RESPONSE_READY: "Model text available (not task completion)",
+            ActivityKind.FAILED: "Model request failed",
+            ActivityKind.CANCELLED: "Model request cancelled",
+        }
+        if value.kind == ActivityKind.TOOL_PROPOSED:
+            label = "Tool proposed: " + (value.tool_name or "unknown") + " — NOT EXECUTED"
+        else:
+            label = descriptions.get(value.kind, "Harness metadata")
+        if self.local_activity.count() == 1 and self.local_activity.item(0).text().startswith(
+            "Call requested"
+        ):
+            self.local_activity.clear()
+        self.local_activity.addItem(f"◈  {label}")
+        if self.local_activity.count() > 16:
+            self.local_activity.takeItem(0)
+        self.local_state.setText(label.upper()[:95])
 
     def _run(self, action: str, fn: Callable[[], Any]) -> None:
         if self._closing:
@@ -677,6 +788,20 @@ class MaxWindow(QMainWindow):
                 "Task recorded. No AI, shell command or computer action was executed."
             )
             self.refresh()
+        elif action == "model" and isinstance(value, LocalModelReply):
+            self.local_button.setEnabled(True)
+            if value.state == "failed":
+                self.local_state.setText("LOCAL MODEL REQUEST FAILED")
+                self.local_answer.setPlainText(
+                    "The local request failed safely: " + (value.error_code or "unavailable")
+                )
+            else:
+                self.local_answer.setPlainText(value.text)
+                self.local_state.setText(
+                    "TOOL REVIEW REQUIRED — NOTHING EXECUTED"
+                    if value.state == "review_required"
+                    else "RESPONSE RECEIVED — NOT TASK COMPLETION"
+                )
         elif action == "activity" and isinstance(value, TaskActivity):
             self.activity_state.setText(value.headline)
             self.activity_detail.setText(value.description)
@@ -704,6 +829,16 @@ class MaxWindow(QMainWindow):
             self.online.setText("●  CORE NOT READY")
             self.system_core.setText("Core: unavailable")
             self.system_storage.setText("Verify your local development database.")
+        if action == "model":
+            self.local_button.setEnabled(True)
+            self.local_state.setText("LOCAL MODEL NOT AVAILABLE")
+            self.local_answer.setPlainText(
+                {
+                    "local_model_not_configured": "Configure an owner-reviewed local trial model.",
+                    "local_model_only": "Cloud inference is blocked by this native model session.",
+                    "invalid_model_prompt": "The requested prompt is not valid for this model.",
+                }.get(code, "Local model request failed. No tools were run.")
+            )
         if action == "create":
             self.queue_button.setEnabled(self._store_ready)
         if action == "activity":
@@ -762,6 +897,9 @@ class MaxWindow(QMainWindow):
         self._closing = True
         self._activity_timer.stop()
         self.orb.set_quiet(True)
+        self.local_prompt.clear()
+        self.local_answer.clear()
+        self.local_activity.clear()
         self._pool.waitForDone()
         self.core.close()
         super().closeEvent(event)
