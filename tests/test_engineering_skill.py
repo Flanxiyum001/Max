@@ -26,9 +26,7 @@ def _settings(*, enabled: bool) -> TrialSettings:
 def test_engineering_mode_is_explicit_and_isolated_from_normal_persona() -> None:
     for mode in ReplyMode:
         content = persona_message(mode).content
-        assert ("single-owner development partner" in content) == (
-            mode == ReplyMode.ENGINEERING
-        )
+        assert ("single-owner development partner" in content) == (mode == ReplyMode.ENGINEERING)
         assert "You are MAX" in content
         assert len(content) < 2500
     assert ENGINEERING_DISCIPLINE in persona_message(ReplyMode.ENGINEERING).content
