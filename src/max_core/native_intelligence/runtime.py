@@ -121,6 +121,7 @@ def train(
     learning_rate: float = 0.001,
     seed: int = 7,
     device: str = "cpu",
+    validation_files: list[Path] | None = None,
 ) -> dict[str, Any]:
     """Create new model weights. Never loads existing weights or contacts a service."""
     if not 1 <= steps <= 1_000_000 or not 1 <= batch_size <= 256:
@@ -130,6 +131,9 @@ def train(
     if device not in {"cpu", "cuda"} or (device == "cuda" and not torch.cuda.is_available()):
         raise ValueError("Requested compute device is unavailable")
     data = _corpus(files, config.context)
+    heldout = _corpus(validation_files, config.context) if validation_files is not None else None
+    if heldout is not None and heldout == data:
+        raise ValueError("Validation corpus must differ from training corpus")
     if output_dir.exists():
         raise FileExistsError("Output directory already exists: refusing to overwrite")
 
@@ -172,6 +176,14 @@ def train(
         "last_batch_loss": final_loss,
         "quality_claim": "research_only_not_frontier_capable",
     }
+    if heldout is not None:
+        from max_core.native_intelligence.evaluation import evaluate_weights
+
+        metadata["validation"] = {
+            "heldout_sha256": hashlib.sha256(heldout).hexdigest(),
+            "heldout_bytes": len(heldout),
+            **evaluate_weights(model, heldout),
+        }
     model_path = output_dir / MODEL_FILE
     torch.save(model.cpu().state_dict(), model_path)
     metadata["weights_sha256"] = hashlib.sha256(model_path.read_bytes()).hexdigest()
@@ -210,9 +222,19 @@ def load(checkpoint: Path) -> ByteTransformer:
     return model
 
 
-def sample(checkpoint: Path, prompt: str, *, tokens: int = 120, seed: int = 17) -> str:
+def sample(
+    checkpoint: Path,
+    prompt: str,
+    *,
+    tokens: int = 120,
+    seed: int = 17,
+    temperature: float = 1.0,
+    top_k: int = 0,
+) -> str:
     if not 1 <= tokens <= MAX_GENERATE_TOKENS or not 0 <= seed < 2**32:
         raise ValueError("Invalid sampling bounds")
+    if not 0.05 <= temperature <= 5.0 or not 0 <= top_k <= VOCAB_SIZE:
+        raise ValueError("Temperature or top-k outside permitted bounds")
     if len(prompt.encode("utf-8")) > 8_192:
         raise ValueError("Prompt is too long")
     model = load(checkpoint)
@@ -221,9 +243,15 @@ def sample(checkpoint: Path, prompt: str, *, tokens: int = 120, seed: int = 17) 
     with torch.inference_mode():
         for _ in range(tokens):
             context = torch.tensor([input_bytes[-model.config.context :]], dtype=torch.long)
-            logits = model(context)[0, -1, :]
-            probability = torch.softmax(logits, dim=-1)
-            next_byte = int(torch.multinomial(probability, 1, generator=rng).item())
+            logits = model(context)[0, -1, :] / temperature
+            if top_k:
+                values, indices = torch.topk(logits, top_k)
+                probability = torch.softmax(values, dim=-1)
+                choice = int(torch.multinomial(probability, 1, generator=rng).item())
+                next_byte = int(indices[choice].item())
+            else:
+                probability = torch.softmax(logits, dim=-1)
+                next_byte = int(torch.multinomial(probability, 1, generator=rng).item())
             input_bytes.append(next_byte)
     return bytes(input_bytes).decode("utf-8", errors="replace")
 
@@ -235,19 +263,60 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     trainer = commands.add_parser("train", help="Train only on explicitly listed, permitted files")
     trainer.add_argument("--input", action="append", type=Path, required=True)
+    trainer.add_argument("--validation-input", action="append", type=Path)
     trainer.add_argument("--output", type=Path, required=True)
     trainer.add_argument("--steps", type=int, default=100)
+    trainer.add_argument("--context", type=int, default=64)
+    trainer.add_argument("--width", type=int, default=64)
+    trainer.add_argument("--layers", type=int, default=2)
+    trainer.add_argument("--heads", type=int, default=4)
+    trainer.add_argument("--batch-size", type=int, default=8)
+    trainer.add_argument("--seed", type=int, default=7)
     trainer.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     generator = commands.add_parser("sample", help="Generate sample bytes from a trained model")
     generator.add_argument("--checkpoint", type=Path, required=True)
     generator.add_argument("--prompt", required=True)
     generator.add_argument("--tokens", type=int, default=120)
+    generator.add_argument("--seed", type=int, default=17)
+    generator.add_argument("--temperature", type=float, default=1.0)
+    generator.add_argument("--top-k", type=int, default=0)
+    evaluator = commands.add_parser("evaluate", help="Score strictly held-out, permitted data")
+    evaluator.add_argument("--checkpoint", type=Path, required=True)
+    evaluator.add_argument("--input", action="append", type=Path, required=True)
+    evaluator.add_argument("--max-windows", type=int, default=128)
     args = parser.parse_args(argv)
     if args.command == "train":
         result = train(
-            args.input, args.output, config=Config(), steps=args.steps, device=args.device
+            args.input,
+            args.output,
+            config=Config(
+                context=args.context, width=args.width, layers=args.layers, heads=args.heads
+            ),
+            steps=args.steps,
+            batch_size=args.batch_size,
+            seed=args.seed,
+            device=args.device,
+            validation_files=args.validation_input,
         )
         print(json.dumps(result, indent=2))
+    elif args.command == "evaluate":
+        from max_core.native_intelligence.evaluation import evaluate_checkpoint
+
+        print(
+            json.dumps(
+                evaluate_checkpoint(args.checkpoint, args.input, max_windows=args.max_windows),
+                indent=2,
+            )
+        )
     else:
-        print(sample(args.checkpoint, args.prompt, tokens=args.tokens))
+        print(
+            sample(
+                args.checkpoint,
+                args.prompt,
+                tokens=args.tokens,
+                seed=args.seed,
+                temperature=args.temperature,
+                top_k=args.top_k,
+            )
+        )
     return 0
