@@ -51,23 +51,37 @@ MAX_TRIAL_INPUT_USD_PER_MILLION=0
 MAX_TRIAL_OUTPUT_USD_PER_MILLION=0
 ```
 
-Cloud sessions are sent as `Privacy.PUBLIC`: everything typed **and every tool
-result (including workspace files read)** goes to that provider. The CLI prints
-this warning at start.
+Cloud sessions are sent as `Privacy.PUBLIC`: text the owner types and
+results from `clock.now` / `math.calculate` may go to the provider.
+**Workspace reads, file listings and note writes are deliberately unavailable
+on cloud routes**, even when `MAX_WORKSPACE_DIR` is set. Merely showing an
+egress warning is not consent to disclose local files.
 
 ## Decisions
 
 - Text protocol instead of extending `ChatMessage` with a `tool` role: avoids a
   cross-cutting gateway contract change and works with weak local models.
   Native `tools`/`tool` role wiring is a possible later milestone.
-- Approval is an in-process typed `y/N` from the owner's own terminal. It is
-  not WebAuthn/device approval (issues #32/#33 remain open) and is not used by
-  any remote surface.
+- Approval is an in-process typed `y/N` from the owner's own terminal.
+  The complete arguments (including note content) must be visible before a
+  decision; shortened previews never authorize hidden text. This remains a
+  local development consent gesture, **not** WebAuthn/device authorization
+  (issues #32/#33), and must never be reused by a remote surface.
+- Effectful handlers run synchronously in the invoking thread; they are
+  never detached into a timed-out background worker that could later write.
+  A typed-approval delay beyond the deadline prevents the subsequent write.
+  This is **not** process isolation or an OS hard-kill timeout. File creation
+  is not rolled back if an OS write stalls after it began; verify the result
+  before retrying.
 
 ## Risks and not included
 
 - Prompt injection via workspace files can make the model *propose* calls;
-  read-only tools have no effects and effectful tools still need my `y`.
+  read-only tools have no filesystem writes and effectful tools still need my
+  explicit terminal confirmation. Only use owner-controlled, non-secret
+  workspaces and genuinely owner-verified local model routes. Path checks do
+  not provide adversarial host filesystem isolation against concurrent
+  symlink/path replacement.
 - No shell, browser, network, email or arbitrary file-write tools.
 - No persistence of chat history; not wired into the Qt desktop app yet.
 - Secret-looking and dot-files are hidden, but this is a name heuristic.
