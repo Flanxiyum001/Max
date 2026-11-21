@@ -27,7 +27,7 @@ from max_core.gateway import (
     Privacy,
 )
 from max_core.gateway_trial import TrialConfigurationError, TrialSettings
-from max_core.persona import persona_message
+from max_core.persona import ReplyMode, persona_message
 from max_core.tool_loop import ToolLoop, ToolStep
 from max_core.tools import ToolRegistry, builtin_registry
 
@@ -89,10 +89,15 @@ def registry_for_session(settings: TrialSettings, workspace: Path | None) -> Too
     return builtin_registry(workspace)
 
 
+def session_system_messages(settings: TrialSettings, mode: ReplyMode) -> list[ChatMessage]:
+    """Only an explicit, opt-in persona mode can add engineering guidance."""
+    return [persona_message(mode)] if settings.persona_enabled else []
+
+
 async def chat(settings: TrialSettings, workspace: Path | None) -> None:
     registry = registry_for_session(settings, workspace)
     make = request_factory(settings)
-    system = [persona_message()] if settings.persona_enabled else []
+    mode = ReplyMode.CONVERSATION
     history: list[ChatMessage] = []
     where = (
         "cloud API"
@@ -100,7 +105,8 @@ async def chat(settings: TrialSettings, workspace: Path | None) -> None:
         else "local"
     )
     print(
-        f"MAX online ({where} model, {len(registry)} tools). Type /exit to leave, /reset to clear."
+        f"MAX online ({where} model, {len(registry)} tools). "
+        "Type /exit to leave, /reset to clear, /mode engineering for coding guidance."
     )
     if settings.spec.inference_destination == InferenceDestination.CLOUD:
         print(
@@ -128,9 +134,22 @@ async def chat(settings: TrialSettings, workspace: Path | None) -> None:
                 history.clear()
                 print("(conversation cleared)")
                 continue
+            if text == "/mode" or text.startswith("/mode "):
+                chosen = text.removeprefix("/mode").strip().lower()
+                if not settings.persona_enabled:
+                    print("(mode unavailable: set MAX_TRIAL_PERSONA=yes to opt in)")
+                elif chosen not in {"conversation", "engineering"}:
+                    print("(use /mode engineering or /mode conversation)")
+                else:
+                    mode = ReplyMode(chosen)
+                    history.clear()  # avoid silently carrying work data across modes
+                    print(f"(MAX {mode.value} mode; conversation cleared)")
+                continue
             history.append(ChatMessage("user", text[:20_000]))
             try:
-                result = await loop.run(system + history[-MAX_HISTORY:], make)
+                result = await loop.run(
+                    session_system_messages(settings, mode) + history[-MAX_HISTORY:], make
+                )
             except TimeoutError:
                 print("max > (that took too long; try again)")
                 history.pop()
