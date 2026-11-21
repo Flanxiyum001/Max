@@ -60,13 +60,13 @@ from max_core.gateway.adapters import _chunked_scan_messages, _walk_strings
 from max_core.gateway.privacy_guard import contains_high_confidence_secret
 from max_core.local_config import DesktopConfig
 from max_core.local_tools import LocalToolExecutor, LocalToolRegistry
-from max_core.native_desktop.title_bar import AccentStrip, IslandState, IslandTitleBar
 from max_core.native_desktop.backend import (
     ApprovalResolution,
     DesktopSnapshot,
     NativeDesktopCore,
     NativeDesktopError,
 )
+from max_core.native_desktop.title_bar import AccentStrip, IslandState, IslandTitleBar
 from max_core.presence.notifications import FocusState
 from max_core.presence.orb import OrbReducer, OrbState, OrbView, OrbVisibility
 from max_core.voice.controller import VoiceCapabilities, VoiceController
@@ -1049,6 +1049,7 @@ class MaxWindow(QMainWindow):
             self.ptt_button.setText("Push to Talk")
             self.ptt_button.setEnabled(True)
         self.orb.set_quiet(self._quiet)
+        self._sync_island()
         self.focus_button.setText("Quiet mode: on" if self._quiet else "Quiet mode: off")
         self._sync_orb()
         self.notice.setText(

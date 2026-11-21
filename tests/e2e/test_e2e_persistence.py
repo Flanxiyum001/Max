@@ -1053,7 +1053,7 @@ def test_t2_f3_01_cli_rejects_unsupported_flags_with_exit_code_2(
             env=clean_desktop_env,
         )
         assert res.returncode == 2
-        assert "Usage: python -m max_core.native_desktop [--smoke-test]" in res.stderr
+        assert "Usage: python -m max_core.native_desktop [--dashboard] [--smoke-test]" in res.stderr
 
 
 def test_t2_f3_02_cli_smoke_test_rejects_remote_postgres_without_leaking_secrets(

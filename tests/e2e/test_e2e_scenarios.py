@@ -431,7 +431,7 @@ def test_t4_02_openai_research_note_saving_and_restart_trust_approval(
     desktop_core_factory: Callable[..., NativeDesktopCore],
     mock_llm_server: MockLLMServer,
 ) -> None:
-    """T4-02: Multi-turn OpenAI R0 read + R1 notes.save gated across restart, approved in Trust."""
+    """T4-02: Cloud workspace read denied; R1 notes.save approved across restart."""
     pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
 
@@ -447,7 +447,7 @@ def test_t4_02_openai_research_note_saving_and_restart_trust_approval(
     mock_llm_server.queue_tool_calls(
         [{"id": "c_ws", "name": "workspace.list_files", "arguments": {}}]
     )
-    mock_llm_server.queue_text("Workspace contains roadmap.md.")
+    mock_llm_server.queue_text("Workspace access denied; no local file data was shared.")
     mock_llm_server.queue_tool_calls(
         [
             {
@@ -483,7 +483,7 @@ def test_t4_02_openai_research_note_saving_and_restart_trust_approval(
     finally:
         if c1 is not None:
             asyncio.run(c1.aclose())
-    assert r1.tool_executions[0].status == "completed"
+    assert r1.tool_executions[0].status == "denied"
     gated = r2.tool_executions[0]
     assert gated.status == "awaiting_approval" and gated.approval_id is not None
     assert not notes_dir.exists() or not any(notes_dir.rglob("*"))
@@ -738,7 +738,7 @@ def test_t4_05_headless_workstation_full_session_across_restart(
             },
         ]
     )
-    mock_llm_server.queue_text("System healthy; task creation awaiting Trust approval.")
+    mock_llm_server.queue_text("System-status read denied; task creation awaits Trust approval.")
 
     cfg = load_desktop_config(
         env={
@@ -776,7 +776,7 @@ def test_t4_05_headless_workstation_full_session_across_restart(
     assert res1.ok is True
     sys_exec = next(t for t in res1.tool_executions if t.tool_name == "system.status")
     create_exec = next(t for t in res1.tool_executions if t.tool_name == "task.create")
-    assert sys_exec.status == "completed"
+    assert sys_exec.status == "denied"
     assert create_exec.status == "awaiting_approval" and create_exec.approval_id is not None
 
     core1.decide_approval(create_exec.approval_id, True)

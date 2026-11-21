@@ -1052,7 +1052,7 @@ def test_t3_04_cloud_chat_invokes_multiple_r0_tools_and_surfaces_ui_outcomes(
     desktop_core_factory: Callable[..., NativeDesktopCore],
     mock_llm_server: MockLLMServer,
 ) -> None:
-    """T3-04: Cloud chat runs workspace.list_files + dev.add R0 tools and surfaces outcomes."""
+    """T3-04: Cloud chat blocks local workspace reads but permits safe dev.add."""
     pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
 
@@ -1069,7 +1069,7 @@ def test_t3_04_cloud_chat_invokes_multiple_r0_tools_and_surfaces_ui_outcomes(
             {"id": "call_sum", "name": "dev.add", "arguments": {"a": 12, "b": 30}},
         ]
     )
-    mock_llm_server.queue_text("Found spec.md and computed 12 + 30 = 42.")
+    mock_llm_server.queue_text("Workspace access denied; 12 + 30 = 42.")
 
     cfg = load_desktop_config(
         env={
@@ -1096,8 +1096,8 @@ def test_t3_04_cloud_chat_invokes_multiple_r0_tools_and_surfaces_ui_outcomes(
 
     assert res.ok is True
     assert "42" in res.reply
-    assert "spec.md" in res.reply
-    assert [t.status for t in res.tool_executions] == ["completed", "completed"]
+    assert "spec.md" not in res.reply
+    assert [t.status for t in res.tool_executions] == ["denied", "completed"]
 
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     mock_llm_server.queue_tool_calls(
