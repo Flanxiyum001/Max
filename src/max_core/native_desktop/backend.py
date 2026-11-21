@@ -156,11 +156,9 @@ def _create_local_sqlite_store(url_str: str) -> tuple[Engine, TaskStore]:
         except FileExistsError:
             info = db_path.lstat()
             if not stat.S_ISREG(info.st_mode):
-                raise NativeDesktopError("unsafe_sqlite_path")
-            if os.name == "posix" and (
-                info.st_uid != os.getuid() or info.st_mode & 0o077
-            ):
-                raise NativeDesktopError("unsafe_sqlite_permissions")
+                raise NativeDesktopError("unsafe_sqlite_path") from None
+            if os.name == "posix" and (info.st_uid != os.getuid() or info.st_mode & 0o077):
+                raise NativeDesktopError("unsafe_sqlite_permissions") from None
         else:
             os.close(descriptor)
         engine = create_engine(
