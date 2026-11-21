@@ -375,7 +375,7 @@ def create_app(settings: Settings | None = None, store: TaskStore | None = None)
                 )
                 if outbound not in done:
                     outbound.cancel()
-                    await asyncio.gather(outbound, return_exceptions=True)
+                    await asyncio.wait({outbound})
                 if inbound in done:
                     message = inbound.result()
                     if message["type"] != "websocket.disconnect":
@@ -394,7 +394,7 @@ def create_app(settings: Settings | None = None, store: TaskStore | None = None)
         finally:
             if inbound is not None and not inbound.done():
                 inbound.cancel()
-                await asyncio.gather(inbound, return_exceptions=True)
+                await asyncio.wait({inbound})
             event_bus.unsubscribe(identifier)
 
     return app
