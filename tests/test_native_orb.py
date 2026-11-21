@@ -118,3 +118,75 @@ def test_model_tool_proposal_is_never_reported_as_executed(orb) -> None:  # type
         "The model proposed tool actions. Nothing was executed; review required."
     )
     assert "modified the source code" not in window.answer.text()
+
+
+class _FakeSession:
+    """Stands in for AssistantSession: asks approval for one tool, then answers."""
+
+    def __init__(self) -> None:
+        self.decisions: list[bool] = []
+        self.closed = False
+
+    def ask(self, text, *, approve=None, on_step=None):  # type: ignore[no-untyped-def]
+        from max_core.tool_loop import LoopResult
+
+        self.decisions.append(approve("apps.open", {"target": "https://example.org"}))
+        return LoopResult(answer="opened" if self.decisions[-1] else "not opened")
+
+    def due_reminders(self):  # type: ignore[no-untyped-def]
+        return [{"text": "stretch"}]
+
+    def reset(self) -> None:
+        pass
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _orb_with(monkeypatch: pytest.MonkeyPatch, session: _FakeSession):  # type: ignore[no-untyped-def]
+    pytest.importorskip("PySide6")
+    monkeypatch.delenv("MAX_DATABASE_URL", raising=False)
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from max_core.native_desktop.backend import NativeDesktopCore
+    from max_core.native_desktop.orb_ui import OrbWindow
+
+    app = QApplication.instance() or QApplication([])
+    window = OrbWindow(NativeDesktopCore.from_env(), session_factory=lambda: session)
+    window.show()
+    return app, window
+
+
+@pytest.mark.parametrize(("key", "allowed"), [("Return", True), ("Escape", False)])
+def test_orb_asks_owner_before_effectful_tool(
+    monkeypatch: pytest.MonkeyPatch, key: str, allowed: bool
+) -> None:
+    session = _FakeSession()
+    app, window = _orb_with(monkeypatch, session)
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    window.input.setText("open example")
+    window.send()
+    for _ in range(200):
+        app.processEvents()
+        if window._pending_approval is not None:
+            break
+        QTest.qWait(5)
+    assert "MAX wants to run apps.open" in window.answer.text()
+    QTest.keyClick(window, getattr(Qt.Key, f"Key_{key}"))
+    window._pool.waitForDone()
+    for _ in range(50):
+        app.processEvents()
+    assert session.decisions == [allowed]
+    assert window.answer.text() == ("opened" if allowed else "not opened")
+    window.close()
+    assert session.closed
+
+
+def test_orb_announces_due_reminders(monkeypatch: pytest.MonkeyPatch) -> None:
+    app, window = _orb_with(monkeypatch, _FakeSession())
+    window._check_reminders()
+    assert window.answer.text() == "Reminder: stretch"
+    window.close()

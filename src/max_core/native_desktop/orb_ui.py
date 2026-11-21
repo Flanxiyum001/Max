@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import math
 import sys
+import threading
 from typing import Any
 
 from PySide6.QtCore import (
@@ -211,16 +212,43 @@ class OrbView(QWidget):
 class _Signals(QObject):
     done = Signal(object)
     failed = Signal(str)
+    step = Signal(str, str)
+    approval = Signal(str, object, object)  # tool name, arguments, _Approval
+
+
+class _Approval:
+    """Worker thread blocks here until the owner answers in the orb window."""
+
+    def __init__(self) -> None:
+        self.event = threading.Event()
+        self.allowed = False
 
 
 class _Ask(QRunnable):
-    def __init__(self, core: NativeDesktopCore, prompt: str) -> None:
+    """Runs one assistant turn (model + tools) off the GUI thread."""
+
+    def __init__(self, window: OrbWindow, prompt: str) -> None:
         super().__init__()
-        self.core, self.prompt, self.signals = core, prompt, _Signals()
+        self.window, self.prompt, self.signals = window, prompt, _Signals()
+
+    def _approve(self, name: str, arguments: dict[str, Any]) -> bool:
+        request = _Approval()
+        self.signals.approval.emit(name, arguments, request)
+        # No answer within 90 s means "no".
+        return request.event.wait(90) and request.allowed
 
     def run(self) -> None:
         try:
-            self.signals.done.emit(self.core.ask_local(self.prompt))
+            session = self.window.ensure_session()
+            if session is None:
+                self.signals.failed.emit(self.window.session_error or "local_model_not_configured")
+                return
+            result = session.ask(
+                self.prompt,
+                approve=self._approve,
+                on_step=lambda step: self.signals.step.emit(step.tool_name, step.status),
+            )
+            self.signals.done.emit(result)
         except NativeDesktopError as exc:
             self.signals.failed.emit(exc.code)
         except Exception:
@@ -228,7 +256,10 @@ class _Ask(QRunnable):
 
 
 _ERRORS = {
-    "local_model_not_configured": "No model connected yet. Set the MAX_TRIAL_* settings.",
+    "local_model_not_configured": (
+        "No model connected yet. Put your MAX_TRIAL_* settings in a .env file "
+        "(see docs/M28_ASSISTANT_TOOLKIT.md)."
+    ),
     "local_model_only": "This window only talks to a local model.",
     "invalid_model_prompt": "Say that again, a bit shorter.",
 }
@@ -237,9 +268,14 @@ _ERRORS = {
 class OrbWindow(QWidget):
     open_dashboard = Signal()
 
-    def __init__(self, core: NativeDesktopCore) -> None:
+    def __init__(self, core: NativeDesktopCore, session_factory: Any = None) -> None:
         super().__init__()
         self.core = core
+        self._session_factory = session_factory
+        self._session: Any = None
+        self._session_lock = threading.Lock()
+        self.session_error: str | None = None
+        self._pending_approval: _Approval | None = None
         self.setWindowTitle("MAX")
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -294,6 +330,70 @@ class OrbWindow(QWidget):
         self._hide_timer = QTimer(self)
         self._hide_timer.setSingleShot(True)
         self._hide_timer.timeout.connect(lambda: self._show_answer(None))
+        self._reminder_timer = QTimer(self)
+        self._reminder_timer.setInterval(20_000)
+        self._reminder_timer.timeout.connect(self._check_reminders)
+        self._reminder_timer.start()
+        QTimer.singleShot(1500, self._check_reminders)
+
+    # --- assistant session --------------------------------------------------
+    def ensure_session(self) -> Any:
+        """Create the model/tool session on first use (any thread)."""
+        with self._session_lock:
+            if self._session is None and self.session_error is None:
+                try:
+                    if self._session_factory is not None:
+                        self._session = self._session_factory()
+                    else:
+                        from max_core.assistant_session import AssistantSession
+
+                        self._session = AssistantSession.from_env()
+                except Exception:
+                    self.session_error = "local_model_not_configured"
+            return self._session
+
+    def _check_reminders(self) -> None:
+        if self._closing or self._busy or self._pending_approval is not None:
+            return
+        session = self.ensure_session()
+        if session is None:
+            return
+        due = session.due_reminders()
+        if due:
+            self.orb.set_state(SPEAKING)
+            self._state_timer.start(4000)
+            self._show_answer("Reminder: " + " · ".join(item["text"] for item in due))
+            QApplication.beep()
+
+    def _on_step(self, tool: str, status: str) -> None:
+        if self._closing:
+            return
+        if status == "proposed":
+            self._show_answer(f"⋯ {tool}")
+        elif status in {"denied", "failed"}:
+            self._show_answer(f"⋯ {tool} {status}")
+
+    def _on_approval(self, tool: str, arguments: dict, request: _Approval) -> None:
+        if self._closing:
+            request.event.set()
+            return
+        self._pending_approval = request
+        detail = ", ".join(f"{k}: {str(v)[:160]}" for k, v in arguments.items())
+        self.orb.set_state(SPEAKING)
+        self._hide_timer.stop()
+        self.answer.setText(f"MAX wants to run {tool}\n{detail}\n\nEnter = allow   ·   Esc = deny")
+        self._fade_target = 1.0
+        self._fade_timer.start()
+        self.setFocus()
+
+    def _answer_approval(self, allowed: bool) -> None:
+        request, self._pending_approval = self._pending_approval, None
+        if request is None:
+            return
+        request.allowed = allowed
+        request.event.set()
+        self.orb.set_state(THINKING)
+        self._show_answer("⋯ allowed" if allowed else "⋯ denied")
 
     # --- conversation -------------------------------------------------------
     def send(self) -> None:
@@ -305,18 +405,28 @@ class OrbWindow(QWidget):
         self._busy = True
         self.orb.set_state(THINKING)
         self._show_answer(None)
-        job = _Ask(self.core, prompt)
+        job = _Ask(self, prompt)
         job.signals.done.connect(self._done)
         job.signals.failed.connect(self._failed)
+        job.signals.step.connect(self._on_step)
+        job.signals.approval.connect(self._on_approval)
         self._job = job
         self._pool.start(job)
 
-    def _done(self, reply: LocalModelReply) -> None:
+    def _done(self, reply: Any) -> None:
         self._busy = False
         if self._close_requested:
             QTimer.singleShot(0, self.close)
             return
         if self._closing:
+            return
+        if not isinstance(reply, LocalModelReply):  # assistant LoopResult
+            if reply.stopped_reason == "model_failed":
+                self._failed("unavailable")
+                return
+            self.orb.set_state(SPEAKING)
+            self._state_timer.start(2500)
+            self._show_answer(reply.answer.strip() or "…")
             return
         if reply.state == "failed":
             self._failed(reply.error_code or "unavailable")
@@ -371,6 +481,12 @@ class OrbWindow(QWidget):
 
     # --- input --------------------------------------------------------------
     def keyPressEvent(self, event: Any) -> None:
+        if self._pending_approval is not None:
+            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                self._answer_approval(True)
+            elif event.key() == Qt.Key.Key_Escape:
+                self._answer_approval(False)
+            return  # nothing else is typed while an approval is pending
         if event.key() == Qt.Key.Key_Escape:
             if self.input.text():
                 self.input.clear()
@@ -408,15 +524,21 @@ class OrbWindow(QWidget):
             "QMenu::item:selected { background: #0f3a48; }"
         )
         dash = menu.addAction("Open dashboard")
+        reset = menu.addAction("New conversation")
         menu.addSeparator()
         close = menu.addAction("Close MAX")
         chosen = menu.exec(event.globalPos())
         if chosen is dash:
             self.open_dashboard.emit()
+        elif chosen is reset and self._session is not None and not self._busy:
+            self._session.reset()
+            self._show_answer("New conversation.")
         elif chosen is close:
             self.close()
 
     def closeEvent(self, event: Any) -> None:
+        if self._pending_approval is not None:
+            self._answer_approval(False)
         if self._busy:
             # The worker may be waiting on a local model for up to 45 seconds.
             # Never freeze the GUI in waitForDone during an in-flight request.
@@ -428,7 +550,13 @@ class OrbWindow(QWidget):
         self._hide_timer.stop()
         self._fade_timer.stop()
         self.orb._timer.stop()
+        self._reminder_timer.stop()
         self._pool.waitForDone()
+        if self._session is not None:
+            try:
+                self._session.close()
+            except Exception:
+                pass
         self.core.close()
         super().closeEvent(event)
 
