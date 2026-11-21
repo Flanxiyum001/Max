@@ -8,7 +8,7 @@ import pytest
 
 pytest.importorskip("torch")
 
-from max_core.native_intelligence.runtime import ByteTransformer, Config, load, sample, train
+from max_core.native_intelligence.runtime import ByteTransformer, Config, load, sample, train  # noqa: E402
 
 
 def test_original_model_trains_and_samples_offline(tmp_path: Path) -> None:
