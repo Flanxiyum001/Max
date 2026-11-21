@@ -482,7 +482,9 @@ class MaxWindow(QMainWindow):
             )
         )
         self.local_prompt = QPlainTextEdit()
-        self.local_prompt.setPlaceholderText("Ask an approved local model to explain or plan a task…")
+        self.local_prompt.setPlaceholderText(
+            "Ask an approved local model to explain or plan a task…"
+        )
         self.local_prompt.setMaximumBlockCount(8)
         self.local_prompt.setFixedHeight(65)
         trial.addWidget(self.local_prompt)
