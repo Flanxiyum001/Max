@@ -1861,3 +1861,23 @@ def test_chat_lone_surrogates_rejected_cleanly_without_history_poisoning(tmp_pat
     clean_next = svc_apr.send_message("Next question", tool_executor=apr_exec)
     assert clean_next.ok is True
     assert clean_next.reply == "Clean turn"
+
+
+def test_cloud_model_never_receives_private_local_read_tool_definitions(tmp_path: Path) -> None:
+    """Cloud inference cannot silently list or read local files, notes, or tasks."""
+    private_reads = (
+        "workspace.list_files",
+        "workspace.read_file",
+        "notes.list",
+        "task.list",
+        "task.status",
+        "system.status",
+    )
+    allowed = ("dev.health", "dev.add", "task.create", "notes.save")
+    definitions = tuple(ToolDefinition(name, name) for name in (*private_reads, *allowed))
+    executor = _FakeToolExecutor(definitions, {})
+    svc = AssistantChatService(_make_config(tmp_path), tools=definitions)
+    selected = {definition.name for definition in svc._resolve_tools(executor)}
+    assert set(private_reads).isdisjoint(selected)
+    assert selected == set(allowed)
+    assert {definition.name for definition in svc._resolve_tools(None)} == set(allowed)
