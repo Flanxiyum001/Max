@@ -7,7 +7,6 @@ The strong bootstrap token never leaves this Python process.
 from __future__ import annotations
 
 import asyncio
-import os
 import re
 import threading
 from collections.abc import Callable
