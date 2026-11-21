@@ -49,6 +49,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from max_core.activity_view import TaskActivity
 from max_core.native_desktop.backend import (
     DesktopSnapshot,
     NativeDesktopCore,
@@ -253,6 +254,7 @@ class MaxWindow(QMainWindow):
         self._store_ready = False
         self._quiet = False
         self._task_ids: list[str] = []
+        self._selected_task_id: str | None = None
 
         root = QWidget()
         root.setObjectName("root")
@@ -344,6 +346,10 @@ class MaxWindow(QMainWindow):
             QShortcut(
                 QKeySequence(f"Alt+{i + 1}"), self, activated=lambda number=i: self.switch(number)
             )
+        self._activity_timer = QTimer(self)
+        self._activity_timer.setInterval(3500)
+        self._activity_timer.timeout.connect(self._poll_activity)
+        self._activity_timer.start()
         QTimer.singleShot(50, self.refresh)
 
     def _scroll(self, page: QWidget) -> QScrollArea:
@@ -472,10 +478,15 @@ class MaxWindow(QMainWindow):
         box.addWidget(self.task_list, 1)
         row.addWidget(panel, 1)
         panel2, box2 = _panel()
-        box2.addWidget(_label("SELECTED TASK TIMELINE", "eyebrow"))
-        box2.addWidget(
-            _label("Metadata only. Events are not proof that a model or tool ran.", "subtle")
+        box2.addWidget(_label("ACTIVITY TRACE  /  CORE EVENTS", "eyebrow"))
+        self.activity_state = _label("SELECT A TASK", "sectionTitle")
+        box2.addWidget(self.activity_state)
+        self.activity_detail = _label(
+            "Real journal activity only. Coding, tool calls and model thinking "
+            "must have separate execution evidence.",
+            "subtle",
         )
+        box2.addWidget(self.activity_detail)
         self.events_list = QListWidget()
         self.events_list.setMinimumHeight(220)
         box2.addWidget(self.events_list, 1)
@@ -532,6 +543,7 @@ class MaxWindow(QMainWindow):
         for item in (
             "Native desktop window  —  ACTIVE",
             "Task journal  —  requires migrated local PostgreSQL",
+            "Activity trace  —  Core metadata only, refreshes on selection",
             "Trust inbox  —  read-only; no owner decisions",
             "Voice / microphone  —  not connected",
             "LLM conversations  —  not connected",
@@ -632,9 +644,25 @@ class MaxWindow(QMainWindow):
         identifier = item.data(Qt.ItemDataRole.UserRole)
         if not isinstance(identifier, str):
             return
+        self._selected_task_id = identifier
+        self.activity_state.setText("READING CORE")
+        self.activity_detail.setText("Retrieving authenticated task and journal metadata…")
         self.events_list.clear()
-        self.events_list.addItem("Loading read-only journal events…")
-        self._run("timeline", lambda: self.core.timeline(identifier))
+        self.events_list.addItem("Loading activity trace…")
+        self._poll_activity()
+
+    def _poll_activity(self) -> None:
+        """Never synthesize activity from time elapsed or the task objective."""
+        identifier = self._selected_task_id
+        if (
+            self._closing
+            or not self._store_ready
+            or identifier is None
+            or self.stack.currentIndex() != 1
+            or any(work.action == "activity" for work in self._running.values())
+        ):
+            return
+        self._run("activity", lambda: self.core.activity(identifier))
 
     def _done(self, sequence: int, action: str, value: Any) -> None:
         self._running.pop(sequence, None)
@@ -649,14 +677,16 @@ class MaxWindow(QMainWindow):
                 "Task recorded. No AI, shell command or computer action was executed."
             )
             self.refresh()
-        elif action == "timeline":
+        elif action == "activity" and isinstance(value, TaskActivity):
+            self.activity_state.setText(value.headline)
+            self.activity_detail.setText(value.description)
             self.events_list.clear()
-            for event in value:
-                kind = str(event.get("kind", "event"))[:90]
-                revision = str(event.get("task_revision", "?"))
-                self.events_list.addItem(f"{kind}    •    Revision {revision}")
-            if not value:
-                self.events_list.addItem("No recorded events.")
+            for record in value.rows:
+                self.events_list.addItem(
+                    f"◈  {record.heading}  ·  Revision {record.revision}\n     {record.explanation}"
+                )
+            if not value.rows:
+                self.events_list.addItem("No recorded activity. No tool calls are assumed.")
 
     def _failed(self, sequence: int, action: str, code: str) -> None:
         self._running.pop(sequence, None)
@@ -676,7 +706,9 @@ class MaxWindow(QMainWindow):
             self.system_storage.setText("Verify your local development database.")
         if action == "create":
             self.queue_button.setEnabled(self._store_ready)
-        if action == "timeline":
+        if action == "activity":
+            self.activity_state.setText("TRACE UNAVAILABLE")
+            self.activity_detail.setText("Core activity could not be verified.")
             self.events_list.clear()
             self.events_list.addItem(message)
 
@@ -691,6 +723,10 @@ class MaxWindow(QMainWindow):
         self.stat_trust.setText(str(len(snapshot.approvals)) if self._store_ready else "—")
         self.task_list.clear()
         if not self._store_ready:
+            self._selected_task_id = None
+            self.activity_state.setText("STORE NOT READY")
+            self.activity_detail.setText("Configure local PostgreSQL to view real activity.")
+            self.events_list.clear()
             self.recent_tasks.setText(
                 "No database configured. Explore the interface without creating tasks."
             )
@@ -724,6 +760,7 @@ class MaxWindow(QMainWindow):
 
     def closeEvent(self, event: Any) -> None:
         self._closing = True
+        self._activity_timer.stop()
         self.orb.set_quiet(True)
         self._pool.waitForDone()
         self.core.close()
