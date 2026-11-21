@@ -67,7 +67,7 @@ def response(
         "mock",
         "mock",
         "",
-        (ToolProposal("call-1", name, args if args is not None else {"task_id": "abc"}),),
+        (ToolProposal("call-1", name, args if args is not None else {"task_id": "zq-marker-xx"}),),
         "tool_calls",
         None,
         None,
@@ -80,7 +80,7 @@ def test_review_creates_only_inert_binding() -> None:
     assert intent.state == "blocked_pending_dispatch"
     assert intent.requires_owner_approval and intent.risk == RiskTier.R2
     assert len(intent.binding_sha256) == 64
-    assert "abc" not in repr(intent)
+    assert "zq-marker-xx" not in repr(intent)
 
 
 def test_server_readonly_hint_cannot_lower_risk() -> None:
