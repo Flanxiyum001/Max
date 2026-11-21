@@ -207,7 +207,6 @@ def load(checkpoint: Path) -> ByteTransformer:
     return model
 
 
-@torch.inference_mode()
 def sample(checkpoint: Path, prompt: str, *, tokens: int = 120, seed: int = 17) -> str:
     if not 1 <= tokens <= MAX_GENERATE_TOKENS or not 0 <= seed < 2**32:
         raise ValueError("Invalid sampling bounds")
@@ -216,12 +215,13 @@ def sample(checkpoint: Path, prompt: str, *, tokens: int = 120, seed: int = 17) 
     model = load(checkpoint)
     input_bytes = list(prompt.encode("utf-8")) or [10]
     rng = torch.Generator(device="cpu").manual_seed(seed)
-    for _ in range(tokens):
-        context = torch.tensor([input_bytes[-model.config.context :]], dtype=torch.long)
-        logits = model(context)[0, -1, :]
-        probability = torch.softmax(logits, dim=-1)
-        next_byte = int(torch.multinomial(probability, 1, generator=rng).item())
-        input_bytes.append(next_byte)
+    with torch.inference_mode():
+        for _ in range(tokens):
+            context = torch.tensor([input_bytes[-model.config.context :]], dtype=torch.long)
+            logits = model(context)[0, -1, :]
+            probability = torch.softmax(logits, dim=-1)
+            next_byte = int(torch.multinomial(probability, 1, generator=rng).item())
+            input_bytes.append(next_byte)
     return bytes(input_bytes).decode("utf-8", errors="replace")
 
 
