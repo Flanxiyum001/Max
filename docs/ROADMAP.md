@@ -134,3 +134,7 @@ A separate [Milestone 7 bounded worker](BOUNDED_WORKER.md) PR extends the owner-
 ## Milestone 8 — independent dev.add evidence observation (review-only)
 
 The next [local deterministic expected-result observer](INDEPENDENT_EVIDENCE_OBSERVER.md) compares independently recomputed `dev.add` arithmetic against Milestone 7's **untrusted** SHA-256 claim and records task/attempt-bound provenance, exact idempotency and an atomic existing-verifier completion. Unsupported, contradictory or unavailable evidence never completes or retries a task. This milestone is **not** external-effect attestation, actual worker-execution proof, autonomous behavior, model/tool permissions, production identity, a general sandbox, or owner-device deployment. The schema is additive and reviewed on its own PR with manual owner merge. All future personal/remote/effectful observer sources require stronger process/DB isolation and independent source integrity.
+
+## Milestone 23 — bounded tool calling and `max chat` (review-only)
+
+Adds a tool registry with READ_ONLY/EFFECTFUL tiers, a bounded multi-step tool loop and an interactive terminal chat over the existing local/cloud trial settings. Effectful tools require my per-call typed approval. Mock-tested only; real Ollama / free-API runs are owner acceptance steps. See [M23_TOOL_LOOP.md](M23_TOOL_LOOP.md).
