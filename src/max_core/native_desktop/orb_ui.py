@@ -65,7 +65,7 @@ class OrbView(QWidget):
         self.state = IDLE
         self.energy = 0.0  # smoothed 0..1, drives speed and brightness
         self._timer = QTimer(self)
-        self._timer.setInterval(16)
+        self._timer.setInterval(33)  # bounded redraw rate while MAX is idle
         self._timer.timeout.connect(self._tick)
         self._timer.start()
 
@@ -251,6 +251,10 @@ class OrbWindow(QWidget):
         self._pool.setMaxThreadCount(1)
         self._busy = False
         self._closing = False
+        self._close_requested = False
+        self._state_timer = QTimer(self)
+        self._state_timer.setSingleShot(True)
+        self._state_timer.timeout.connect(self._idle_after_reply)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(40, 30, 40, 26)
@@ -309,24 +313,35 @@ class OrbWindow(QWidget):
 
     def _done(self, reply: LocalModelReply) -> None:
         self._busy = False
+        if self._close_requested:
+            QTimer.singleShot(0, self.close)
+            return
         if self._closing:
             return
         if reply.state == "failed":
             self._failed(reply.error_code or "unavailable")
             return
         self.orb.set_state(SPEAKING)
-        QTimer.singleShot(2500, lambda: self.orb.set_state(IDLE) if not self._busy else None)
+        self._state_timer.start(2500)
         self._show_answer(reply.text.strip() or "…")
 
     def _failed(self, code: str) -> None:
         self._busy = False
+        if self._close_requested:
+            QTimer.singleShot(0, self.close)
+            return
         if self._closing:
             return
         self.orb.set_state(ERROR)
-        QTimer.singleShot(2500, lambda: self.orb.set_state(IDLE) if not self._busy else None)
+        self._state_timer.start(2500)
         self._show_answer(_ERRORS.get(code, "I couldn't reach my model just now."))
 
+    def _idle_after_reply(self) -> None:
+        if not self._busy and not self._closing:
+            self.orb.set_state(IDLE)
+
     def _show_answer(self, text: str | None) -> None:
+        self._hide_timer.stop()  # old answer cannot hide a newer reply
         if text is None:
             self._fade_target = 0.0
         else:
@@ -393,8 +408,19 @@ class OrbWindow(QWidget):
             self.close()
 
     def closeEvent(self, event: Any) -> None:
+        if self._busy:
+            # The worker may be waiting on a local model for up to 45 seconds.
+            # Never freeze the GUI in waitForDone during an in-flight request.
+            self._close_requested = True
+            event.ignore()
+            return
         self._closing = True
+        self._state_timer.stop()
+        self._hide_timer.stop()
+        self._fade_timer.stop()
+        self.orb._timer.stop()
         self._pool.waitForDone()
+        self.core.close()
         super().closeEvent(event)
 
 
@@ -428,9 +454,7 @@ def launch_orb(*, smoke_test: bool = False) -> int:
     app.setQuitOnLastWindowClosed(False)
     window.destroyed.connect(app.quit)
     window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
-    code = app.exec()
-    core.close()
-    return code
+    return app.exec()
 
 
 __all__ = ["OrbView", "OrbWindow", "launch_orb"]
