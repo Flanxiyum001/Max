@@ -144,9 +144,9 @@ def train(
     for _ in range(steps):
         starts = torch.randint(0, maximum_start, (batch_size,))
         x = torch.stack([tokens[int(s) : int(s) + config.context] for s in starts]).to(device)
-        y = torch.stack(
-            [tokens[int(s) + 1 : int(s) + config.context + 1] for s in starts]
-        ).to(device)
+        y = torch.stack([tokens[int(s) + 1 : int(s) + config.context + 1] for s in starts]).to(
+            device
+        )
         optimizer.zero_grad(set_to_none=True)
         predictions = model(x)
         loss = F.cross_entropy(predictions.reshape(-1, VOCAB_SIZE), y.reshape(-1))
