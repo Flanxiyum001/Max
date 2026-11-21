@@ -338,7 +338,7 @@ class MaxWindow(QMainWindow):
         footer_layout.addLayout(form)
         body.addWidget(footer)
         self.notice = _label(
-            "Local command deck only. AI chat and microphone are not connected.", "sidebarNote"
+            "Local model trial requires explicit opt-in; no voice or tool execution.", "sidebarNote"
         )
         self.notice.setContentsMargins(20, 3, 15, 12)
         body.addWidget(self.notice)
@@ -388,8 +388,8 @@ class MaxWindow(QMainWindow):
         hero_text.addWidget(
             _label(
                 "This desktop companion is a native application. "
-                "You can inspect task records and Trust requests; AI and computer-control "
-                "features are still gated.",
+                "You can inspect task records and run an optional local-only model trial; "
+                "computer-control features remain gated.",
                 "subtle",
             )
         )
@@ -412,7 +412,7 @@ class MaxWindow(QMainWindow):
         self.stat_core = self._stat(stats, "CORE STATUS", "STARTING", "Private in-process")
         self.stat_tasks = self._stat(stats, "TRACKED TASKS", "—", "Requires PostgreSQL")
         self.stat_trust = self._stat(stats, "PENDING TRUST", "—", "Read-only inbox")
-        self._stat(stats, "MODEL EXECUTION", "NOT WIRED", "Not an AI chat client")
+        self._stat(stats, "LOCAL MODEL", "OPT-IN", "No automatic tools")
         layout.addLayout(stats)
 
         sections = QHBoxLayout()
@@ -612,7 +612,7 @@ class MaxWindow(QMainWindow):
         self.notice.setText(
             "Quiet mode limits animation in this window; it does not control OS notifications."
             if self._quiet
-            else "Local command deck only. AI chat and microphone are not connected."
+            else "Local model trial is manual. Voice and tool execution are not connected."
         )
 
     def eventFilter(self, watched: QObject, event: Any) -> bool:
