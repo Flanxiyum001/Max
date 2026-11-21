@@ -7,6 +7,7 @@ job and never imported by the regular headless MAX Core/server process.
 
 from __future__ import annotations
 
+import os
 import sys
 from collections.abc import Callable
 from typing import Any
@@ -44,6 +45,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QSizeGrip,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -57,6 +59,7 @@ from max_core.native_desktop.backend import (
     NativeDesktopCore,
     NativeDesktopError,
 )
+from max_core.native_desktop.title_bar import AccentStrip, IslandState, IslandTitleBar
 
 STYLE = """
 QWidget { color: #eae8f3; font-family: "Segoe UI", "Inter", sans-serif; font-size: 12px; }
@@ -94,6 +97,7 @@ QPlainTextEdit:focus, QListWidget:focus { border: 1px solid #af84eb; }
 QListWidget::item { padding: 11px; border-bottom: 1px solid #292337; }
 QListWidget::item:selected { background: #403159; color: #fff; border-radius: 8px; }
 QScrollArea { background: transparent; border: none; }
+QScrollArea > QWidget > QWidget#page { background: #090a12; }
 QScrollBar:vertical { background: #12111c; width: 9px; }
 QScrollBar::handle:vertical { background: #544260; border-radius: 4px; min-height: 20px; }
 """
@@ -258,10 +262,36 @@ class MaxWindow(QMainWindow):
         self._quiet = False
         self._task_ids: list[str] = []
         self._selected_task_id: str | None = None
+        self._history: list[int] = [0]
+        self._history_index = 0
+        # MAX_NATIVE_SYSTEM_FRAME=yes keeps the OS title bar (e.g. for tiling WMs).
+        self._custom_frame = os.environ.get("MAX_NATIVE_SYSTEM_FRAME") != "yes"
+        if self._custom_frame:
+            self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
 
+        outer = QWidget()
+        outer.setObjectName("root")
+        self.setCentralWidget(outer)
+        shell = QVBoxLayout(outer)
+        shell.setContentsMargins(0, 0, 0, 0)
+        shell.setSpacing(0)
+        self.title_bar = IslandTitleBar(self)
+        self.title_bar.back.connect(self.go_back)
+        self.title_bar.forward.connect(self.go_forward)
+        self.title_bar.inbox.connect(lambda: self.switch(2))
+        self.title_bar.help.connect(self.show_help)
+        if not self._custom_frame:
+            for button in (
+                self.title_bar.min_button,
+                self.title_bar.max_button,
+                self.title_bar.close_button,
+            ):
+                button.hide()
+        shell.addWidget(self.title_bar)
+        shell.addWidget(AccentStrip())
         root = QWidget()
         root.setObjectName("root")
-        self.setCentralWidget(root)
+        shell.addWidget(root, 1)
         frame = QHBoxLayout(root)
         frame.setContentsMargins(0, 0, 0, 0)
         frame.setSpacing(0)
@@ -344,7 +374,17 @@ class MaxWindow(QMainWindow):
         body.addWidget(self.notice)
         frame.addWidget(right, 1)
 
+        if self._custom_frame:
+            grip = QSizeGrip(self)
+            grip.setFixedSize(14, 14)
+            footer_row = QHBoxLayout()
+            footer_row.setContentsMargins(0, 0, 0, 0)
+            footer_row.addStretch(1)
+            footer_row.addWidget(grip, 0, Qt.AlignmentFlag.AlignBottom)
+            body.addLayout(footer_row)
         QShortcut(QKeySequence("Ctrl+K"), self, activated=self.command.setFocus)
+        QShortcut(QKeySequence("Alt+Left"), self, activated=self.go_back)
+        QShortcut(QKeySequence("Alt+Right"), self, activated=self.go_forward)
         for i in range(4):
             QShortcut(
                 QKeySequence(f"Alt+{i + 1}"), self, activated=lambda number=i: self.switch(number)
@@ -358,6 +398,7 @@ class MaxWindow(QMainWindow):
     def _scroll(self, page: QWidget) -> QScrollArea:
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        page.setObjectName("page")
         scroll.setWidget(page)
         return scroll
 
@@ -597,9 +638,17 @@ class MaxWindow(QMainWindow):
         layout.addStretch(1)
         return page
 
-    def switch(self, index: int) -> None:
+    def switch(self, index: int, *, record: bool = True) -> None:
         if not 0 <= index < self.stack.count():
             return
+        if record and index != self._history[self._history_index]:
+            del self._history[self._history_index + 1 :]
+            self._history.append(index)
+            self._history = self._history[-50:]
+            self._history_index = len(self._history) - 1
+        self.title_bar.set_history(
+            self._history_index > 0, self._history_index < len(self._history) - 1
+        )
         self.stack.setCurrentIndex(index)
         self.crumb.setText("MAX  /  " + ("Overview", "Tasks", "Trust", "System")[index])
         for n, button in enumerate(self.nav):
@@ -607,9 +656,34 @@ class MaxWindow(QMainWindow):
             button.style().unpolish(button)
             button.style().polish(button)
 
+    def go_back(self) -> None:
+        if self._history_index > 0:
+            self._history_index -= 1
+            self.switch(self._history[self._history_index], record=False)
+
+    def go_forward(self) -> None:
+        if self._history_index < len(self._history) - 1:
+            self._history_index += 1
+            self.switch(self._history[self._history_index], record=False)
+
+    def show_help(self) -> None:
+        self.notice.setText(
+            "Commands: /status, /tasks, /trust, /task <objective>, /ask <text>. "
+            "Alt+Left/Right navigate, Ctrl+K focuses the command bar."
+        )
+
+    def _sync_island(self) -> None:
+        if any(work.action == "model" for work in self._running.values()):
+            self.title_bar.island.set_state(IslandState.THINKING)
+        elif self._quiet:
+            self.title_bar.island.set_state(IslandState.QUIET)
+        else:
+            self.title_bar.island.set_state(IslandState.IDLE)
+
     def toggle_quiet(self) -> None:
         self._quiet = not self._quiet
         self.orb.set_quiet(self._quiet)
+        self._sync_island()
         self.focus_button.setText("Quiet mode: on" if self._quiet else "Quiet mode: off")
         self.notice.setText(
             "Quiet mode limits animation in this window; it does not control OS notifications."
@@ -692,6 +766,7 @@ class MaxWindow(QMainWindow):
         work.signals.progress.connect(self._progress)
         self._running[sequence] = work
         self._pool.start(work)
+        self._sync_island()
 
     def _progress(self, sequence: int, action: str, value: Any) -> None:
         if (
@@ -779,6 +854,8 @@ class MaxWindow(QMainWindow):
 
     def _done(self, sequence: int, action: str, value: Any) -> None:
         self._running.pop(sequence, None)
+        if not self._closing:
+            self._sync_island()
         if self._closing or self._latest.get(action) != sequence:
             return
         if action == "snapshot":
@@ -817,6 +894,8 @@ class MaxWindow(QMainWindow):
 
     def _failed(self, sequence: int, action: str, code: str) -> None:
         self._running.pop(sequence, None)
+        if not self._closing:
+            self._sync_island()
         if self._closing or self._latest.get(action) != sequence:
             return
         messages = {
@@ -922,7 +1001,11 @@ def launch(*, smoke_test: bool = False) -> int:
     window.show()
     if smoke_test:
         app.processEvents()
-        healthy = window.isVisible() and window.stack.count() == 4
+        healthy = (
+            window.isVisible()
+            and window.stack.count() == 4
+            and window.title_bar.island.state == IslandState.IDLE
+        )
         window.close()
         return 0 if healthy else 1
     return app.exec()
