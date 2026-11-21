@@ -693,6 +693,17 @@ class DesktopSpeechToText:
         return self._endpoint
 
     @property
+    def requires_remote_upload(self) -> bool:
+        """The HTTP STT adapter sends captured WAV audio to a remote service."""
+        if self._transcribe_fn is not None:
+            return False  # explicit injected local/in-memory transcription handler
+        try:
+            hostname = urlsplit(self._endpoint).hostname or ""
+        except ValueError:
+            return True
+        return not _is_loopback_host(hostname)
+
+    @property
     def model(self) -> str:
         return self._model
 
