@@ -7,7 +7,9 @@ The strong bootstrap token never leaves this Python process.
 from __future__ import annotations
 
 import asyncio
+import os
 import re
+import stat
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -139,7 +141,28 @@ def _create_local_sqlite_store(url_str: str) -> tuple[Engine, TaskStore]:
             or "?" in url_str
         ):
             raise NativeDesktopError("invalid_local_database_configuration")
-        Path(db_name).parent.mkdir(parents=True, exist_ok=True)
+        db_path = Path(db_name)
+        db_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        # The durable journal contains task details, Trust decisions and memory.
+        # Never follow an existing SQLite-file symlink or open a shared Unix DB.
+        if db_path.is_symlink():
+            raise NativeDesktopError("unsafe_sqlite_path")
+        try:
+            descriptor = os.open(
+                db_path,
+                os.O_CREAT | os.O_EXCL | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+            )
+        except FileExistsError:
+            info = db_path.lstat()
+            if not stat.S_ISREG(info.st_mode):
+                raise NativeDesktopError("unsafe_sqlite_path")
+            if os.name == "posix" and (
+                info.st_uid != os.getuid() or info.st_mode & 0o077
+            ):
+                raise NativeDesktopError("unsafe_sqlite_permissions")
+        else:
+            os.close(descriptor)
         engine = create_engine(
             url_str,
             connect_args={"check_same_thread": False, "timeout": 30.0},
@@ -414,14 +437,18 @@ class NativeDesktopCore:
         Do not deserialize model/tool payloads, accept pseudo-live claims or infer
         active coding from a generic task objective.
         """
-        events = self.timeline(task_id)
-        item = self._call("GET", f"/v1/tasks/{task_id}")
-        if not isinstance(item, dict) or not isinstance(item.get("state"), str):
-            raise NativeDesktopError("invalid_core_response")
+        self._enter_call()
         try:
-            return task_activity(item["state"], events)
-        except ValueError:
-            raise NativeDesktopError("invalid_core_response") from None
+            events = self.timeline(task_id)
+            item = self._call("GET", f"/v1/tasks/{task_id}")
+            if not isinstance(item, dict) or not isinstance(item.get("state"), str):
+                raise NativeDesktopError("invalid_core_response")
+            try:
+                return task_activity(item["state"], events)
+            except ValueError:
+                raise NativeDesktopError("invalid_core_response") from None
+        finally:
+            self._exit_call()
 
     def ask_local(
         self,
