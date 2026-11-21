@@ -46,8 +46,6 @@ def test_qt_native_window_enables_tasks_with_local_sqlite(
         window._show_snapshot(core.snapshot())
         assert window.stat_tasks.text() == "1"
         assert window.task_list.count() == 1
-        assert task["id"] == window.task_list.item(0).data(
-            Qt.ItemDataRole.UserRole
-        )
+        assert task["id"] == window.task_list.item(0).data(Qt.ItemDataRole.UserRole)
     finally:
         window.close()
