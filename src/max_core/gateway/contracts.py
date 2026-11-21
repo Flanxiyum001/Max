@@ -5,7 +5,9 @@ Model replies are *untrusted* proposals. A future MAX Trust layer must authorize
 
 from __future__ import annotations
 
+import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
@@ -37,20 +39,150 @@ class InferenceDestination(StrEnum):
     UNKNOWN = "unknown"
 
 
-Role = Literal["system", "user", "assistant"]
+Role = Literal["system", "user", "assistant", "tool"]
 StreamKind = Literal["start", "content_delta", "tool_proposal", "usage", "complete"]
+
+_TOOL_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]{0,99}")
+
+
+def _default_tool_parameters() -> dict[str, Any]:
+    return {"type": "object", "properties": {}}
+
+
+def _require_utf8(value: str, message: str) -> None:
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError(message) from None
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class ToolProposal:
+    call_id: str
+    name: str
+    arguments: dict[str, Any]
+    # Not a tool execution result, approval, or a permission grant.
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class ToolDefinition:
+    name: str
+    description: str
+    parameters: dict[str, Any] = field(default_factory=_default_tool_parameters)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or _TOOL_NAME_RE.fullmatch(self.name) is None:
+            raise ValueError("Invalid tool definition name")
+        if not isinstance(self.description, str) or len(self.description) > 4_000:
+            raise ValueError("Tool description must be text of at most 4,000 characters")
+        _require_utf8(self.description, "Tool description must be valid UTF-8 text")
+        if not isinstance(self.parameters, dict):
+            raise ValueError("Tool parameters must be a JSON object schema")
+        try:
+            encoded = json.dumps(
+                self.parameters, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+            )
+            encoded_bytes = encoded.encode("utf-8")
+        except (TypeError, ValueError, RecursionError):
+            raise ValueError("Tool parameters must be JSON-serializable") from None
+        if len(encoded_bytes) > 32_000:
+            raise ValueError("Tool parameters schema exceeds 32,000 bytes")
+
+
+def request_envelope_bytes(
+    messages: Sequence[ChatMessage], tools: Sequence[ToolDefinition] = ()
+) -> int:
+    total = 0
+    try:
+        for message in messages:
+            total += len(message.content.encode("utf-8")) + 32
+            if message.tool_call_id is not None:
+                total += len(message.tool_call_id.encode("utf-8")) + 16
+            for call in message.tool_calls:
+                encoded = json.dumps(
+                    call.arguments, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+                )
+                total += (
+                    len(call.call_id.encode("utf-8"))
+                    + len(call.name.encode("utf-8"))
+                    + len(encoded.encode("utf-8"))
+                    + 16
+                )
+        for tool in tools:
+            encoded = json.dumps(
+                tool.parameters, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+            )
+            total += (
+                len(tool.name.encode("utf-8"))
+                + len(tool.description.encode("utf-8"))
+                + len(encoded.encode("utf-8"))
+                + 32
+            )
+    except (TypeError, ValueError, RecursionError):
+        raise ValueError("Gateway payload must be JSON-serializable") from None
+    return total
 
 
 @dataclass(frozen=True, slots=True, repr=False)
 class ChatMessage:
     role: Role
-    content: str
+    content: str = ""
+    tool_calls: tuple[ToolProposal, ...] = ()
+    tool_call_id: str | None = None
+    is_error: bool = False
 
     def __post_init__(self) -> None:
-        if self.role not in {"system", "user", "assistant"}:
+        if self.role not in {"system", "user", "assistant", "tool"}:
             raise ValueError("Unsupported role")
         if not isinstance(self.content, str) or len(self.content) > 32_000:
             raise ValueError("Message must be text of at most 32,000 characters")
+        _require_utf8(self.content, "Message must be valid UTF-8 text")
+        if type(self.is_error) is not bool:
+            raise ValueError("Tool error flag must be a boolean")
+        if not isinstance(self.tool_calls, tuple) or len(self.tool_calls) > 16:
+            raise ValueError("tool_calls must be a tuple of at most 16 proposals")
+        if self.role == "tool":
+            if (
+                not isinstance(self.tool_call_id, str)
+                or not 1 <= len(self.tool_call_id) <= 128
+                or any(ch in self.tool_call_id for ch in ("\r", "\n", "\x00"))
+            ):
+                raise ValueError("Tool messages require a valid tool_call_id")
+            _require_utf8(self.tool_call_id, "Tool messages require a valid tool_call_id")
+            if self.tool_calls:
+                raise ValueError("Tool messages cannot include tool_calls")
+        else:
+            if self.tool_call_id is not None or self.is_error:
+                raise ValueError("tool_call_id and is_error are only valid for tool messages")
+        if self.tool_calls:
+            if self.role != "assistant":
+                raise ValueError("Only assistant messages may include tool_calls")
+            for call in self.tool_calls:
+                if not isinstance(call, ToolProposal):
+                    raise ValueError("Invalid tool proposal")
+                if (
+                    not isinstance(call.call_id, str)
+                    or not 1 <= len(call.call_id) <= 128
+                    or any(ch in call.call_id for ch in ("\r", "\n", "\x00"))
+                ):
+                    raise ValueError("Invalid tool proposal call_id")
+                _require_utf8(call.call_id, "Invalid tool proposal call_id")
+                if not isinstance(call.name, str) or _TOOL_NAME_RE.fullmatch(call.name) is None:
+                    raise ValueError("Invalid tool proposal name")
+                if not isinstance(call.arguments, dict):
+                    raise ValueError("Tool proposal arguments must be a JSON object")
+                try:
+                    encoded = json.dumps(
+                        call.arguments,
+                        separators=(",", ":"),
+                        ensure_ascii=False,
+                        allow_nan=False,
+                    )
+                    encoded_bytes = encoded.encode("utf-8")
+                except (TypeError, ValueError, RecursionError):
+                    raise ValueError("Tool proposal arguments must be JSON-serializable") from None
+                if len(encoded_bytes) > 32_000:
+                    raise ValueError("Tool proposal arguments exceed 32,000 bytes")
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -88,6 +220,8 @@ class ModelSpec:
             not self.api_key or "\n" in self.api_key or "\r" in self.api_key
         ):
             raise ValueError("Invalid API key configuration")
+        if self.api_key is not None:
+            _require_utf8(self.api_key, "Invalid API key configuration")
         parts = urlsplit(self.endpoint)
         hostname = parts.hostname or ""
         if (
@@ -110,7 +244,9 @@ class ModelSpec:
         elif parts.scheme != "https" or hostname.lower() in {"localhost", "127.0.0.1", "::1"}:
             raise ValueError("Remote model endpoints require HTTPS and a non-loopback host")
         for rate in (self.input_usd_per_million, self.output_usd_per_million):
-            if rate is not None and (not rate.is_finite() or rate < 0):
+            if rate is not None and (
+                not isinstance(rate, Decimal) or not rate.is_finite() or rate < 0
+            ):
                 raise ValueError("Invalid model token pricing")
 
 
@@ -130,6 +266,7 @@ class GatewayRequest:
     allowed_regions: frozenset[str] = frozenset()
     allow_fallback: bool = False
     timeout_seconds: float = 20.0
+    tools: tuple[ToolDefinition, ...] = ()
 
     def __post_init__(self) -> None:
         if not re.fullmatch(r"[A-Za-z0-9._:-]{1,100}", self.request_id):
@@ -151,19 +288,25 @@ class GatewayRequest:
         if not self.required_capabilities or not self.required_capabilities <= {"text", "tools"}:
             raise ValueError("Unsupported requested capabilities")
         if self.max_cost_usd is not None and (
-            not self.max_cost_usd.is_finite() or self.max_cost_usd < 0
+            not isinstance(self.max_cost_usd, Decimal)
+            or not self.max_cost_usd.is_finite()
+            or self.max_cost_usd < 0
         ):
             raise ValueError("Invalid USD spend ceiling")
         if not 1 <= self.timeout_seconds <= 120:
             raise ValueError("Invalid deadline")
         if any(not isinstance(x, ChatMessage) for x in self.messages):
             raise ValueError("Invalid message type")
+        if not isinstance(self.tools, tuple) or len(self.tools) > 32:
+            raise ValueError("At most 32 tool definitions are supported")
+        if any(not isinstance(tool, ToolDefinition) for tool in self.tools):
+            raise ValueError("Invalid tool definition")
+        tool_names = [tool.name for tool in self.tools]
+        if len(set(tool_names)) != len(tool_names):
+            raise ValueError("Duplicate tool definition name")
         # Byte count is a deliberately conservative text-only admission estimate.
         # Provider-specific token counting remains unverified; this is not a billing SLA.
-        if (
-            sum(len(message.content.encode("utf-8")) + 32 for message in self.messages)
-            > self.max_input_tokens
-        ):
+        if request_envelope_bytes(self.messages, self.tools) > self.max_input_tokens:
             raise ValueError("Declared input-token ceiling is below conservative text envelope")
         seen_non_system = False
         for message in self.messages:
@@ -177,14 +320,6 @@ class GatewayRequest:
 class TokenUsage:
     input_tokens: int | None
     output_tokens: int | None
-
-
-@dataclass(frozen=True, slots=True, repr=False)
-class ToolProposal:
-    call_id: str
-    name: str
-    arguments: dict[str, Any]
-    # Not a tool execution result, approval, or a permission grant.
 
 
 @dataclass(frozen=True, slots=True, repr=False)

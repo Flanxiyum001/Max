@@ -16,7 +16,15 @@ from max_core.gateway.contracts import (
     StreamEvent,
     TokenUsage,
 )
-from max_core.gateway.normalize import MAX_TEXT, MAX_TOOLS, _mapping, _text, _tool, _usage
+from max_core.gateway.normalize import (
+    MAX_TEXT,
+    MAX_TOOLS,
+    _mapping,
+    _text,
+    _tool,
+    _usage,
+    model_matches,
+)
 
 MAX_EVENTS = 5_000
 MAX_STREAM_BYTES = 1_000_000
@@ -29,7 +37,11 @@ async def sse_frames(lines: AsyncIterator[str]) -> AsyncIterator[tuple[str, str]
     total_bytes = 0
     count = 0
     async for line in lines:
-        total_bytes += len(line.encode("utf-8"))
+        try:
+            line_bytes = len(line.encode("utf-8"))
+        except UnicodeEncodeError:
+            raise GatewayError("malformed_provider_response") from None
+        total_bytes += line_bytes
         if total_bytes > MAX_STREAM_BYTES:
             raise GatewayError("stream_too_large")
         if line == "":
@@ -51,7 +63,7 @@ async def sse_frames(lines: AsyncIterator[str]) -> AsyncIterator[tuple[str, str]
 def _json(data: str) -> dict[str, Any]:
     try:
         result = json.loads(data)
-    except (ValueError, json.JSONDecodeError):
+    except (ValueError, json.JSONDecodeError, RecursionError):
         raise GatewayError("malformed_provider_response") from None
     return _mapping(result)
 
@@ -74,7 +86,7 @@ async def openai_events(
         if event not in {"message", "chunk"}:
             raise GatewayError("malformed_provider_response")
         obj = _json(raw)
-        if obj.get("model") is not None and obj["model"] != spec.model_id:
+        if obj.get("model") is not None and not model_matches(spec.model_id, obj["model"]):
             raise GatewayError("model_mismatch")
         usage = _usage(obj.get("usage"), "prompt_tokens", "completion_tokens")
         if usage is not None:
@@ -117,6 +129,10 @@ async def openai_events(
             if call_id is not None:
                 if not isinstance(call_id, str) or not call_id:
                     raise GatewayError("invalid_tool_proposal")
+                try:
+                    call_id.encode("utf-8")
+                except UnicodeEncodeError:
+                    raise GatewayError("invalid_tool_proposal") from None
                 state["id"] += call_id
             fn = tool.get("function")
             if fn is not None:
@@ -126,6 +142,10 @@ async def openai_events(
                     if part is not None:
                         if not isinstance(part, str):
                             raise GatewayError("invalid_tool_proposal")
+                        try:
+                            part.encode("utf-8")
+                        except UnicodeEncodeError:
+                            raise GatewayError("invalid_tool_proposal") from None
                         state[key] += part
             if len(state["arguments"]) > 32_000:
                 raise GatewayError("invalid_tool_proposal")
@@ -133,6 +153,10 @@ async def openai_events(
         if reason is not None:
             if not isinstance(reason, str):
                 raise GatewayError("malformed_provider_response")
+            try:
+                reason.encode("utf-8")
+            except UnicodeEncodeError:
+                raise GatewayError("malformed_provider_response") from None
             finish = reason
     if not finished:
         raise GatewayError("stream_interrupted")
@@ -181,7 +205,7 @@ async def anthropic_events(
             raise GatewayError("provider_unavailable")
         if kind == "message_start":
             msg = _mapping(obj.get("message"))
-            if msg.get("model") is not None and msg["model"] != spec.model_id:
+            if msg.get("model") is not None and not model_matches(spec.model_id, msg["model"]):
                 raise GatewayError("model_mismatch")
             usage = _usage(msg.get("usage"), "input_tokens", "output_tokens")
             if usage is not None:
@@ -212,10 +236,19 @@ async def anthropic_events(
                 tool_count += 1
                 if tool_count > MAX_TOOLS:
                     raise GatewayError("invalid_tool_proposal")
+                tool_id = block.get("id", "")
+                tool_name = block.get("name", "")
+                if not isinstance(tool_id, str) or not isinstance(tool_name, str):
+                    raise GatewayError("invalid_tool_proposal")
+                try:
+                    tool_id.encode("utf-8")
+                    tool_name.encode("utf-8")
+                except UnicodeEncodeError:
+                    raise GatewayError("invalid_tool_proposal") from None
                 blocks[idx] = {
                     "type": "tool_use",
-                    "id": block.get("id", ""),
-                    "name": block.get("name", ""),
+                    "id": tool_id,
+                    "name": tool_name,
                     "input": "",
                 }
             else:
@@ -245,6 +278,10 @@ async def anthropic_events(
                 part = delta.get("partial_json")
                 if not isinstance(part, str):
                     raise GatewayError("invalid_tool_proposal")
+                try:
+                    part.encode("utf-8")
+                except UnicodeEncodeError:
+                    raise GatewayError("invalid_tool_proposal") from None
                 block["input"] += part
                 if len(block["input"]) > 32_000:
                     raise GatewayError("invalid_tool_proposal")
@@ -273,6 +310,10 @@ async def anthropic_events(
             if reason is not None:
                 if not isinstance(reason, str):
                     raise GatewayError("malformed_provider_response")
+                try:
+                    reason.encode("utf-8")
+                except UnicodeEncodeError:
+                    raise GatewayError("malformed_provider_response") from None
                 finish = reason
             usage = _usage(obj.get("usage"), "input_tokens", "output_tokens")
             if usage is not None:

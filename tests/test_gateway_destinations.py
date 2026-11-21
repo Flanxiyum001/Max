@@ -31,6 +31,7 @@ from max_core.gateway import (
     TokenUsage,
     ToolProposal,
 )
+from max_core.gateway.contracts import ToolDefinition
 from tests.test_gateway import OPENAI_DATA, cloud, local, request, run_complete
 
 
@@ -266,6 +267,12 @@ def test_gateway_request_and_response_repr_hide_prompts_and_tool_arguments() -> 
         max_output_tokens=5,
     )
     proposal = ToolProposal(call_id="call1", name="search", arguments={"token": tool_marker})
+    tool_def = ToolDefinition(
+        name="search",
+        description=f"desc {marker}",
+        parameters={"type": "object", "properties": {"q": {"description": tool_marker}}},
+    )
+    tool_msg = ChatMessage("tool", f"result {marker}", tool_call_id="call1")
     result = GatewayResponse(
         request_id="sensitive-req-001",
         provider_id="fake",
@@ -285,7 +292,7 @@ def test_gateway_request_and_response_repr_hide_prompts_and_tool_arguments() -> 
         text=marker,
         tool_proposal=proposal,
     )
-    for value in (req.messages[0], req, proposal, result, event):
+    for value in (req.messages[0], req, proposal, tool_def, tool_msg, result, event):
         assert marker not in repr(value)
         assert tool_marker not in repr(value)
         assert marker not in str(value)
