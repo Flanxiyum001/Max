@@ -326,7 +326,9 @@ class OrbWindow(QWidget):
             # potentially misleading model completion claim as task evidence.
             self.orb.set_state(ERROR)
             self._state_timer.start(2500)
-            self._show_answer("The model proposed tool actions. Nothing was executed; review required.")
+            self._show_answer(
+                "The model proposed tool actions. Nothing was executed; review required."
+            )
             return
         self.orb.set_state(SPEAKING)
         self._state_timer.start(2500)
