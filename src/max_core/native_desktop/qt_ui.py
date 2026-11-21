@@ -53,9 +53,9 @@ from max_core.activity_view import TaskActivity
 from max_core.agent_harness import ActivityEvent, ActivityKind
 from max_core.native_desktop.backend import (
     DesktopSnapshot,
+    LocalModelReply,
     NativeDesktopCore,
     NativeDesktopError,
-    LocalModelReply,
 )
 
 STYLE = """
