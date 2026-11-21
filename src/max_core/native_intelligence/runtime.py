@@ -184,7 +184,10 @@ def train(
 def load(checkpoint: Path) -> ByteTransformer:
     """Load strictly shaped tensors only; never unpickle arbitrary Python objects."""
     metadata = json.loads((checkpoint / METADATA_FILE).read_text(encoding="utf-8"))
-    if metadata.get("format") != 1 or metadata.get("origin") != "trained_from_random_initialization":
+    if (
+        metadata.get("format") != 1
+        or metadata.get("origin") != "trained_from_random_initialization"
+    ):
         raise ValueError("Unsupported or unverified model metadata")
     if metadata.get("architecture") != "max_byte_causal_transformer_v1":
         raise ValueError("Unsupported model architecture")
@@ -226,7 +229,9 @@ def sample(checkpoint: Path, prompt: str, *, tokens: int = 120, seed: int = 17) 
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="MAX native model research (offline, from scratch)")
+    parser = argparse.ArgumentParser(
+        description="MAX native model research (offline, from scratch)"
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     trainer = commands.add_parser("train", help="Train only on explicitly listed, permitted files")
     trainer.add_argument("--input", action="append", type=Path, required=True)
