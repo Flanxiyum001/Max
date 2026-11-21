@@ -80,7 +80,9 @@ def test_model_tool_calls_remain_inert_and_require_separate_owner_review() -> No
 def test_malformed_or_duplicate_proposals_fail_closed() -> None:
     bad = [
         response(proposals=tuple(ToolProposal(f"c{n}", "safe_tool", {}) for n in range(9))),
-        response(proposals=(ToolProposal("duplicate", "a", {}), ToolProposal("duplicate", "b", {}))),
+        response(
+            proposals=(ToolProposal("duplicate", "a", {}), ToolProposal("duplicate", "b", {}))
+        ),
         response(proposals=(ToolProposal("c1", "unsafe/tool", {}),)),
         replace(response(), request_id="wrong-id"),
     ]
@@ -104,7 +106,9 @@ def test_no_raw_provider_failure_exposed_to_observer() -> None:
 
 
 def test_timeout_is_bounded_and_does_not_complete() -> None:
-    outcome = asyncio.run(AgentHarness(FakeGateway(delay=0.05), deadline_seconds=0.001).run(request()))
+    outcome = asyncio.run(
+        AgentHarness(FakeGateway(delay=0.05), deadline_seconds=0.001).run(request())
+    )
     assert outcome.state == "failed"
     assert outcome.error_code == "model_deadline_exceeded"
 
