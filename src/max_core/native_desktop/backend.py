@@ -6,20 +6,35 @@ The strong bootstrap token never leaves this Python process.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from secrets import token_hex
 from typing import Any
 from uuid import UUID, uuid4
+
+import httpx
 
 from fastapi.testclient import TestClient
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
 from max_core.activity_view import TaskActivity, task_activity
+from max_core.agent_harness import ActivityEvent, AgentHarness
 from max_core.api import create_app
 from max_core.config import Settings
+from max_core.gateway import (
+    ChatMessage,
+    Gateway,
+    GatewayRequest,
+    HTTPAdapter,
+    InferenceDestination,
+    Privacy,
+)
+from max_core.gateway_trial import TrialConfigurationError, TrialSettings
+from max_core.persona import with_persona
 from max_core.store import TaskStore
 
 
@@ -60,6 +75,16 @@ class DesktopSnapshot:
     storage_status: str
     tasks: tuple[dict[str, Any], ...]
     approvals: tuple[dict[str, Any], ...]
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class LocalModelReply:
+    """Owner-visible model text only; no tool execution or private repr."""
+
+    state: str
+    text: str = field(repr=False)
+    proposed_tools: tuple[str, ...] = ()
+    error_code: str | None = None
 
 
 class NativeDesktopCore:
@@ -178,6 +203,67 @@ class NativeDesktopCore:
             return task_activity(item["state"], events)
         except ValueError:
             raise NativeDesktopError("invalid_core_response") from None
+
+    def ask_local(
+        self,
+        prompt: str,
+        *,
+        on_activity: Callable[[ActivityEvent], None] | None = None,
+        client: httpx.AsyncClient | None = None,
+    ) -> LocalModelReply:
+        """One manual, non-persistent, explicitly verified-local model turn.
+
+        Supplying an HTTP client is solely a transport seam for mock-only tests;
+        no call is made unless the owner explicitly initiates this method.
+        """
+        if not isinstance(prompt, str) or not 1 <= len(prompt.strip()) <= 2000:
+            raise NativeDesktopError("invalid_model_prompt")
+        try:
+            settings = TrialSettings.from_env()
+        except TrialConfigurationError:
+            raise NativeDesktopError("local_model_not_configured") from None
+        if settings.spec.inference_destination != InferenceDestination.VERIFIED_LOCAL:
+            raise NativeDesktopError("local_model_only")
+        try:
+            request = GatewayRequest(
+                request_id=uuid4().hex,
+                messages=(ChatMessage("user", prompt.strip()),),
+                privacy=Privacy.CONFIDENTIAL,
+                max_input_tokens=min(4096, settings.spec.context_tokens - 512),
+                max_output_tokens=512,
+                cloud_allowed=False,
+                local_only=True,
+                allow_fallback=False,
+            )
+            if settings.persona_enabled:
+                request = with_persona(request)
+        except ValueError:
+            raise NativeDesktopError("invalid_model_prompt") from None
+
+        async def one_turn() -> LocalModelReply:
+            async def invoke(transport: httpx.AsyncClient) -> LocalModelReply:
+                harness = AgentHarness(
+                    Gateway((settings.spec,), HTTPAdapter(transport)),
+                    deadline_seconds=45,
+                )
+                result = await harness.run(request, on_activity=on_activity)
+                if result.response is None:
+                    return LocalModelReply("failed", "", (), result.error_code)
+                return LocalModelReply(
+                    result.state,
+                    result.response.content,
+                    tuple(proposal.name for proposal in result.response.tool_proposals),
+                )
+
+            if client is not None:
+                return await invoke(client)
+            async with httpx.AsyncClient(trust_env=False) as transport:
+                return await invoke(transport)
+
+        try:
+            return asyncio.run(one_turn())
+        except Exception:
+            raise NativeDesktopError("local_model_unavailable") from None
 
     def close(self) -> None:
         self._pending_task = None
