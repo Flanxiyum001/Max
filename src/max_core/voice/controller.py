@@ -259,6 +259,7 @@ class VoiceController:
     def revoke_microphone(self) -> None:
         with self._lock:
             self._recording = False
+            self._remote_stt_consent = False
             self._activation.revoke()
             self._recorder.discard()
             self.interrupt_speech()
@@ -419,6 +420,8 @@ class VoiceController:
             return None
         finally:
             frames.clear()
+            with self._lock:
+                self._remote_stt_consent = False  # one explicit approval per recording
             if not idle_emitted:
                 with self._lock:
                     self._emit_orb(OrbState.IDLE)

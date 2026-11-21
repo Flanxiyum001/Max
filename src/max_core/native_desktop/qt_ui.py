@@ -1230,7 +1230,7 @@ class MaxWindow(QMainWindow):
                 self,
                 "Send microphone audio to the speech provider?",
                 "MAX uses an external speech-transcription service for this turn. "
-                "If you continue, captured microphone audio will be uploaded over "
+                "If you continue, microphone audio recorded this turn will be uploaded over "
                 "HTTPS to the configured provider for transcription. "
                 "Choose No to keep the recording on your device.",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,

@@ -82,6 +82,7 @@ If no API key is configured, MAX still launches cleanly and shows an actionable 
 ## What Works in This Local Build
 
 ### Native Desktop Window (`max_core.native_desktop`)
+- **Default orb:** `python -m max_core.native_desktop` opens M25's minimal local-only orb. The new cloud chat, local-tool and voice controls live in the separately opened `python -m max_core.native_desktop --dashboard` window until an explicitly reviewed orb integration is built.
 - **In-process Core bridge (`backend.py`)**: Uses FastAPI's in-process ASGI `TestClient` with an ephemeral per-run bearer token—no open TCP port, no external HTTP listener, and no browser token handoff.
 - **Four-tab workspace (`qt_ui.py`)**:
   - **Overview**: Cyan/turquoise holographic orb (`IDENTITY.md`, driven by `OrbReducer`), live multi-turn assistant chat transcript, tool execution outcomes panel, voice controls, and provider/storage summary cards.
@@ -97,7 +98,7 @@ If no API key is configured, MAX still launches cleanly and shows an actionable 
 - Surfaces missing keys, `401`/`403` auth errors, `429` rate limits, `5xx` errors, timeouts, and network errors as sanitized status messages without leaking API keys or raw tracebacks.
 
 ### Bounded Local Tools & MAX Trust (`max_core.local_tools`, `max_core.trust`)
-The assistant can propose only the 10 typed, allowlisted tools below—all validated against strict JSON schemas and audited in `max_trust_audit` (metadata only, never plaintext secrets):
+The trusted local tool registry contains 10 typed allowlisted tools, validated against strict JSON schemas and audited in `max_trust_audit` (metadata only, never plaintext secrets). **Cloud chat does not advertise private local read tools** (workspace, note, task, or system status) because their outputs could disclose non-secret private data to a remote model without separate export consent:
 
 | Risk Tier | Behavior | Tools |
 | --- | --- | --- |
@@ -106,10 +107,11 @@ The assistant can propose only the 10 typed, allowlisted tools below—all valid
 
 - `workspace.list_files` and `workspace.read_file` are confined to `MAX_WORKSPACE_ROOT` (defaulting to the current working directory) and block `.git`, `.venv`, `.env*`, private keys, and `.sqlite3`/`.db` files.
 - `notes.save` and `notes.list` operate only inside `MAX_NOTES_DIR` (defaulting to `%LOCALAPPDATA%\MAX\notes` on Windows).
+- In remote/cloud chat, `dev.health` and `dev.add` may be offered for deterministic safe computation; Trust-gated `task.create` and `notes.save` require an owner approval. **No private local read tool** may be offered automatically. A cloud model's undeclared request to read files is denied.
 - Any undeclared tool (for example `shell.run`) is denied before execution.
 
 ### Voice Interaction (`max_core.voice`)
-- **Opt-in Push-to-Talk STT**: Bounded microphone capture (`QtMicrophoneRecorder` + `LocalActivationGate`) starts only on an explicit **Push to Talk** click—never automatically on startup. Audio is transcribed via OpenAI `/v1/audio/transcriptions` (`whisper-1`).
+- **Opt-in Push-to-Talk STT**: Bounded microphone capture (`QtMicrophoneRecorder` + `LocalActivationGate`) starts only on an explicit **Push to Talk** click—never automatically on startup. With an explicitly configured remote provider, **microphone audio is uploaded to the external speech provider** (OpenAI-compatible `/v1/audio/transcriptions`, `whisper-1`). A visible per-recording consent dialog is required before capture; the trusted voice controller blocks remote recording without that consent and clears consent after every turn or cancellation.
   - *Note:* Speech-to-text requires `OPENAI_API_KEY` even if you choose `MAX_LLM_PROVIDER=anthropic` for text chat.
   - All speech transcripts enter the chat flow strictly as untrusted user text—never as direct slash commands or self-approved tool calls.
 - **Text-to-Speech (TTS)**: Uses local Qt `QTextToSpeech` (`winrt` / `sapi` on Windows where available) honoring `MAX_VOICE_LOCALE=en-GB` and `MAX_VOICE_PRESENTATION=feminine` preferences when matching OS voices exist, controlled by the **Speak: on/off** toggle and **Stop** barge-in button (`BargeInGate`).
