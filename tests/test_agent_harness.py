@@ -107,7 +107,7 @@ def test_no_raw_provider_failure_exposed_to_observer() -> None:
 
 def test_timeout_is_bounded_and_does_not_complete() -> None:
     outcome = asyncio.run(
-        AgentHarness(FakeGateway(delay=0.05), deadline_seconds=0.001).run(request())
+        AgentHarness(FakeGateway(delay=2.0), deadline_seconds=1.0).run(request())
     )
     assert outcome.state == "failed"
     assert outcome.error_code == "model_deadline_exceeded"
