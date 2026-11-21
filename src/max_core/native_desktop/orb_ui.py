@@ -17,6 +17,7 @@ import math
 import sys
 import threading
 from typing import Any
+from urllib.parse import urlsplit
 
 from PySide6.QtCore import (
     QObject,
@@ -53,6 +54,7 @@ from max_core.native_desktop.backend import (
 )
 
 IDLE, THINKING, SPEAKING, ERROR = "idle", "thinking", "speaking", "error"
+LISTENING = "listening"
 
 
 class OrbView(QWidget):
@@ -74,7 +76,7 @@ class OrbView(QWidget):
         self.state = state
 
     def _tick(self) -> None:
-        target = {IDLE: 0.0, THINKING: 1.0, SPEAKING: 0.6, ERROR: 0.2}[self.state]
+        target = {IDLE: 0.0, THINKING: 1.0, SPEAKING: 0.6, ERROR: 0.2, LISTENING: 0.75}[self.state]
         self.energy += (target - self.energy) * 0.05
         self.t += 0.016 * (1.0 + 2.2 * self.energy)
         self.update()
@@ -186,6 +188,14 @@ class OrbView(QWidget):
         p.setPen(thin)
         p.drawEllipse(c, r * 0.9, r * 0.9)
 
+        # 4b. Listening: soft rings ripple outward from the rim
+        if self.state == LISTENING:
+            for k in range(3):
+                phase = (self.t * 0.9 + k / 3) % 1.0
+                ring = QPen(QColor(150, 240, 255, int(150 * (1 - phase))), 1.6)
+                p.setPen(ring)
+                p.drawEllipse(c, r * (1.0 + 0.35 * phase), r * (1.0 + 0.35 * phase))
+
         # 5. Specular highlights: white crescent top-right, cyan sheen bottom
         p.setPen(Qt.PenStyle.NoPen)
         p.save()
@@ -214,22 +224,25 @@ class _Signals(QObject):
     failed = Signal(str)
     step = Signal(str, str)
     approval = Signal(str, object, object)  # tool name, arguments, _Approval
+    heard = Signal(str)
 
 
 class _Approval:
     """Worker thread blocks here until the owner answers in the orb window."""
 
-    def __init__(self) -> None:
+    def __init__(self, on_answer: Any = None) -> None:
         self.event = threading.Event()
         self.allowed = False
+        self.on_answer = on_answer  # main-thread callback (voice consent)
 
 
 class _Ask(QRunnable):
     """Runs one assistant turn (model + tools) off the GUI thread."""
 
-    def __init__(self, window: OrbWindow, prompt: str) -> None:
+    def __init__(self, window: OrbWindow, prompt: str, transcribe: Any = None) -> None:
         super().__init__()
         self.window, self.prompt, self.signals = window, prompt, _Signals()
+        self.transcribe = transcribe  # voice turn: callable returning text or None
 
     def _approve(self, name: str, arguments: dict[str, Any]) -> bool:
         request = _Approval()
@@ -239,6 +252,13 @@ class _Ask(QRunnable):
 
     def run(self) -> None:
         try:
+            if self.transcribe is not None:
+                heard = self.transcribe()
+                if not heard:
+                    self.signals.failed.emit("voice:" + (self.window.voice_error() or "no_speech"))
+                    return
+                self.prompt = heard
+                self.signals.heard.emit(heard)
             session = self.window.ensure_session()
             if session is None:
                 self.signals.failed.emit(self.window.session_error or "local_model_not_configured")
@@ -255,6 +275,25 @@ class _Ask(QRunnable):
             self.signals.failed.emit("unavailable")
 
 
+_VOICE_ERRORS = {
+    "stt_not_configured": (
+        "Voice isn't set up yet. Add MAX_STT_API_KEY (and MAX_STT_ENDPOINT for a free "
+        "Whisper provider) to .env — see docs/M29_ORB_VOICE.md."
+    ),
+    "microphone_unavailable": "I can't find a microphone.",
+    "microphone_start_failed": "I couldn't open the microphone.",
+    "empty_audio": "I didn't hear anything.",
+    "empty_transcript": "I didn't catch that.",
+    "no_speech": "I didn't catch that.",
+    "remote_stt_consent_required": "Recording cancelled.",
+    "activation_denied": "Microphone isn't allowed right now.",
+}
+
+
+def _voice_message(code: str) -> str:
+    return _VOICE_ERRORS.get(code, f"Voice problem: {code}")
+
+
 _ERRORS = {
     "local_model_not_configured": (
         "No model connected yet. Put your MAX_TRIAL_* settings in a .env file "
@@ -268,7 +307,9 @@ _ERRORS = {
 class OrbWindow(QWidget):
     open_dashboard = Signal()
 
-    def __init__(self, core: NativeDesktopCore, session_factory: Any = None) -> None:
+    def __init__(
+        self, core: NativeDesktopCore, session_factory: Any = None, voice_factory: Any = None
+    ) -> None:
         super().__init__()
         self.core = core
         self._session_factory = session_factory
@@ -330,6 +371,14 @@ class OrbWindow(QWidget):
         self._hide_timer = QTimer(self)
         self._hide_timer.setSingleShot(True)
         self._hide_timer.timeout.connect(lambda: self._show_answer(None))
+        self._voice_factory = voice_factory
+        self._voice: Any = None
+        self._voice_failed: str | None = None
+        self._recorder_proxy: Any = None
+        self._voice_turn = False
+        self._speak_poll = QTimer(self)
+        self._speak_poll.setInterval(300)
+        self._speak_poll.timeout.connect(self._poll_speaking)
         self._reminder_timer = QTimer(self)
         self._reminder_timer.setInterval(20_000)
         self._reminder_timer.timeout.connect(self._check_reminders)
@@ -392,8 +441,138 @@ class OrbWindow(QWidget):
             return
         request.allowed = allowed
         request.event.set()
+        if request.on_answer is not None:
+            request.on_answer(allowed)
+            return
         self.orb.set_state(THINKING)
         self._show_answer("⋯ allowed" if allowed else "⋯ denied")
+
+    # --- voice ----------------------------------------------------------------
+    def ensure_voice(self) -> Any:
+        """Create the voice controller on the GUI thread (microphone is Qt-owned)."""
+        if self._voice is None and self._voice_failed is None:
+            try:
+                if self._voice_factory is not None:
+                    self._voice = self._voice_factory()
+                else:
+                    self._voice = self._default_voice()
+            except Exception:
+                self._voice_failed = "voice_unavailable"
+        return self._voice
+
+    def _default_voice(self) -> Any:
+        from max_core.assistant_session import merged_environment
+        from max_core.local_config import load_desktop_config
+        from max_core.native_desktop.qt_ui import _MainThreadRecorderProxy
+        from max_core.voice.controller import VoiceController
+        from max_core.voice.desktop_stt import DesktopSpeechToText, QtMicrophoneRecorder
+
+        env = merged_environment()
+        config = load_desktop_config()
+        stt = None
+        if env.get("MAX_STT_API_KEY") or env.get("MAX_STT_ENDPOINT"):
+            stt = DesktopSpeechToText(
+                endpoint=env.get("MAX_STT_ENDPOINT") or None,
+                api_key=env.get("MAX_STT_API_KEY") or None,
+                model=env.get("MAX_STT_MODEL") or "whisper-1",
+            )
+        self._recorder_proxy = _MainThreadRecorderProxy(QtMicrophoneRecorder(), parent=self)
+        self._always_allow_remote_stt = env.get(
+            "MAX_VOICE_ALWAYS_ALLOW_REMOTE_STT", ""
+        ).lower() in {"yes", "true", "1"}
+        return VoiceController(config=config, stt=stt, recorder=self._recorder_proxy)
+
+    def voice_error(self) -> str | None:
+        return None if self._voice is None else self._voice.last_error
+
+    def _is_speaking(self) -> bool:
+        return self._voice is not None and bool(self._voice.is_speaking)
+
+    def _speak(self, text: str) -> bool:
+        voice = self._voice
+        if voice is None:
+            return False
+        try:
+            return bool(voice.speak_text(text[:1500]))
+        except Exception:
+            return False
+
+    def _poll_speaking(self) -> None:
+        if self._closing or not self._is_speaking():
+            self._speak_poll.stop()
+            self._idle_after_reply()
+
+    def toggle_listening(self) -> None:
+        """Space: start listening, Space again: stop and answer."""
+        if self._closing:
+            return
+        voice = self.ensure_voice()
+        if voice is None:
+            self.orb.set_state(ERROR)
+            self._state_timer.start(2500)
+            self._show_answer(_voice_message(self._voice_failed or "voice_unavailable"))
+            return
+        if voice.is_recording:
+            self._busy = True
+            self._voice_turn = True
+            self.orb.set_state(THINKING)
+            self._show_answer("⋯ transcribing")
+            self._start_job(_Ask(self, "", transcribe=voice.stop_push_to_talk_and_transcribe))
+            return
+        if self._busy:
+            return
+        if self._is_speaking():
+            voice.interrupt_speech()
+            self._speak_poll.stop()
+        stt = voice.stt
+        if (
+            stt.available
+            and getattr(stt, "requires_remote_upload", False)
+            and not voice.remote_stt_consent
+        ):
+            if getattr(self, "_always_allow_remote_stt", False):
+                voice.grant_remote_stt_consent()
+            else:
+                host = urlsplit(getattr(stt, "endpoint", "")).hostname or "the speech service"
+                self._ask_consent(
+                    f"Your voice will be sent to {host} to turn it into text.\n\n"
+                    "Enter = allow this recording   ·   Esc = cancel",
+                    lambda ok: self._consented(ok),
+                )
+                return
+        self._begin_listening()
+
+    def _ask_consent(self, text: str, callback: Any) -> None:
+        self._pending_approval = _Approval(on_answer=callback)
+        self.orb.set_state(SPEAKING)
+        self._hide_timer.stop()
+        self.answer.setText(text)
+        self._fade_target = 1.0
+        self._fade_timer.start()
+        self.setFocus()
+
+    def _consented(self, allowed: bool) -> None:
+        if not allowed or self._voice is None:
+            self._idle_after_reply()
+            self._show_answer("Okay, not recording.")
+            return
+        self._voice.grant_remote_stt_consent()
+        self._begin_listening()
+
+    def _begin_listening(self) -> None:
+        voice = self._voice
+        if not voice.start_push_to_talk(direct_user_gesture=True):
+            self.orb.set_state(ERROR)
+            self._state_timer.start(2500)
+            self._show_answer(_voice_message(voice.last_error or "voice_unavailable"))
+            return
+        self.orb.set_state(LISTENING)
+        self._show_answer("Listening…  (Space to send)")
+        self._hide_timer.stop()
+
+    def _on_heard(self, text: str) -> None:
+        if not self._closing:
+            self._show_answer(f"“{text[:300]}”")
 
     # --- conversation -------------------------------------------------------
     def send(self) -> None:
@@ -405,11 +584,14 @@ class OrbWindow(QWidget):
         self._busy = True
         self.orb.set_state(THINKING)
         self._show_answer(None)
-        job = _Ask(self, prompt)
+        self._start_job(_Ask(self, prompt))
+
+    def _start_job(self, job: _Ask) -> None:
         job.signals.done.connect(self._done)
         job.signals.failed.connect(self._failed)
         job.signals.step.connect(self._on_step)
         job.signals.approval.connect(self._on_approval)
+        job.signals.heard.connect(self._on_heard)
         self._job = job
         self._pool.start(job)
 
@@ -424,9 +606,14 @@ class OrbWindow(QWidget):
             if reply.stopped_reason == "model_failed":
                 self._failed("unavailable")
                 return
+            text = reply.answer.strip() or "…"
             self.orb.set_state(SPEAKING)
-            self._state_timer.start(2500)
-            self._show_answer(reply.answer.strip() or "…")
+            self._show_answer(text)
+            if self._voice_turn and self._speak(text):
+                self._speak_poll.start()
+            else:
+                self._state_timer.start(2500)
+            self._voice_turn = False
             return
         if reply.state == "failed":
             self._failed(reply.error_code or "unavailable")
@@ -446,6 +633,7 @@ class OrbWindow(QWidget):
 
     def _failed(self, code: str) -> None:
         self._busy = False
+        self._voice_turn = False
         if self._close_requested:
             QTimer.singleShot(0, self.close)
             return
@@ -453,6 +641,9 @@ class OrbWindow(QWidget):
             return
         self.orb.set_state(ERROR)
         self._state_timer.start(2500)
+        if code.startswith("voice:"):
+            self._show_answer(_voice_message(code[6:]))
+            return
         self._show_answer(_ERRORS.get(code, "I couldn't reach my model just now."))
 
     def _idle_after_reply(self) -> None:
@@ -487,6 +678,14 @@ class OrbWindow(QWidget):
             elif event.key() == Qt.Key.Key_Escape:
                 self._answer_approval(False)
             return  # nothing else is typed while an approval is pending
+        if event.key() == Qt.Key.Key_Space and not self.input.text() and not event.isAutoRepeat():
+            self.toggle_listening()
+            return
+        if event.key() == Qt.Key.Key_Escape and self._is_speaking():
+            self._voice.interrupt_speech()
+            self._speak_poll.stop()
+            self._idle_after_reply()
+            return
         if event.key() == Qt.Key.Key_Escape:
             if self.input.text():
                 self.input.clear()
@@ -551,6 +750,14 @@ class OrbWindow(QWidget):
         self._fade_timer.stop()
         self.orb._timer.stop()
         self._reminder_timer.stop()
+        self._speak_poll.stop()
+        if self._voice is not None:
+            try:
+                if self._recorder_proxy is not None:
+                    self._recorder_proxy.mark_closing()
+                self._voice.revoke_microphone()
+            except Exception:
+                pass
         self._pool.waitForDone()
         if self._session is not None:
             try:
