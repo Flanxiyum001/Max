@@ -47,9 +47,7 @@ def evaluate_weights(
             for index in range(0, windows, EVAL_BATCH_SIZE):
                 batch = starts[index : index + EVAL_BATCH_SIZE]
                 x = torch.stack([tokens[s : s + context] for s in batch]).to(device)
-                y = torch.stack([tokens[s + 1 : s + context + 1] for s in batch]).to(
-                    device
-                )
+                y = torch.stack([tokens[s + 1 : s + context + 1] for s in batch]).to(device)
                 predictions = model(x)
                 total_loss += float(
                     F.cross_entropy(
