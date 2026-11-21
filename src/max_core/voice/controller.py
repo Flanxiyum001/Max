@@ -112,6 +112,7 @@ class VoiceController:
         clock_ms: Callable[[], int] | None = None,
         focus_probe: Callable[[], FocusState] | None = None,
         owner_opted_in: bool = True,
+        allow_remote_transcription: bool = False,
         os_microphone_permission: bool = True,
         foreground: bool = True,
     ) -> None:
@@ -146,6 +147,7 @@ class VoiceController:
         self._focus_probe = focus_probe if focus_probe is not None else windows_focus_state
 
         self._owner_opted_in = bool(owner_opted_in)
+        self._remote_stt_consent = allow_remote_transcription is True
         self._os_microphone_permission = bool(os_microphone_permission)
         self._foreground = bool(foreground)
 
@@ -261,6 +263,20 @@ class VoiceController:
             self._recorder.discard()
             self.interrupt_speech()
 
+    @property
+    def remote_stt_consent(self) -> bool:
+        with self._lock:
+            return self._remote_stt_consent
+
+    def grant_remote_stt_consent(self) -> None:
+        """Trusted UI calls this only after an explicit, visible owner decision."""
+        with self._lock:
+            self._remote_stt_consent = True
+
+    def revoke_remote_stt_consent(self) -> None:
+        with self._lock:
+            self._remote_stt_consent = False
+
     def start_push_to_talk(self, *, direct_user_gesture: bool = True) -> bool:
         with self._lock:
             if self._recording:
@@ -273,6 +289,13 @@ class VoiceController:
                 return False
             if not self._stt.available:
                 self._last_error = self._stt.reason or "stt_not_configured"
+                return False
+            if (
+                isinstance(self._stt, DesktopSpeechToText)
+                and self._stt.requires_remote_upload
+                and not self._remote_stt_consent
+            ):
+                self._last_error = "remote_stt_consent_required"
                 return False
 
             try:
@@ -319,6 +342,13 @@ class VoiceController:
             try:
                 now = self._now_ms()
                 allowed = self._activation.streaming_allowed(now_ms=now)
+                if (
+                    isinstance(self._stt, DesktopSpeechToText)
+                    and self._stt.requires_remote_upload
+                    and not self._remote_stt_consent
+                ):
+                    allowed = False
+                    self._last_error = "remote_stt_consent_required"
             except (ActivationError, VoiceError) as exc:
                 self._last_error = str(exc)
                 allowed = False
