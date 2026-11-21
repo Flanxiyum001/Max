@@ -19,6 +19,7 @@ from max_core.gateway.contracts import (
     ModelSpec,
     StreamEvent,
     ToolDefinition,
+    request_envelope_bytes,
 )
 from max_core.gateway.normalize import model_matches, normalize_anthropic, normalize_openai
 from max_core.gateway.privacy_guard import contains_high_confidence_secret
@@ -547,6 +548,12 @@ class HTTPAdapter:
         self.client = client
 
     async def complete(self, spec: ModelSpec, request: GatewayRequest) -> GatewayResponse:
+        # GatewayRequest and ChatMessage are frozen, but nested arguments can be
+        # mutated after construction. Validate immediately before every egress.
+        try:
+            request_envelope_bytes(request.messages, request.tools)
+        except (TypeError, ValueError, RecursionError):
+            raise GatewayError("invalid_request") from None
         # Defence in depth: even a direct adapter call must not leak known
         # credential patterns. This is not an exhaustive secret classifier.
         if (
@@ -599,6 +606,10 @@ class HTTPAdapter:
         return normalize_anthropic(data, request.request_id, spec)
 
     async def stream(self, spec: ModelSpec, request: GatewayRequest) -> AsyncIterator[StreamEvent]:
+        try:
+            request_envelope_bytes(request.messages, request.tools)
+        except (TypeError, ValueError, RecursionError):
+            raise GatewayError("invalid_request") from None
         if (
             spec.inference_destination == InferenceDestination.CLOUD
             and request_has_high_confidence_secret(request.messages, request.tools)
