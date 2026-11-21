@@ -46,6 +46,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
@@ -1219,6 +1220,25 @@ class MaxWindow(QMainWindow):
         if self._quiet:
             self.notice.setText("Turn off Quiet mode before using Push to Talk.")
             return
+        if (
+            self._voice.stt.available
+            and getattr(self._voice.stt, "requires_remote_upload", False)
+            and not self._voice.remote_stt_consent
+        ):
+            decision = QMessageBox.question(
+                self,
+                "Send microphone audio to the speech provider?",
+                "MAX uses an external speech-transcription service for this turn. "
+                "If you continue, captured microphone audio will be uploaded over "
+                "HTTPS to the configured provider for transcription. "
+                "Choose No to keep the recording on your device.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if decision != QMessageBox.StandardButton.Yes:
+                self.notice.setText("Remote speech upload denied. No recording started.")
+                return
+            self._voice.grant_remote_stt_consent()
         started = self._voice.start_push_to_talk(direct_user_gesture=True)
         if not started:
             reason = (
