@@ -42,12 +42,24 @@ Wayland/Hyprland focus and compositor tests are still pending.
 - Supports local commands /help, /status, /tasks, /trust and /task followed
   by text. /task only pre-fills the task editor. Ctrl+K and Alt+1..4 are
   app-focused shortcuts, not global system keyboard hooks.
-- Starts and remains usable as a UI preview when no database is configured.
-  It honestly shows that task persistence and Trust require PostgreSQL.
+- Creates a local SQLite task journal by default in the owner's AppData/XDG
+  data directory. Tasks, timelines, and Trust records persist across restarts.
+  The database is restricted to the current Unix user; Windows depends on
+  the owner's AppData ACL. Backups and encryption are not implemented.
+- Requires explicit owner action to queue tasks. The activity journal alone
+  is not evidence that a model or tool executed.
 
-## Optional: enable real local task journaling
+## Local task journal and optional PostgreSQL
 
-After PostgreSQL 17 is installed locally, create a development database,
+SQLite is enabled automatically for the native launcher. It creates the
+needed tables from the current model schema, not from Alembic revision
+migrations. This is still an early-use, single-owner local store. Do not
+store data you cannot afford to lose and do not use it as production Trust
+authorization for remote devices. See `.env.example` for optional
+`MAX_LOCAL_DB_PATH` and `MAX_DESKTOP_DB_URL` overrides. Never commit
+database files, secrets, or backups.
+
+Alternatively, after PostgreSQL 17 is installed locally, create a development database,
 set MAX_DATABASE_URL pointing explicitly to 127.0.0.1/localhost/::1 and a
 specified port using the postgresql+psycopg driver, and apply the
 repository's Alembic migrations as documented in CORE_BOOTSTRAP.md and
@@ -60,17 +72,19 @@ This is only an example—never commit actual credentials to source,
 hosts are intentionally rejected by this development launcher.
 No production DB or deployment is accessed by the preview.
 
-With a correctly migrated local database the app can add, list and inspect
-tracked tasks and read pending Trust requests. It cannot claim completion
-from journal events or approve real side effects. For retrying an ambiguous
-task creation, the in-process client reuses its request idempotency key
-until the same text is acknowledged.
+With SQLite or a correctly migrated local PostgreSQL database the app can
+add, list and inspect tracked tasks and read pending Trust requests.
+The backend also exposes an explicit approval-decision method; the current
+native Trust screen itself remains read-only. Journal entries cannot prove
+external execution. For retrying an ambiguous task creation, the in-process
+client reuses its request idempotency key until the same text is acknowledged.
 
 ## Current limitations and release gates
 
 **This is not a production-ready personal AI assistant.** In this build:
 
-- No live model conversation, selected voice, microphone/STT/TTS or audio.
+- An opt-in, manually invoked verified-local model text trial exists;
+  no fully autonomous agent chat, selected voice, microphone/STT/TTS or audio.
 - No real computer control, screen/clipboard capture, file manipulation,
   global wake hotkey, always-on-top gaming overlay or MCP tool execution.
 - No separate device authentication, remote desktop connectivity,
@@ -89,12 +103,14 @@ effect permissions before executing any OS or MCP action.
 
 The regular Python 3.11 and 3.13 CI keeps Ruff, strict mypy, migrated
 ephemeral PostgreSQL integration, the full unit/security tests and audit.
-New native backend tests verify local DB guard, no-db startup, owner-scoped
-tasks/timeline and request-key replay.
+New native backend tests verify local DB guards, SQLite persistence and
+file privacy, owner-scoped tasks/timeline, request-key replay and Qt storage
+readiness.
 
 A separate GitHub Actions Qt job installs the desktop dependency and runs
 an offscreen window smoke test. No user device has been tested by CI.
 
-Rollback: revert this PR. No DB migration, real provider access, secret,
-local system installation, external calls or production deploy is performed.
-Keep the PR separate and require manual owner merge.
+Rollback: revert the feature and restore the prior native launcher behavior.
+The local SQLite database may remain under the owner's data directory; do not
+delete it without an independent backup and explicit owner intent. No hosted
+provider or production deployment is activated by this storage change.

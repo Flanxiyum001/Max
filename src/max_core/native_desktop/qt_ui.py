@@ -410,7 +410,7 @@ class MaxWindow(QMainWindow):
 
         stats = QHBoxLayout()
         self.stat_core = self._stat(stats, "CORE STATUS", "STARTING", "Private in-process")
-        self.stat_tasks = self._stat(stats, "TRACKED TASKS", "—", "Requires PostgreSQL")
+        self.stat_tasks = self._stat(stats, "TRACKED TASKS", "—", "Local persistence")
         self.stat_trust = self._stat(stats, "PENDING TRUST", "—", "Read-only inbox")
         self._stat(stats, "LOCAL MODEL", "OPT-IN", "No automatic tools")
         layout.addLayout(stats)
@@ -584,7 +584,7 @@ class MaxWindow(QMainWindow):
         available.addWidget(_label("CAPABILITY STATUS", "eyebrow"))
         for item in (
             "Native desktop window  —  ACTIVE",
-            "Task journal  —  requires migrated local PostgreSQL",
+            "Task journal  —  local SQLite or migrated PostgreSQL",
             "Activity trace  —  Core metadata only, refreshes on selection",
             "Trust inbox  —  read-only; no owner decisions",
             "Voice / microphone  —  not connected",
@@ -742,7 +742,7 @@ class MaxWindow(QMainWindow):
     def queue_task(self) -> None:
         if not self._store_ready:
             self.notice.setText(
-                "Connect a migrated local PostgreSQL database before creating tasks."
+                "Connect a ready local SQLite or PostgreSQL task store before creating tasks."
             )
             return
         objective = self.objective.toPlainText().strip()
@@ -853,7 +853,10 @@ class MaxWindow(QMainWindow):
         self.online.setText("●  LOCAL CORE ACTIVE")
         self.system_core.setText("Core: " + snapshot.core_status)
         self.system_storage.setText("Storage: " + snapshot.storage_status)
-        self._store_ready = snapshot.storage_status == "Local PostgreSQL ready"
+        self._store_ready = snapshot.storage_status in {
+            "Local PostgreSQL ready",
+            "Local SQLite ready",
+        }
         self.queue_button.setEnabled(self._store_ready)
         self.stat_core.setText("ONLINE")
         self.stat_tasks.setText(str(len(snapshot.tasks)) if self._store_ready else "—")
@@ -862,13 +865,17 @@ class MaxWindow(QMainWindow):
         if not self._store_ready:
             self._selected_task_id = None
             self.activity_state.setText("STORE NOT READY")
-            self.activity_detail.setText("Configure local PostgreSQL to view real activity.")
+            self.activity_detail.setText(
+                "Configure a ready local task store to view real activity."
+            )
             self.events_list.clear()
             self.recent_tasks.setText(
                 "No database configured. Explore the interface without creating tasks."
             )
-            self.recent_trust.setText("Trust storage unavailable until PostgreSQL is configured.")
-            self.task_list.addItem("Task journal disabled: configure local PostgreSQL.")
+            self.recent_trust.setText(
+                "Trust storage unavailable until the local task store is ready."
+            )
+            self.task_list.addItem("Task journal disabled: configure a local task store.")
             self.trust_list.clear()
             self.trust_list.addItem("No Trust database connected.")
             return

@@ -9,16 +9,20 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import stat
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from secrets import token_hex
-from typing import Any
+from typing import Any, TypeAlias
 from uuid import UUID, uuid4
 
 import httpx
 from fastapi.testclient import TestClient
+from sqlalchemy import Connection, Engine, create_engine, event, text
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import ArgumentError
+from sqlalchemy.exc import ArgumentError, SQLAlchemyError
 
 from max_core.activity_view import TaskActivity, task_activity
 from max_core.agent_harness import ActivityEvent, AgentHarness
@@ -33,8 +37,16 @@ from max_core.gateway import (
     Privacy,
 )
 from max_core.gateway_trial import TrialConfigurationError, TrialSettings
+from max_core.local_config import DesktopConfig, load_desktop_config
+from max_core.models import Base
 from max_core.persona import with_persona
 from max_core.store import TaskStore
+
+TaskRecord: TypeAlias = dict[str, Any]
+TimelineRecord: TypeAlias = dict[str, Any]
+ApprovalRecord: TypeAlias = dict[str, Any]
+
+_UUID_LOWER_RE = re.compile(r"[0-9a-f-]{36}")
 
 
 class NativeDesktopError(RuntimeError):
@@ -45,10 +57,16 @@ class NativeDesktopError(RuntimeError):
         super().__init__(code)
 
 
+def _has_control_chars(value: str) -> bool:
+    return any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in value)
+
+
 def local_database_url(value: str | None) -> str | None:
     """This early-use desktop cannot silently connect to remote databases."""
     if not value:
         return None
+    if not isinstance(value, str) or value != value.strip() or _has_control_chars(value):
+        raise NativeDesktopError("invalid_local_database_configuration")
     try:
         url = make_url(value)
         if (
@@ -59,11 +77,120 @@ def local_database_url(value: str | None) -> str | None:
             or not url.database
         ):
             raise NativeDesktopError("local_postgresql_required")
+        if url.database != url.database.strip() or _has_control_chars(url.database):
+            raise NativeDesktopError("invalid_local_database_configuration")
     except NativeDesktopError:
         raise
     except (ValueError, TypeError, AttributeError, ArgumentError):
         raise NativeDesktopError("invalid_local_database_configuration") from None
     return value
+
+
+def desktop_database_url(source: DesktopConfig | str | None) -> str | None:
+    """Validate a desktop database URL, allowing file-backed local SQLite or local PostgreSQL."""
+    value = source.database_url if isinstance(source, DesktopConfig) else source
+    if not value:
+        return None
+    if not isinstance(value, str) or value != value.strip() or _has_control_chars(value):
+        raise NativeDesktopError("invalid_local_database_configuration")
+    try:
+        url = make_url(value)
+    except (ValueError, TypeError, AttributeError, ArgumentError):
+        raise NativeDesktopError("invalid_local_database_configuration") from None
+    if url.drivername == "sqlite+pysqlite":
+        db_name = url.database or ""
+        db_stripped = db_name.strip()
+        if (
+            url.host
+            or not db_stripped
+            or db_name != db_stripped
+            or _has_control_chars(db_name)
+            or db_stripped.lower() == ":memory:"
+            or db_stripped.lower().startswith("file:")
+            or bool(url.query)
+            or "?" in value
+            or not value.startswith("sqlite+pysqlite:///")
+        ):
+            raise NativeDesktopError("invalid_local_database_configuration")
+        return value
+    return local_database_url(value)
+
+
+def _create_local_sqlite_store(url_str: str) -> tuple[Engine, TaskStore]:
+    """Initialize a thread-safe local SQLite engine and create missing tables."""
+    engine: Engine | None = None
+    try:
+        if (
+            not isinstance(url_str, str)
+            or url_str != url_str.strip()
+            or _has_control_chars(url_str)
+        ):
+            raise NativeDesktopError("invalid_local_database_configuration")
+        url = make_url(url_str)
+        db_name = url.database or ""
+        db_stripped = db_name.strip()
+        if (
+            url.drivername != "sqlite+pysqlite"
+            or url.host
+            or not db_stripped
+            or db_name != db_stripped
+            or _has_control_chars(db_name)
+            or db_stripped.lower() == ":memory:"
+            or db_stripped.lower().startswith("file:")
+            or bool(url.query)
+            or "?" in url_str
+        ):
+            raise NativeDesktopError("invalid_local_database_configuration")
+        db_path = Path(db_name)
+        db_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        # The durable journal contains task details, Trust decisions and memory.
+        # Never follow an existing SQLite-file symlink or open a shared Unix DB.
+        if db_path.is_symlink():
+            raise NativeDesktopError("unsafe_sqlite_path")
+        try:
+            descriptor = os.open(
+                db_path,
+                os.O_CREAT | os.O_EXCL | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+            )
+        except FileExistsError:
+            info = db_path.lstat()
+            if not stat.S_ISREG(info.st_mode):
+                raise NativeDesktopError("unsafe_sqlite_path") from None
+            if os.name == "posix" and (info.st_uid != os.getuid() or info.st_mode & 0o077):
+                raise NativeDesktopError("unsafe_sqlite_permissions") from None
+        else:
+            os.close(descriptor)
+        engine = create_engine(
+            url_str,
+            connect_args={"check_same_thread": False, "timeout": 30.0},
+        )
+
+        @event.listens_for(engine, "connect")
+        def _configure_sqlite_connection(dbapi_connection: Any, _connection_record: Any) -> None:
+            dbapi_connection.isolation_level = None
+            cursor = dbapi_connection.cursor()
+            try:
+                cursor.execute("PRAGMA foreign_keys=ON")
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA busy_timeout=5000")
+            finally:
+                cursor.close()
+
+        @event.listens_for(engine, "begin")
+        def _begin_immediate_transaction(conn: Connection) -> None:
+            conn.exec_driver_sql("BEGIN IMMEDIATE")
+
+        Base.metadata.create_all(engine)
+        return engine, TaskStore(engine)
+    except NativeDesktopError:
+        if engine is not None:
+            engine.dispose()
+        raise
+    except (OSError, ValueError, SQLAlchemyError):
+        if engine is not None:
+            engine.dispose()
+        raise NativeDesktopError("task_store_not_ready") from None
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,8 +199,8 @@ class DesktopSnapshot:
 
     core_status: str
     storage_status: str
-    tasks: tuple[dict[str, Any], ...]
-    approvals: tuple[dict[str, Any], ...]
+    tasks: tuple[TaskRecord, ...]
+    approvals: tuple[ApprovalRecord, ...]
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -89,27 +216,93 @@ class LocalModelReply:
 class NativeDesktopCore:
     """Private TestClient ASGI transport, not an HTTP server or public desktop API."""
 
-    def __init__(self, *, database_url: str | None = None, store: TaskStore | None = None) -> None:
-        safe_db = local_database_url(database_url)
-        self._owner_token = token_hex(32)
-        self._client = TestClient(
-            create_app(Settings(bearer_token=self._owner_token, database_url=safe_db), store=store),
-            base_url="http://localhost",
-            raise_server_exceptions=False,
+    def __init__(
+        self,
+        *,
+        database_url: str | None = None,
+        store: TaskStore | None = None,
+        config: DesktopConfig | None = None,
+    ) -> None:
+        self.config = config
+        effective_url = (
+            database_url
+            if database_url is not None
+            else (config.database_url if config is not None else None)
         )
+        safe_db = desktop_database_url(effective_url)
+        self._owner_token = token_hex(32)
+        self._owned_engine: Engine | None = None
+        self._is_sqlite_local = False
         self._pending_task: tuple[str, str] | None = None
+        self._task_lock = threading.Lock()
+        self._lifecycle_cond = threading.Condition()
+        self._close_lock = threading.Lock()
+        self._closed = False
+        self._resources_closed = False
+        self._active_calls = 0
+
+        effective_store = store
+        settings_db = safe_db
+        if store is None and safe_db is not None and safe_db.startswith("sqlite+pysqlite:///"):
+            self._owned_engine, effective_store = _create_local_sqlite_store(safe_db)
+            self._is_sqlite_local = True
+            settings_db = None
+        elif (
+            store is not None
+            and settings_db is not None
+            and settings_db.startswith("sqlite+pysqlite:///")
+        ):
+            settings_db = None
+
+        try:
+            self._client = TestClient(
+                create_app(
+                    Settings(bearer_token=self._owner_token, database_url=settings_db),
+                    store=effective_store,
+                ),
+                base_url="http://localhost",
+                raise_server_exceptions=False,
+            )
+        except Exception:
+            if self._owned_engine is not None:
+                self._owned_engine.dispose()
+                self._owned_engine = None
+            raise
+
+    @property
+    def engine(self) -> Engine | None:
+        """Read-only access to the owned local SQLite engine when active."""
+        return self._owned_engine
 
     @classmethod
-    def from_env(cls) -> NativeDesktopCore:
-        """Read only the optional local dev database URL, not public API tokens."""
-        return cls(database_url=os.environ.get("MAX_DATABASE_URL"))
+    def from_env(cls, *, config: DesktopConfig | None = None) -> NativeDesktopCore:
+        """Load local desktop configuration (SQLite by default, or PostgreSQL via MAX_DATABASE_URL)."""
+        try:
+            resolved = config if config is not None else load_desktop_config()
+            return cls(database_url=resolved.database_url, config=resolved)
+        except NativeDesktopError:
+            raise
+        except (OSError, ValueError):
+            raise NativeDesktopError("invalid_local_database_configuration") from None
+
+    def _enter_call(self) -> None:
+        with self._lifecycle_cond:
+            if self._closed:
+                raise NativeDesktopError("local_core_unavailable")
+            self._active_calls += 1
+
+    def _exit_call(self) -> None:
+        with self._lifecycle_cond:
+            self._active_calls -= 1
+            if self._active_calls == 0:
+                self._lifecycle_cond.notify_all()
 
     def _call(
         self,
         method: str,
         path: str,
         *,
-        payload: dict[str, str] | None = None,
+        payload: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> dict[str, Any] | list[dict[str, Any]]:
         headers = {"Authorization": "Bearer " + self._owner_token}
@@ -130,63 +323,111 @@ class NativeDesktopCore:
         except Exception:
             raise NativeDesktopError("local_core_unavailable") from None
 
-    def snapshot(self) -> DesktopSnapshot:
-        ready = self._call("GET", "/health/ready")
-        if not isinstance(ready, dict) or ready.get("status") != "ready":
-            raise NativeDesktopError("local_core_unavailable")
-        status = self._call("GET", "/v1/status")
-        if not isinstance(status, dict) or status.get("assistant") != "MAX":
-            raise NativeDesktopError("local_core_unavailable")
-        storage_ready = ready.get("scope") == "durable-task-store"
-        if not storage_ready:
-            return DesktopSnapshot("Core online (in-process)", "Database not configured", (), ())
-        tasks = self._call("GET", "/v1/tasks")
-        approvals = self._call("GET", "/v1/approvals")
-        if (
-            not isinstance(tasks, list)
-            or not isinstance(approvals, list)
-            or len(tasks) > 100
-            or len(approvals) > 100
-            or not all(isinstance(item, dict) for item in tasks + approvals)
-        ):
-            raise NativeDesktopError("invalid_core_response")
-        return DesktopSnapshot(
-            "Core online (in-process)",
-            "Local PostgreSQL ready",
-            tuple(tasks),
-            tuple(approvals),
-        )
-
-    def create_task(self, objective: str) -> dict[str, Any]:
-        cleaned = objective.strip()
-        if not 1 <= len(cleaned) <= 500:
-            raise NativeDesktopError("invalid_task_description")
-        if self._pending_task is None or self._pending_task[0] != cleaned:
-            self._pending_task = (cleaned, str(uuid4()))
-        result = self._call(
-            "POST",
-            "/v1/tasks",
-            payload={"objective": cleaned},
-            idempotency_key=self._pending_task[1],
-        )
-        if not isinstance(result, dict) or not isinstance(result.get("id"), str):
-            raise NativeDesktopError("invalid_core_response")
-        self._pending_task = None
-        return result
-
-    def timeline(self, task_id: str) -> tuple[dict[str, Any], ...]:
+    def _verify_local_sqlite_ready(self) -> None:
+        if self._owned_engine is None:
+            raise NativeDesktopError("task_store_not_ready")
         try:
-            if not re.fullmatch(r"[0-9a-f-]{36}", task_id) or str(UUID(task_id)) != task_id:
-                raise ValueError("bad id")
-        except (TypeError, ValueError):
-            raise NativeDesktopError("invalid_task_identifier") from None
-        page = self._call("GET", f"/v1/tasks/{task_id}/events?limit=20")
-        if not isinstance(page, dict) or not isinstance(page.get("events"), list):
-            raise NativeDesktopError("invalid_core_response")
-        events = page["events"]
-        if len(events) > 20 or not all(isinstance(item, dict) for item in events):
-            raise NativeDesktopError("invalid_core_response")
-        return tuple(events)
+            with self._owned_engine.connect() as connection:
+                connection.execute(text("SELECT id FROM max_tasks LIMIT 1"))
+                connection.execute(text("SELECT id FROM max_approval_grants LIMIT 1"))
+                connection.execute(text("SELECT id FROM max_trust_audit LIMIT 1"))
+                connection.execute(text("SELECT id FROM max_verification_checks LIMIT 1"))
+                connection.execute(text("SELECT id FROM max_connect_drafts LIMIT 1"))
+                connection.execute(text("SELECT id FROM max_memories LIMIT 1"))
+                connection.execute(text("SELECT id FROM max_memory_events LIMIT 1"))
+                connection.execute(text("SELECT id FROM max_device_nodes LIMIT 1"))
+                connection.execute(text("SELECT id FROM max_device_challenges LIMIT 1"))
+        except SQLAlchemyError:
+            raise NativeDesktopError("task_store_not_ready") from None
+
+    def snapshot(self) -> DesktopSnapshot:
+        self._enter_call()
+        try:
+            if self._is_sqlite_local:
+                live = self._call("GET", "/health/live")
+                if not isinstance(live, dict) or live.get("status") != "alive":
+                    raise NativeDesktopError("local_core_unavailable")
+                status = self._call("GET", "/v1/status")
+                if not isinstance(status, dict) or status.get("assistant") != "MAX":
+                    raise NativeDesktopError("local_core_unavailable")
+                self._verify_local_sqlite_ready()
+                storage_label = "Local SQLite ready"
+            else:
+                ready = self._call("GET", "/health/ready")
+                if not isinstance(ready, dict) or ready.get("status") != "ready":
+                    raise NativeDesktopError("local_core_unavailable")
+                status = self._call("GET", "/v1/status")
+                if not isinstance(status, dict) or status.get("assistant") != "MAX":
+                    raise NativeDesktopError("local_core_unavailable")
+                if ready.get("scope") != "durable-task-store":
+                    return DesktopSnapshot(
+                        "Core online (in-process)", "Database not configured", (), ()
+                    )
+                storage_label = "Local PostgreSQL ready"
+
+            tasks = self._call("GET", "/v1/tasks")
+            approvals = self._call("GET", "/v1/approvals")
+            if (
+                not isinstance(tasks, list)
+                or not isinstance(approvals, list)
+                or len(tasks) > 100
+                or len(approvals) > 100
+                or not all(isinstance(item, dict) for item in tasks + approvals)
+            ):
+                raise NativeDesktopError("invalid_core_response")
+            return DesktopSnapshot(
+                "Core online (in-process)",
+                storage_label,
+                tuple(tasks),
+                tuple(approvals),
+            )
+        finally:
+            self._exit_call()
+
+    def create_task(self, objective: str) -> TaskRecord:
+        self._enter_call()
+        try:
+            cleaned = objective.strip()
+            if not 1 <= len(cleaned) <= 500:
+                raise NativeDesktopError("invalid_task_description")
+            with self._task_lock:
+                if self._pending_task is None or self._pending_task[0] != cleaned:
+                    self._pending_task = (cleaned, str(uuid4()))
+                idempotency_key = self._pending_task[1]
+                result = self._call(
+                    "POST",
+                    "/v1/tasks",
+                    payload={"objective": cleaned},
+                    idempotency_key=idempotency_key,
+                )
+                if not isinstance(result, dict) or not isinstance(result.get("id"), str):
+                    raise NativeDesktopError("invalid_core_response")
+                self._pending_task = None
+                return result
+        finally:
+            self._exit_call()
+
+    def timeline(self, task_id: str) -> tuple[TimelineRecord, ...]:
+        self._enter_call()
+        try:
+            try:
+                if (
+                    not isinstance(task_id, str)
+                    or not _UUID_LOWER_RE.fullmatch(task_id)
+                    or str(UUID(task_id)) != task_id
+                ):
+                    raise ValueError("bad id")
+            except (TypeError, ValueError):
+                raise NativeDesktopError("invalid_task_identifier") from None
+            page = self._call("GET", f"/v1/tasks/{task_id}/events?limit=20")
+            if not isinstance(page, dict) or not isinstance(page.get("events"), list):
+                raise NativeDesktopError("invalid_core_response")
+            events = page["events"]
+            if len(events) > 20 or not all(isinstance(item, dict) for item in events):
+                raise NativeDesktopError("invalid_core_response")
+            return tuple(events)
+        finally:
+            self._exit_call()
 
     def activity(self, task_id: str) -> TaskActivity:
         """Read only authoritative task state and the bounded, owner-scoped journal.
@@ -194,14 +435,18 @@ class NativeDesktopCore:
         Do not deserialize model/tool payloads, accept pseudo-live claims or infer
         active coding from a generic task objective.
         """
-        events = self.timeline(task_id)
-        item = self._call("GET", f"/v1/tasks/{task_id}")
-        if not isinstance(item, dict) or not isinstance(item.get("state"), str):
-            raise NativeDesktopError("invalid_core_response")
+        self._enter_call()
         try:
-            return task_activity(item["state"], events)
-        except ValueError:
-            raise NativeDesktopError("invalid_core_response") from None
+            events = self.timeline(task_id)
+            item = self._call("GET", f"/v1/tasks/{task_id}")
+            if not isinstance(item, dict) or not isinstance(item.get("state"), str):
+                raise NativeDesktopError("invalid_core_response")
+            try:
+                return task_activity(item["state"], events)
+            except ValueError:
+                raise NativeDesktopError("invalid_core_response") from None
+        finally:
+            self._exit_call()
 
     def ask_local(
         self,
@@ -264,6 +509,49 @@ class NativeDesktopCore:
         except Exception:
             raise NativeDesktopError("local_model_unavailable") from None
 
+    def decide_approval(self, approval_id: str, approve: bool) -> ApprovalRecord:
+        """Record an explicit owner approval or denial against a pending Trust grant."""
+        self._enter_call()
+        try:
+            try:
+                if (
+                    not isinstance(approval_id, str)
+                    or not _UUID_LOWER_RE.fullmatch(approval_id)
+                    or str(UUID(approval_id)) != approval_id
+                ):
+                    raise ValueError("bad id")
+            except (TypeError, ValueError):
+                raise NativeDesktopError("invalid_approval_identifier") from None
+            if type(approve) is not bool:
+                raise NativeDesktopError("invalid_approval_decision")
+            result = self._call(
+                "POST",
+                f"/v1/approvals/{approval_id}/decision",
+                payload={"approve": approve},
+            )
+            if (
+                not isinstance(result, dict)
+                or result.get("id") != approval_id
+                or result.get("state") not in {"approved", "denied"}
+            ):
+                raise NativeDesktopError("invalid_core_response")
+            return result
+        finally:
+            self._exit_call()
+
     def close(self) -> None:
-        self._pending_task = None
-        self._client.close()
+        with self._lifecycle_cond:
+            self._closed = True
+            while self._active_calls > 0:
+                self._lifecycle_cond.wait()
+        with self._close_lock:
+            with self._task_lock:
+                self._pending_task = None
+            if not self._resources_closed:
+                self._resources_closed = True
+                try:
+                    self._client.close()
+                finally:
+                    if self._owned_engine is not None:
+                        self._owned_engine.dispose()
+                        self._owned_engine = None

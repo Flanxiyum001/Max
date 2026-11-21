@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+from uuid import uuid4
+
 import pytest
 
+from max_core.gateway.contracts import ToolProposal
 from max_core.native_desktop.backend import (
     NativeDesktopCore,
     NativeDesktopError,
+    _create_local_sqlite_store,
+    desktop_database_url,
     local_database_url,
 )
 from max_core.store import TaskStore
+from max_core.trust import ActorContext, TrustService
 
 
 def test_local_database_guard_never_accepts_remote_database() -> None:
@@ -31,12 +39,116 @@ def test_local_database_guard_never_accepts_remote_database() -> None:
             local_database_url(url)
 
 
-def test_default_launch_is_self_contained_and_cannot_create_tasks(
-    monkeypatch: pytest.MonkeyPatch,
+def test_desktop_database_url_supports_local_sqlite_and_preserves_pg_guard(
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.delenv("MAX_DATABASE_URL", raising=False)
-    monkeypatch.setenv("MAX_API_BEARER_TOKEN", "DO-NOT-REUSE-EXTERNAL-SECRET")
-    backend = NativeDesktopCore.from_env()
+    sqlite_url = f"sqlite+pysqlite:///{(tmp_path / 'desk.sqlite3').as_posix()}"
+    assert desktop_database_url(sqlite_url) == sqlite_url
+    assert (
+        desktop_database_url("postgresql+psycopg://user:pw@127.0.0.1:5432/max")
+        == "postgresql+psycopg://user:pw@127.0.0.1:5432/max"
+    )
+    assert desktop_database_url(None) is None
+    assert desktop_database_url("") is None
+
+    for bad_url in (
+        "sqlite+pysqlite:///:memory:",
+        "sqlite+pysqlite:///   ",
+        "sqlite+pysqlite:///file::memory:?cache=shared",
+        "sqlite+pysqlite:///file:mem.sqlite3",
+        f"sqlite+pysqlite:///{(tmp_path / 'desk.sqlite3').as_posix()}?mode=memory&uri=true",
+        f"sqlite+pysqlite:///{(tmp_path / 'desk.sqlite3').as_posix()}?cache=shared",
+        "sqlite+pysqlite://localhost/tmp/max.db",
+        "sqlite+pysqlite://",
+        "sqlite:///tmp/max.db",
+        "postgresql+psycopg://u:p@db.example.com:5432/max",
+        "not a url",
+    ):
+        with pytest.raises(
+            NativeDesktopError,
+            match="invalid_local_database_configuration|local_postgresql_required",
+        ):
+            desktop_database_url(bad_url)
+
+
+def test_database_url_validators_reject_whitespace_and_control_characters(
+    tmp_path: Path,
+) -> None:
+    sqlite_base = f"sqlite+pysqlite:///{(tmp_path / 'desk.sqlite3').as_posix()}"
+    pg_base = "postgresql+psycopg://user:pw@127.0.0.1:5432/max"
+    shared_bad_urls = [
+        "   ",
+        "\t",
+        "\n",
+        f" {sqlite_base}",
+        f"{sqlite_base}   ",
+        f" {pg_base}",
+        f"{pg_base}   ",
+    ]
+    for control in ("\x00", "\t", "\n", "\r", "\r\n", "\x1f", "\x7f"):
+        shared_bad_urls.extend(
+            [
+                f"{sqlite_base}{control}",
+                f"{control}{sqlite_base}",
+                f"sqlite+pysqlite:///{(tmp_path / f'bad{control}desk.sqlite3').as_posix()}",
+                f"{pg_base}{control}",
+                f"{control}{pg_base}",
+                f"postgresql+psycopg://user:pw@127.0.0.1:5432/max{control}db",
+            ]
+        )
+
+    for bad_url in shared_bad_urls:
+        with pytest.raises(NativeDesktopError) as desk_exc:
+            desktop_database_url(bad_url)
+        assert desk_exc.value.code == "invalid_local_database_configuration"
+
+        with pytest.raises(NativeDesktopError) as pg_exc:
+            local_database_url(bad_url)
+        assert pg_exc.value.code == "invalid_local_database_configuration"
+
+        with pytest.raises(NativeDesktopError) as core_exc:
+            NativeDesktopCore(database_url=bad_url)
+        assert core_exc.value.code == "invalid_local_database_configuration"
+
+    sqlite_only_bad_urls = [
+        "sqlite+pysqlite:///   " + (tmp_path / "desk.sqlite3").as_posix(),
+        f"{sqlite_base}?",
+        f"{sqlite_base}?bad",
+    ]
+    for bad_sqlite in sqlite_only_bad_urls:
+        with pytest.raises(NativeDesktopError) as sqlite_exc:
+            desktop_database_url(bad_sqlite)
+        assert sqlite_exc.value.code == "invalid_local_database_configuration"
+
+        with pytest.raises(NativeDesktopError) as core_sqlite_exc:
+            NativeDesktopCore(database_url=bad_sqlite)
+        assert core_sqlite_exc.value.code == "invalid_local_database_configuration"
+
+        with pytest.raises(NativeDesktopError) as pg_sqlite_exc:
+            local_database_url(bad_sqlite)
+        assert pg_sqlite_exc.value.code == "local_postgresql_required"
+
+
+def test_create_local_sqlite_store_rejects_control_chars_and_wraps_value_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    sqlite_base = f"sqlite+pysqlite:///{(tmp_path / 'store.sqlite3').as_posix()}"
+    for bad in (f"{sqlite_base}\x00", f"{sqlite_base}\n", f"{sqlite_base} "):
+        with pytest.raises(NativeDesktopError) as exc_info:
+            _create_local_sqlite_store(bad)
+        assert exc_info.value.code == "invalid_local_database_configuration"
+
+    def _boom(*_args: Any, **_kwargs: Any) -> Any:
+        raise ValueError("simulated value error")
+
+    monkeypatch.setattr("max_core.native_desktop.backend.create_engine", _boom)
+    with pytest.raises(NativeDesktopError) as wrap_exc:
+        _create_local_sqlite_store(sqlite_base)
+    assert wrap_exc.value.code == "task_store_not_ready"
+
+
+def test_bootstrap_core_without_database_cannot_create_tasks() -> None:
+    backend = NativeDesktopCore()
     try:
         snapshot = backend.snapshot()
         assert snapshot.core_status == "Core online (in-process)"
@@ -44,6 +156,31 @@ def test_default_launch_is_self_contained_and_cannot_create_tasks(
         assert snapshot.tasks == () and snapshot.approvals == ()
         with pytest.raises(NativeDesktopError, match="task_store_not_ready"):
             backend.create_task("This cannot execute anything")
+        with pytest.raises(NativeDesktopError, match="task_store_not_ready"):
+            backend.decide_approval(str(uuid4()), True)
+    finally:
+        backend.close()
+
+
+def test_default_from_env_initializes_local_sqlite_and_never_reuses_external_token(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    db_file = tmp_path / "local_desktop.sqlite3"
+    monkeypatch.delenv("MAX_DATABASE_URL", raising=False)
+    monkeypatch.delenv("MAX_DESKTOP_DB_URL", raising=False)
+    monkeypatch.setenv("MAX_LOCAL_DB_PATH", str(db_file))
+    monkeypatch.setenv("MAX_API_BEARER_TOKEN", "DO-NOT-REUSE-EXTERNAL-SECRET")
+    backend = NativeDesktopCore.from_env()
+    try:
+        assert backend._owner_token != "DO-NOT-REUSE-EXTERNAL-SECRET"
+        snapshot = backend.snapshot()
+        assert snapshot.core_status == "Core online (in-process)"
+        assert snapshot.storage_status == "Local SQLite ready"
+        assert snapshot.tasks == () and snapshot.approvals == ()
+        record = backend.create_task("Local SQLite desktop task")
+        assert record["objective"] == "Local SQLite desktop task"
+        events = backend.timeline(record["id"])
+        assert events and events[0]["kind"] == "task.queued"
     finally:
         backend.close()
 
@@ -66,6 +203,44 @@ def test_native_task_and_timeline_via_real_core_contracts(store: TaskStore) -> N
         backend.close()
 
 
+def test_decide_approval_via_real_core_contracts(store: TaskStore) -> None:
+    backend = NativeDesktopCore(store=store)
+    try:
+        task = backend.create_task("Task requiring trust approval")
+        trust = TrustService(store.engine)
+        grant = trust.request(
+            ActorContext(
+                owner_id="owner",
+                task_id=task["id"],
+                actor_id="desktop_owner",
+                session_id="sess-1",
+                device_id="local-desktop",
+            ),
+            ToolProposal(
+                call_id="call-1",
+                name="task.status",
+                arguments={"task_id": task["id"]},
+            ),
+        )
+
+        with pytest.raises(NativeDesktopError, match="invalid_approval_identifier"):
+            backend.decide_approval("../bad-id", True)
+        with pytest.raises(NativeDesktopError, match="invalid_approval_decision"):
+            backend.decide_approval(grant.id, "yes")  # type: ignore[arg-type]
+        with pytest.raises(NativeDesktopError, match="invalid_approval_decision"):
+            backend.decide_approval(grant.id, 1)  # type: ignore[arg-type]
+
+        decided = backend.decide_approval(grant.id, True)
+        assert decided["id"] == grant.id
+        assert decided["state"] == "approved"
+
+        # Single-use decision cannot be replayed once no longer pending.
+        with pytest.raises(NativeDesktopError, match="local_core_request_rejected"):
+            backend.decide_approval(grant.id, False)
+    finally:
+        backend.close()
+
+
 def test_replay_idempotency_key_is_preserved_on_ambiguous_failure(store: TaskStore) -> None:
     backend = NativeDesktopCore(store=store)
     try:
@@ -76,9 +251,9 @@ def test_replay_idempotency_key_is_preserved_on_ambiguous_failure(store: TaskSto
             method: str,
             path: str,
             *,
-            payload: dict[str, str] | None = None,
+            payload: dict[str, Any] | None = None,
             idempotency_key: str | None = None,
-        ) -> dict[str, object] | list[dict[str, object]]:
+        ) -> dict[str, Any] | list[dict[str, Any]]:
             calls.append(idempotency_key)
             result = original(method, path, payload=payload, idempotency_key=idempotency_key)
             if len(calls) == 1:
