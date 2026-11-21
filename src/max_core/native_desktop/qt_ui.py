@@ -853,7 +853,10 @@ class MaxWindow(QMainWindow):
         self.online.setText("●  LOCAL CORE ACTIVE")
         self.system_core.setText("Core: " + snapshot.core_status)
         self.system_storage.setText("Storage: " + snapshot.storage_status)
-        self._store_ready = snapshot.storage_status in {"Local PostgreSQL ready", "Local SQLite ready"}
+        self._store_ready = snapshot.storage_status in {
+            "Local PostgreSQL ready",
+            "Local SQLite ready",
+        }
         self.queue_button.setEnabled(self._store_ready)
         self.stat_core.setText("ONLINE")
         self.stat_tasks.setText(str(len(snapshot.tasks)) if self._store_ready else "—")
@@ -862,12 +865,16 @@ class MaxWindow(QMainWindow):
         if not self._store_ready:
             self._selected_task_id = None
             self.activity_state.setText("STORE NOT READY")
-            self.activity_detail.setText("Configure a ready local task store to view real activity.")
+            self.activity_detail.setText(
+                "Configure a ready local task store to view real activity."
+            )
             self.events_list.clear()
             self.recent_tasks.setText(
                 "No database configured. Explore the interface without creating tasks."
             )
-            self.recent_trust.setText("Trust storage unavailable until the local task store is ready.")
+            self.recent_trust.setText(
+                "Trust storage unavailable until the local task store is ready."
+            )
             self.task_list.addItem("Task journal disabled: configure a local task store.")
             self.trust_list.clear()
             self.trust_list.addItem("No Trust database connected.")
