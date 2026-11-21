@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
+from max_core.activity_view import TaskActivity, task_activity
 from max_core.api import create_app
 from max_core.config import Settings
 from max_core.store import TaskStore
@@ -162,6 +163,21 @@ class NativeDesktopCore:
         if len(events) > 20 or not all(isinstance(item, dict) for item in events):
             raise NativeDesktopError("invalid_core_response")
         return tuple(events)
+
+    def activity(self, task_id: str) -> TaskActivity:
+        """Read only authoritative task state and the bounded, owner-scoped journal.
+
+        Do not deserialize model/tool payloads, accept pseudo-live claims or infer
+        active coding from a generic task objective.
+        """
+        events = self.timeline(task_id)
+        item = self._call("GET", f"/v1/tasks/{task_id}")
+        if not isinstance(item, dict) or not isinstance(item.get("state"), str):
+            raise NativeDesktopError("invalid_core_response")
+        try:
+            return task_activity(item["state"], events)
+        except ValueError:
+            raise NativeDesktopError("invalid_core_response") from None
 
     def close(self) -> None:
         self._pending_task = None
