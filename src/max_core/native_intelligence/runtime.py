@@ -10,9 +10,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 try:
     import torch  # type: ignore[import-not-found]
@@ -23,6 +24,9 @@ except ImportError as exc:
         "MAX Native Intelligence needs the optional PyTorch runtime: "
         "pip install -e '.[native-intelligence]'"
     ) from exc
+
+# Explicit exports for the separate offline evaluation module.
+__all__ = ["F", "torch"]
 
 VOCAB_SIZE = 256  # Every byte is a token; no downloaded tokenizer or vocabulary.
 MODEL_FILE = "model.pt"
@@ -154,7 +158,7 @@ def train(
         optimizer.zero_grad(set_to_none=True)
         predictions = model(x)
         loss = F.cross_entropy(predictions.reshape(-1, VOCAB_SIZE), y.reshape(-1))
-        loss.backward()
+        cast(Callable[[], None], loss.backward)()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
         final_loss = float(loss.detach().cpu())
