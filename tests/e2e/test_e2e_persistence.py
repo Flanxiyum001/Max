@@ -858,6 +858,7 @@ def test_t1_f3_01_desktop_smoke_test_cli_offscreen_initializes_sqlite_db(
     run_desktop_subprocess: Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """T1-F3-01: python -m max_core.native_desktop --smoke-test exits 0 & initializes SQLite DB."""
+    pytest.importorskip("PySide6")
     db_path = tmp_path / "smoke.sqlite3"
     env = {**clean_desktop_env, "MAX_LOCAL_DB_PATH": str(db_path)}
     res = run_desktop_subprocess(["-m", "max_core.native_desktop", "--smoke-test"], env=env)
@@ -876,6 +877,7 @@ def test_t1_f3_02_max_window_offscreen_shows_local_core_and_sqlite_storage_statu
     desktop_core_factory: Callable[..., NativeDesktopCore],
 ) -> None:
     """T1-F3-02: MaxWindow launches offscreen and renders Local Core & Local SQLite status."""
+    pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
 
     from max_core.native_desktop.qt_ui import MaxWindow
@@ -909,6 +911,7 @@ def test_t1_f3_03_max_window_navigation_tabs_and_breadcrumbs(
     desktop_core_factory: Callable[..., NativeDesktopCore],
 ) -> None:
     """T1-F3-03: MaxWindow.switch() navigates across Overview, Tasks, Trust, and System."""
+    pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
 
     from max_core.native_desktop.qt_ui import MaxWindow
@@ -943,6 +946,7 @@ def test_t1_f3_04_max_window_command_bar_slash_commands(
     desktop_core_factory: Callable[..., NativeDesktopCore],
 ) -> None:
     """T1-F3-04: MaxWindow command bar handles /help, /status, /tasks, /trust, and /task."""
+    pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
 
     from max_core.native_desktop.qt_ui import MaxWindow
@@ -992,6 +996,7 @@ def test_t1_f3_05_max_window_quiet_mode_and_start_max_cmd_contract(
     desktop_core_factory: Callable[..., NativeDesktopCore],
 ) -> None:
     """T1-F3-05: Quiet mode toggles Orb timer; start-max.cmd matches desktop launch contract."""
+    pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
 
     from max_core.native_desktop.qt_ui import MaxWindow
@@ -1041,6 +1046,7 @@ def test_t2_f3_01_cli_rejects_unsupported_flags_with_exit_code_2(
     run_desktop_subprocess: Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """T2-F3-01: CLI rejects unsupported flags (--server-only, extra args) with exit code 2."""
+    pytest.importorskip("PySide6")
     for argv in (["--server-only"], ["--smoke-test", "--extra"]):
         res = run_desktop_subprocess(
             ["-m", "max_core.native_desktop", *argv],
@@ -1055,6 +1061,7 @@ def test_t2_f3_02_cli_smoke_test_rejects_remote_postgres_without_leaking_secrets
     run_desktop_subprocess: Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """T2-F3-02: Invalid remote DB URL exits 2 with sanitized error and zero credential echo."""
+    pytest.importorskip("PySide6")
     env = {
         **clean_desktop_env,
         "MAX_DATABASE_URL": "postgresql+psycopg://secret_user:secret_pw@remote.example.com:5432/max",
@@ -1074,6 +1081,7 @@ def test_t2_f3_03_max_window_switch_out_of_bounds_is_ignored(
     desktop_core_factory: Callable[..., NativeDesktopCore],
 ) -> None:
     """T2-F3-03: Out-of-bounds switch(-1) and switch(99) leave current page untouched."""
+    pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
 
     from max_core.native_desktop.qt_ui import MaxWindow
@@ -1105,6 +1113,7 @@ def test_t2_f3_04_max_window_command_bar_rejects_empty_and_overlong_task(
     desktop_core_factory: Callable[..., NativeDesktopCore],
 ) -> None:
     """T2-F3-04: Command bar rejects overlong /task and handles whitespace-only input safely."""
+    pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
 
     from max_core.native_desktop.qt_ui import MaxWindow
@@ -1139,6 +1148,7 @@ def test_t2_f3_05_max_window_no_database_mode_degrades_gracefully(
     desktop_core_factory: Callable[..., NativeDesktopCore],
 ) -> None:
     """T2-F3-05: MaxWindow with unconfigured database disables task creation without crashing."""
+    pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
 
     from max_core.native_desktop.qt_ui import MaxWindow
@@ -1254,6 +1264,7 @@ def test_t3_02_desktop_launch_offscreen_window_and_sqlite_task_persistence(
     desktop_core_factory: Callable[..., NativeDesktopCore],
 ) -> None:
     """T3-02: Offscreen --smoke-test, core task creation, and MaxWindow relaunch see SQLite DB."""
+    pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
 
     from max_core.native_desktop.qt_ui import MaxWindow
@@ -1286,12 +1297,9 @@ def test_t3_02_desktop_launch_offscreen_window_and_sqlite_task_persistence(
         persisted = core2.snapshot().tasks
         assert len(persisted) == 1
         assert persisted[0]["id"] == created["id"]
-        # M5 promotion gate: once qt_ui.py accepts "Local SQLite ready",
-        # tighten this to assert window._store_ready is True and stat_tasks == "1".
-        if window._store_ready:
-            assert window.stat_tasks.text() == "1"
-        else:
-            assert window.stat_tasks.text() == "—"
+        assert window._store_ready is True
+        assert window.stat_tasks.text() == "1"
+        assert window.queue_button.isEnabled() is True
     finally:
         window.close()
         app.processEvents()

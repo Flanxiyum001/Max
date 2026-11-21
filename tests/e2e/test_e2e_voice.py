@@ -758,6 +758,7 @@ def test_t3_07_orb_state_transitions_and_quiet_mode_ui_revokes_activation(
     desktop_core_factory: Callable[..., NativeDesktopCore],
 ) -> None:
     """T3-07: OrbReducer transitions across voice states; Quiet mode forces PASSIVE & revokes mic."""
+    pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
 
     from max_core.native_desktop.qt_ui import MaxWindow

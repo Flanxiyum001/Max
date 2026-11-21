@@ -366,6 +366,7 @@ def test_t4_01_first_time_local_setup_and_onboarding_across_restart(
     desktop_core_factory: Callable[..., NativeDesktopCore],
 ) -> None:
     """T4-01: First-time .env.example setup launches cleanly without keys and persists tasks."""
+    pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
 
     from max_core.native_desktop.qt_ui import MaxWindow
@@ -431,6 +432,7 @@ def test_t4_02_openai_research_note_saving_and_restart_trust_approval(
     mock_llm_server: MockLLMServer,
 ) -> None:
     """T4-02: Multi-turn OpenAI R0 read + R1 notes.save gated across restart, approved in Trust."""
+    pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
 
     from max_core.native_desktop.qt_ui import MaxWindow
@@ -601,6 +603,7 @@ def test_t4_04_voice_first_turn_with_barge_in_and_quiet_mode(
     mock_llm_server: MockLLMServer,
 ) -> None:
     """T4-04: Voice PTT -> OpenAI stream -> verified barge-in stops sink -> Quiet mode revokes mic."""
+    pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
 
     from max_core.native_desktop.qt_ui import MaxWindow

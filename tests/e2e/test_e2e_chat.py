@@ -436,6 +436,7 @@ def test_t1_f4_06_max_window_chat_ui_submits_offscreen_and_shows_reply(
     mock_llm_server: MockLLMServer,
 ) -> None:
     """T1-F4-06: MaxWindow offscreen chat submits message off-thread and renders reply + badge."""
+    pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
 
     from max_core.native_desktop.qt_ui import MaxWindow

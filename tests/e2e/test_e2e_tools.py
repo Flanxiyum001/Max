@@ -558,6 +558,7 @@ def test_t1_f6_05_max_window_trust_tab_approve_button_updates_inbox(
     desktop_core_factory: Callable[..., NativeDesktopCore],
 ) -> None:
     """T1-F6-05: Clicking Approve in MaxWindow Trust tab persists decision and clears inbox."""
+    pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
 
     from max_core.native_desktop.qt_ui import MaxWindow
@@ -595,15 +596,38 @@ def test_t1_f6_05_max_window_trust_tab_approve_button_updates_inbox(
         )
         assert approve_btn is not None, "M5 MaxWindow must expose Trust approve button"
         approve_btn.click()
-        _pump_until(app, lambda: core.snapshot().approvals == ())
+        _pump_until(
+            app,
+            lambda: (
+                core.snapshot().approvals == ()
+                and window.stat_trust.text() == "0"
+                and not approve_btn.isEnabled()
+            ),
+        )
+        assert window.trust_list.count() == 1
+        assert window.trust_list.item(0).text() == "No pending Trust requests."
+
+        assert core.engine is not None
+        with Session(core.engine) as session:
+            row = session.scalar(select(ApprovalGrant).where(ApprovalGrant.id == grant.id))
+            assert row is not None and row.state == "approved"
     finally:
         window.close()
         app.processEvents()
 
-    assert core.engine is not None
-    with Session(core.engine) as session:
-        row = session.scalar(select(ApprovalGrant).where(ApprovalGrant.id == grant.id))
-        assert row is not None and row.state == "approved"
+    reopened = desktop_core_factory(config=cfg)
+    try:
+        assert reopened.snapshot().approvals == ()
+        assert reopened.engine is not None
+        with Session(reopened.engine) as session:
+            row = session.scalar(select(ApprovalGrant).where(ApprovalGrant.id == grant.id))
+            audits = session.scalars(
+                select(TrustAudit).where(TrustAudit.approval_id == grant.id)
+            ).all()
+            assert row is not None and row.state == "approved"
+            assert {a.decision for a in audits} == {"pending", "approved"}
+    finally:
+        reopened.close()
 
 
 # ---------------------------------------------------------------------------
@@ -1029,6 +1053,7 @@ def test_t3_04_cloud_chat_invokes_multiple_r0_tools_and_surfaces_ui_outcomes(
     mock_llm_server: MockLLMServer,
 ) -> None:
     """T3-04: Cloud chat runs workspace.list_files + dev.add R0 tools and surfaces outcomes."""
+    pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
 
     from max_core.native_desktop.qt_ui import MaxWindow
