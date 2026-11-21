@@ -27,9 +27,7 @@ def _fixtures(tmp_path: Path) -> tuple[Path, Path, Path, Config]:
     validation = tmp_path / "heldout.txt"
     training.write_bytes(b"def double(x):\n    return x * 2\n" * 40)
     validation.write_bytes(b"def triple(y):\n    return y * 3\n" * 40)
-    return training, validation, tmp_path / "model", Config(
-        context=8, width=16, layers=1, heads=2
-    )
+    return training, validation, tmp_path / "model", Config(context=8, width=16, layers=1, heads=2)
 
 
 def test_train_records_heldout_metrics_without_retraining_on_validation(
@@ -37,8 +35,13 @@ def test_train_records_heldout_metrics_without_retraining_on_validation(
 ) -> None:
     training, validation, checkpoint, config = _fixtures(tmp_path)
     result = train(
-        [training], checkpoint, config=config, validation_files=[validation],
-        steps=2, batch_size=2, seed=19
+        [training],
+        checkpoint,
+        config=config,
+        validation_files=[validation],
+        steps=2,
+        batch_size=2,
+        seed=19,
     )
     metrics = result["validation"]
     assert metrics["heldout_sha256"] == hashlib.sha256(validation.read_bytes()).hexdigest()
@@ -87,10 +90,17 @@ def test_sample_top_k_and_temperature_bounds(tmp_path: Path) -> None:
 def test_cli_evaluate_command(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     training, validation, checkpoint, config = _fixtures(tmp_path)
     train([training], checkpoint, config=config, steps=1, batch_size=1)
-    status = main([
-        "evaluate", "--checkpoint", str(checkpoint), "--input", str(validation),
-        "--max-windows", "2",
-    ])
+    status = main(
+        [
+            "evaluate",
+            "--checkpoint",
+            str(checkpoint),
+            "--input",
+            str(validation),
+            "--max-windows",
+            "2",
+        ]
+    )
     assert status == 0
     assert '"evaluated_windows": 2' in capsys.readouterr().out
 
