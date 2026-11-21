@@ -34,6 +34,8 @@ There is no microphone or speech output yet; the orb never pretends to listen.
 The orb uses the existing `NativeDesktopCore.ask_local` path: **local model
 only** (`MAX_TRIAL_*` with `verified_local`, see `M22_NATIVE_LOCAL_HARNESS.md`).
 Without configuration the orb turns red and says no model is connected.
+If the model proposes tools, the orb explicitly reports that **nothing was
+executed** and requires separate owner review; it cannot carry out tool calls.
 Free cloud APIs and tool calling are in `python -m max_core.chat` (PR for M23)
 and are not wired into the orb yet.
 
