@@ -25,7 +25,7 @@ EVAL_BATCH_SIZE = 16
 
 def evaluate_weights(
     model: Any, data: bytes, *, max_windows: int = MAX_EVAL_WINDOWS
-) -> dict[str, float | int]:
+) -> dict[str, float | int | None]:
     """Compute deterministic teacher-forced next-byte NLL over sampled windows."""
     if not 1 <= max_windows <= MAX_EVAL_WINDOWS:
         raise ValueError("Evaluation window count is out of bounds")
@@ -66,13 +66,13 @@ def evaluate_weights(
         "evaluated_target_bytes": total_targets,
         "next_byte_nll": round(nll, 6),
         "bits_per_byte": round(nll / math.log(2), 6),
-        "perplexity": round(math.exp(min(nll, 80.0)), 6),
+        "perplexity": round(math.exp(nll), 6) if nll <= 80.0 else None,
     }
 
 
 def evaluate_checkpoint(
     checkpoint: Path, files: list[Path], *, max_windows: int = MAX_EVAL_WINDOWS
-) -> dict[str, float | int | str]:
+) -> dict[str, float | int | str | None]:
     """Score only explicitly selected held-out files; never run supplied code."""
     model = load(checkpoint)
     data = _corpus(files, model.config.context)
@@ -82,7 +82,7 @@ def evaluate_checkpoint(
     digest = hashlib.sha256(data).hexdigest()
     if digest == metadata.get("training_sha256"):
         raise ValueError("Refusing exact training-corpus evaluation: data leakage")
-    metrics: dict[str, float | int | str] = {
+    metrics: dict[str, float | int | str | None] = {
         "model_architecture": "max_byte_causal_transformer_v1",
         "heldout_sha256": digest,
         "heldout_bytes": len(data),
