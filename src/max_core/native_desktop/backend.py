@@ -16,7 +16,6 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import httpx
-
 from fastapi.testclient import TestClient
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
