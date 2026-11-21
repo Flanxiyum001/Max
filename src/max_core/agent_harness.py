@@ -88,7 +88,7 @@ class AgentHarness:
         deadline_seconds: float = 45.0,
         max_tool_proposals: int = 8,
     ) -> None:
-        if not 1 <= deadline_seconds <= 120:
+        if type(deadline_seconds) not in {int, float} or not 1 <= deadline_seconds <= 120:
             raise ValueError("invalid_harness_deadline")
         if type(max_tool_proposals) is not int or not 1 <= max_tool_proposals <= 8:
             raise ValueError("invalid_tool_proposal_budget")
@@ -145,10 +145,14 @@ class AgentHarness:
         if (
             not isinstance(response, GatewayResponse)
             or response.request_id != request.request_id
+            or not isinstance(response.content, str)
+            or len(response.content) > 128_000
             or not isinstance(response.tool_proposals, tuple)
             or len(response.tool_proposals) > self._max_tool_proposals
             or any(
                 not isinstance(tool, ToolProposal)
+                or not isinstance(tool.call_id, str)
+                or not 1 <= len(tool.call_id) <= 128
                 or not isinstance(tool.name, str)
                 or _TOOL.fullmatch(tool.name) is None
                 for tool in response.tool_proposals
