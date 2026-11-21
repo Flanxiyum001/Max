@@ -16,7 +16,7 @@ from typing import Any
 
 try:
     import torch  # type: ignore[import-not-found]
-    from torch import nn  # type: ignore[import-not-found]
+    from torch import nn
     from torch.nn import functional as F  # type: ignore[import-not-found]
 except ImportError as exc:
     raise ImportError(
