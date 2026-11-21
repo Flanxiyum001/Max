@@ -190,3 +190,163 @@ def test_orb_announces_due_reminders(monkeypatch: pytest.MonkeyPatch) -> None:
     window._check_reminders()
     assert window.answer.text() == "Reminder: stretch"
     window.close()
+
+
+class _FakeSTT:
+    def __init__(self, remote: bool) -> None:
+        self.available = True
+        self.requires_remote_upload = remote
+        self.endpoint = "https://stt.example.test/v1/audio/transcriptions"
+
+
+class _FakeVoice:
+    """Mimics VoiceController's surface used by the orb."""
+
+    def __init__(self, transcript: str | None = "what time is it", remote: bool = False) -> None:
+        self.stt = _FakeSTT(remote)
+        self.is_recording = False
+        self.is_speaking = False
+        self.remote_stt_consent = False
+        self.last_error: str | None = None
+        self.transcript = transcript
+        self.spoken: list[str] = []
+        self.interrupted = 0
+
+    def grant_remote_stt_consent(self) -> None:
+        self.remote_stt_consent = True
+
+    def start_push_to_talk(self, *, direct_user_gesture: bool = True) -> bool:
+        if self.stt.requires_remote_upload and not self.remote_stt_consent:
+            self.last_error = "remote_stt_consent_required"
+            return False
+        self.is_recording = True
+        return True
+
+    def stop_push_to_talk_and_transcribe(self) -> str | None:
+        self.is_recording = False
+        self.remote_stt_consent = False
+        if self.transcript is None:
+            self.last_error = "empty_audio"
+        return self.transcript
+
+    def speak_text(self, text: str) -> bool:
+        self.spoken.append(text)
+        self.is_speaking = True
+        return True
+
+    def interrupt_speech(self) -> None:
+        self.interrupted += 1
+        self.is_speaking = False
+
+    def revoke_microphone(self) -> None:
+        self.is_recording = False
+
+
+class _EchoSession(_FakeSession):
+    def ask(self, text, *, approve=None, on_step=None):  # type: ignore[no-untyped-def]
+        from max_core.tool_loop import LoopResult
+
+        self.asked = text
+        return LoopResult(answer=f"You asked: {text}")
+
+
+def _voice_orb(monkeypatch, voice, session=None):  # type: ignore[no-untyped-def]
+    pytest.importorskip("PySide6")
+    monkeypatch.delenv("MAX_DATABASE_URL", raising=False)
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from max_core.native_desktop.backend import NativeDesktopCore
+    from max_core.native_desktop.orb_ui import OrbWindow
+
+    app = QApplication.instance() or QApplication([])
+    session = session or _EchoSession()
+    window = OrbWindow(
+        NativeDesktopCore.from_env(),
+        session_factory=lambda: session,
+        voice_factory=lambda: voice,
+    )
+    window.show()
+    return app, window, session
+
+
+def _settle(app, window) -> None:  # type: ignore[no-untyped-def]
+    window._pool.waitForDone()
+    for _ in range(50):
+        app.processEvents()
+
+
+def test_space_listens_then_answers_aloud(monkeypatch: pytest.MonkeyPatch) -> None:
+    voice = _FakeVoice()
+    app, window, session = _voice_orb(monkeypatch, voice)
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    QTest.keyClick(window, Qt.Key.Key_Space)
+    assert voice.is_recording and window.orb.state == "listening"
+    assert window.input.isHidden()  # space did not start typing
+    QTest.keyClick(window, Qt.Key.Key_Space)
+    _settle(app, window)
+    assert session.asked == "what time is it"
+    assert window.answer.text() == "You asked: what time is it"
+    assert voice.spoken == ["You asked: what time is it"]
+    assert window.orb.state == "speaking"
+    QTest.keyClick(window, Qt.Key.Key_Escape)  # Esc stops speech
+    assert voice.interrupted == 1 and window.orb.state == "idle"
+    window.close()
+
+
+def test_typed_turn_is_not_spoken(monkeypatch: pytest.MonkeyPatch) -> None:
+    voice = _FakeVoice()
+    app, window, _ = _voice_orb(monkeypatch, voice)
+    window.input.setText("hello")
+    window.send()
+    _settle(app, window)
+    assert window.answer.text() == "You asked: hello" and voice.spoken == []
+    window.close()
+
+
+@pytest.mark.parametrize(("key", "records"), [("Return", True), ("Escape", False)])
+def test_remote_transcription_needs_consent_each_time(
+    monkeypatch: pytest.MonkeyPatch, key: str, records: bool
+) -> None:
+    voice = _FakeVoice(remote=True)
+    app, window, _ = _voice_orb(monkeypatch, voice)
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    QTest.keyClick(window, Qt.Key.Key_Space)
+    assert not voice.is_recording
+    assert "stt.example.test" in window.answer.text()
+    QTest.keyClick(window, getattr(Qt.Key, f"Key_{key}"))
+    assert voice.is_recording is records
+    if records:
+        QTest.keyClick(window, Qt.Key.Key_Space)
+        _settle(app, window)
+        assert not voice.remote_stt_consent  # consent used up by that one recording
+        QTest.keyClick(window, Qt.Key.Key_Space)
+        assert not voice.is_recording and "stt.example.test" in window.answer.text()
+        QTest.keyClick(window, Qt.Key.Key_Escape)
+    window.close()
+
+
+def test_silence_reports_honestly(monkeypatch: pytest.MonkeyPatch) -> None:
+    voice = _FakeVoice(transcript=None)
+    app, window, session = _voice_orb(monkeypatch, voice)
+    window.toggle_listening()
+    window.toggle_listening()
+    _settle(app, window)
+    assert window.orb.state == "error" and window.answer.text() == "I didn't hear anything."
+    assert not hasattr(session, "asked")
+    window.close()
+
+
+def test_voice_unavailable_is_explained(monkeypatch: pytest.MonkeyPatch) -> None:
+    def broken():  # type: ignore[no-untyped-def]
+        raise RuntimeError("no audio stack")
+
+    app, window, _ = _voice_orb(monkeypatch, None)
+    window._voice_factory = broken
+    window.toggle_listening()
+    assert window.orb.state == "error" and "Voice problem" in window.answer.text()
+    window.close()
