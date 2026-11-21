@@ -683,8 +683,7 @@ class MaxWindow(QMainWindow):
             self.events_list.clear()
             for record in value.rows:
                 self.events_list.addItem(
-                    f"◈  {record.heading}  ·  Revision {record.revision}\n"
-                    f"     {record.explanation}"
+                    f"◈  {record.heading}  ·  Revision {record.revision}\n     {record.explanation}"
                 )
             if not value.rows:
                 self.events_list.addItem("No recorded activity. No tool calls are assumed.")
