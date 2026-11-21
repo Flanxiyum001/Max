@@ -9,7 +9,6 @@ Set ``MAX_WORKSPACE_DIR`` to give MAX read access to one folder.
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -79,14 +78,27 @@ def _show_step(step: ToolStep) -> None:
         print(f"  [tool] {step.tool_name} {step.status}: {step.error_code}")
 
 
-def registry_for_session(settings: TrialSettings, workspace: Path | None) -> ToolRegistry:
+def registry_for_session(
+    settings: TrialSettings, workspace: Path | None, options: Any = None
+) -> ToolRegistry:
     """Cloud models cannot request local workspace reads or note writes.
 
     Merely printing a warning is not consent to transmit local file contents.
+    With ``options`` (a ``SessionOptions``) the full assistant toolkit is added.
     """
-    if settings.spec.inference_destination == InferenceDestination.CLOUD:
-        return builtin_registry()
-    return builtin_registry(workspace)
+    is_cloud = settings.spec.inference_destination == InferenceDestination.CLOUD
+    if options is None:
+        return builtin_registry() if is_cloud else builtin_registry(workspace)
+    from max_core.assistant_tools import assistant_registry
+
+    return assistant_registry(
+        data_dir=options.data_dir,
+        workspace=workspace,
+        cloud=is_cloud,
+        cloud_personal_tools=options.cloud_personal_tools,
+        enable_shell=options.enable_shell,
+        enable_web=options.enable_web,
+    )
 
 
 def session_system_messages(settings: TrialSettings, mode: ReplyMode) -> list[ChatMessage]:
@@ -94,8 +106,13 @@ def session_system_messages(settings: TrialSettings, mode: ReplyMode) -> list[Ch
     return [persona_message(mode)] if settings.persona_enabled else []
 
 
-async def chat(settings: TrialSettings, workspace: Path | None) -> None:
-    registry = registry_for_session(settings, workspace)
+async def chat(settings: TrialSettings, workspace: Path | None, options: Any = None) -> None:
+    registry = registry_for_session(settings, workspace, options)
+    store = None
+    if options is not None and "reminders.list" in {t.name for t in registry}:
+        from max_core.assistant_tools import AssistantStore
+
+        store = AssistantStore(options.data_dir)
     make = request_factory(settings)
     mode = ReplyMode.CONVERSATION
     history: list[ChatMessage] = []
@@ -121,6 +138,9 @@ async def chat(settings: TrialSettings, workspace: Path | None) -> None:
             on_step=_show_step,
         )
         while True:
+            if store is not None:
+                for item in store.pop_due():
+                    print(f"\n  [reminder] {item['text']}")
             try:
                 text = (await asyncio.to_thread(input, "\nyou > ")).strip()
             except (EOFError, KeyboardInterrupt):
@@ -159,16 +179,18 @@ async def chat(settings: TrialSettings, workspace: Path | None) -> None:
 
 
 def main() -> int:
+    from max_core.assistant_session import SessionOptions, merged_environment
+
+    env = merged_environment()
     try:
-        settings = TrialSettings.from_env()
+        settings = TrialSettings.from_env(env)
     except TrialConfigurationError as exc:
         print(f"MAX chat configuration error: {exc.code}", file=sys.stderr)
         print("See docs/M23_TOOL_LOOP.md for setup.", file=sys.stderr)
         return 2
-    raw = os.environ.get("MAX_WORKSPACE_DIR")
-    workspace = Path(raw) if raw else None
+    options = SessionOptions.from_env(env)
     try:
-        asyncio.run(chat(settings, workspace))
+        asyncio.run(chat(settings, options.workspace, options))
     except ValueError as exc:
         print(f"MAX chat error: {exc}", file=sys.stderr)
         return 2
