@@ -29,7 +29,7 @@ from max_core.gateway import (
 from max_core.gateway_trial import TrialConfigurationError, TrialSettings
 from max_core.persona import persona_message
 from max_core.tool_loop import ToolLoop, ToolStep
-from max_core.tools import builtin_registry
+from max_core.tools import ToolRegistry, builtin_registry
 
 MAX_HISTORY = 30
 
@@ -62,9 +62,10 @@ def request_factory(
 
 def _ask_approval(name: str, arguments: dict[str, Any]) -> bool:
     print(f"\n  MAX wants to run {name} with:")
+    # Full repr makes newlines visible and prevents a hidden suffix from being
+    # approved under the false claim that only the first 300 chars were shown.
     for key, value in arguments.items():
-        preview = str(value)
-        print(f"    {key}: {preview[:300]}{'...' if len(preview) > 300 else ''}")
+        print(f"    {key}: {value!r}")
     try:
         return input("  Allow this exact action? [y/N] ").strip().lower() == "y"
     except EOFError:
@@ -78,8 +79,18 @@ def _show_step(step: ToolStep) -> None:
         print(f"  [tool] {step.tool_name} {step.status}: {step.error_code}")
 
 
+def registry_for_session(settings: TrialSettings, workspace: Path | None) -> ToolRegistry:
+    """Cloud models cannot request local workspace reads or note writes.
+
+    Merely printing a warning is not consent to transmit local file contents.
+    """
+    if settings.spec.inference_destination == InferenceDestination.CLOUD:
+        return builtin_registry()
+    return builtin_registry(workspace)
+
+
 async def chat(settings: TrialSettings, workspace: Path | None) -> None:
-    registry = builtin_registry(workspace)
+    registry = registry_for_session(settings, workspace)
     make = request_factory(settings)
     system = [persona_message()] if settings.persona_enabled else []
     history: list[ChatMessage] = []
@@ -92,7 +103,10 @@ async def chat(settings: TrialSettings, workspace: Path | None) -> None:
         f"MAX online ({where} model, {len(registry)} tools). Type /exit to leave, /reset to clear."
     )
     if settings.spec.inference_destination == InferenceDestination.CLOUD:
-        print("Note: messages and tool results in this session are sent to the cloud provider.")
+        print(
+            "Note: public chat text and non-file tool results go to the cloud provider. "
+            "Workspace reads and note writes are disabled in cloud mode."
+        )
     async with httpx.AsyncClient(trust_env=False, timeout=70.0) as client:
         loop = ToolLoop(
             Gateway((settings.spec,), HTTPAdapter(client)),
