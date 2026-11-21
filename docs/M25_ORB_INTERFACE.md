@@ -14,6 +14,9 @@ The previous dashboard is still available via `--dashboard` or right-click →
 - The answer fades in under the orb and fades out after a while.
 - Esc clears the input, then the answer, then closes MAX.
 - Drag anywhere to move; double-click for full screen; right-click for the menu.
+- Closing while a local model is responding defers shutdown until that bounded
+  request finishes rather than freezing the window. A closed window releases
+  its local SQLite/desktop-core resources.
 
 ## Orb states (all real)
 
@@ -38,6 +41,9 @@ and are not wired into the orb yet.
 
 `tests/test_native_orb.py`: smoke launch, frameless + idle start, typing reveals
 the input and Esc clears it, unconfigured model goes thinking → error honestly.
-Dashboard smoke test still passes with `--dashboard`.
+Dashboard smoke test still passes with `--dashboard`. Additional regressions
+cover closing during an in-flight model request, local resource cleanup,
+reply auto-hide timer invalidation, and return to idle. The orb redraws at
+~30 fps to reduce idle CPU usage; real-device performance remains unmeasured.
 
 Rollback: revert `orb_ui.py`, `__main__.py`, tests and this doc.
