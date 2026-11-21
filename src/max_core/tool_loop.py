@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from time import monotonic
 from typing import Any, Literal
 
 from max_core.agent_harness import CompletionGateway
@@ -96,6 +98,15 @@ class ToolLoop:
     ) -> None:
         if not 1 <= max_steps <= 12 or not 1 <= max_calls_per_step <= 8:
             raise ValueError("invalid_loop_budget")
+        if (
+            not isinstance(deadline_seconds, (float, int))
+            or not math.isfinite(deadline_seconds)
+            or not 1 <= deadline_seconds <= 300
+            or not isinstance(tool_timeout_seconds, (float, int))
+            or not math.isfinite(tool_timeout_seconds)
+            or not 0 < tool_timeout_seconds <= 60
+        ):
+            raise ValueError("invalid_loop_deadline")
         self._gateway = gateway
         self._registry = registry
         self._approve = approve
@@ -113,7 +124,9 @@ class ToolLoop:
             except Exception:
                 pass  # a display failure is never an approval or a crash
 
-    async def _execute(self, name: str, arguments: object, result: LoopResult) -> str:
+    async def _execute(
+        self, name: str, arguments: object, result: LoopResult, deadline_at: float
+    ) -> str:
         tool = self._registry.get(name)
         if tool is None:
             self._record(result, ToolStep(name[:100], "failed", "unknown_tool"))
@@ -124,6 +137,9 @@ class ToolLoop:
             self._record(result, ToolStep(name, "failed", exc.code))
             return json.dumps({"error": exc.code})
         self._record(result, ToolStep(name, "proposed"))
+        if monotonic() >= deadline_at:
+            self._record(result, ToolStep(name, "denied", "turn_deadline_exceeded"))
+            return json.dumps({"error": "turn_deadline_exceeded"})
         if tool.risk == ToolRisk.EFFECTFUL:
             approved = False
             if self._approve is not None:
@@ -134,10 +150,25 @@ class ToolLoop:
             if not approved:
                 self._record(result, ToolStep(name, "denied", "owner_denied"))
                 return json.dumps({"error": "owner_denied"})
+            # Typed confirmation is synchronous. An operator can take time to
+            # review; never execute a stale approval after the turn expired.
+            if monotonic() >= deadline_at:
+                self._record(result, ToolStep(name, "denied", "turn_deadline_exceeded"))
+                return json.dumps({"error": "turn_deadline_exceeded"})
         try:
-            output = await asyncio.wait_for(
-                asyncio.to_thread(tool.handler, clean), timeout=self._tool_timeout
-            )
+            if tool.risk == ToolRisk.EFFECTFUL:
+                # Never detach writes into a thread that may outlive timeout or
+                # cancellation and modify files *after* a failed turn returns.
+                # This is cooperative, not a hard-kill sandbox.
+                output = tool.handler(clean)
+            else:
+                remaining = deadline_at - monotonic()
+                if remaining <= 0:
+                    raise TimeoutError
+                output = await asyncio.wait_for(
+                    asyncio.to_thread(tool.handler, clean),
+                    timeout=min(self._tool_timeout, remaining),
+                )
         except ToolError as exc:
             self._record(result, ToolStep(name, "failed", exc.code))
             return json.dumps({"error": exc.code})
@@ -152,10 +183,16 @@ class ToolLoop:
 
     async def run(self, history: Sequence[ChatMessage], make_request: RequestFactory) -> LoopResult:
         """``history`` is the conversation so far, ending with the owner's message."""
-        return await asyncio.wait_for(self._run(history, make_request), timeout=self._deadline)
+        deadline_at = monotonic() + self._deadline
+        return await asyncio.wait_for(
+            self._run(history, make_request, deadline_at), timeout=self._deadline
+        )
 
     async def _run(
-        self, history: Sequence[ChatMessage], make_request: RequestFactory
+        self,
+        history: Sequence[ChatMessage],
+        make_request: RequestFactory,
+        deadline_at: float,
     ) -> LoopResult:
         result = LoopResult(answer="")
         prompt = tool_system_prompt(self._registry)
@@ -166,6 +203,10 @@ class ToolLoop:
             system.append(ChatMessage("system", prompt))
         scratch: list[ChatMessage] = []
         for _ in range(self._max_steps):
+            if monotonic() >= deadline_at:
+                result.stopped_reason = "step_limit"
+                result.answer = "Turn time budget expired; review prior tool steps before retrying."
+                return result
             window = (turns + scratch)[-(46 - len(system)) :]
             while window and window[0].role != "user":
                 window = window[1:]
@@ -182,12 +223,22 @@ class ToolLoop:
                 return result
             outputs = []
             for name, arguments in calls[: self._max_calls]:
-                payload = await self._execute(name, arguments, result)
-                outputs.append(f'<tool_result name="{name[:100]}">{payload}</tool_result>')
+                payload = await self._execute(name, arguments, result, deadline_at)
+                # Untrusted tool names must not break out of an XML-like attribute.
+                registered = self._registry.get(name)
+                label = registered.name if registered is not None else "unrecognized"
+                outputs.append(f'<tool_result name="{label}">{payload}</tool_result>')
             if len(calls) > self._max_calls:
                 outputs.append(
                     '<tool_result name="limit">{"error": "too_many_calls"}</tool_result>'
                 )
+            if monotonic() >= deadline_at:
+                result.stopped_reason = "step_limit"
+                result.answer = (
+                    "Turn time budget expired after tool processing; "
+                    "inspect the recorded steps before retrying."
+                )
+                return result
             assistant_text = response.content.strip() or "(tool calls)"
             scratch.append(ChatMessage("assistant", assistant_text[:_MAX_MESSAGE]))
             scratch.append(
