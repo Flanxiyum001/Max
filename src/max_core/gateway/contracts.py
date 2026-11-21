@@ -48,6 +48,24 @@ _TOOL_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]{0,99}")
 def _default_tool_parameters() -> dict[str, Any]:
     return {"type": "object", "properties": {}}
 
+def _assert_json_depth(value: object) -> None:
+    """Reject oversized recursive structures independent of Python JSON limits.
+
+    Different CPython versions and test runtimes may accept a 3,000-level
+    dict before json.dumps reaches their recursion limit. Tool input cannot
+    depend on those interpreter-specific thresholds.
+    """
+    stack: list[tuple[object, int]] = [(value, 0)]
+    while stack:
+        current, depth = stack.pop()
+        if depth > 96:
+            raise ValueError("JSON-serializable data exceeds maximum nesting depth")
+        if isinstance(current, dict):
+            stack.extend((item, depth + 1) for item in current.values())
+        elif isinstance(current, (list, tuple)):
+            stack.extend((item, depth + 1) for item in current)
+
+
 
 def _require_utf8(value: str, message: str) -> None:
     try:
@@ -79,6 +97,7 @@ class ToolDefinition:
         if not isinstance(self.parameters, dict):
             raise ValueError("Tool parameters must be a JSON object schema")
         try:
+            _assert_json_depth(self.parameters)
             encoded = json.dumps(
                 self.parameters, separators=(",", ":"), ensure_ascii=False, allow_nan=False
             )
@@ -99,6 +118,7 @@ def request_envelope_bytes(
             if message.tool_call_id is not None:
                 total += len(message.tool_call_id.encode("utf-8")) + 16
             for call in message.tool_calls:
+                _assert_json_depth(call.arguments)
                 encoded = json.dumps(
                     call.arguments, separators=(",", ":"), ensure_ascii=False, allow_nan=False
                 )
@@ -109,6 +129,7 @@ def request_envelope_bytes(
                     + 16
                 )
         for tool in tools:
+            _assert_json_depth(tool.parameters)
             encoded = json.dumps(
                 tool.parameters, separators=(",", ":"), ensure_ascii=False, allow_nan=False
             )
@@ -172,6 +193,7 @@ class ChatMessage:
                 if not isinstance(call.arguments, dict):
                     raise ValueError("Tool proposal arguments must be a JSON object")
                 try:
+                    _assert_json_depth(call.arguments)
                     encoded = json.dumps(
                         call.arguments,
                         separators=(",", ":"),

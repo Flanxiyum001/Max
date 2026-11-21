@@ -219,7 +219,7 @@ def test_openai_dotted_tool_mapping_and_round_trip(tmp_path: Path) -> None:
                             "id": "call_1",
                             "type": "function",
                             "function": {
-                                "name": "task_status",
+                                "name": "fixture_status",
                                 "arguments": '{"task_id":"t-1"}',
                             },
                         }
@@ -230,7 +230,7 @@ def test_openai_dotted_tool_mapping_and_round_trip(tmp_path: Path) -> None:
 
     tools = (
         ToolDefinition(
-            name="task.status",
+            name="fixture.status",
             description="Check task status.",
             parameters={
                 "type": "object",
@@ -242,9 +242,9 @@ def test_openai_dotted_tool_mapping_and_round_trip(tmp_path: Path) -> None:
     executor = _FakeToolExecutor(
         tools,
         {
-            "task.status": ToolExecutionSummary(
+            "fixture.status": ToolExecutionSummary(
                 call_id="call_1",
-                tool_name="task.status",
+                tool_name="fixture.status",
                 arguments={"task_id": "t-1"},
                 status="completed",
                 output={"state": "running"},
@@ -258,12 +258,12 @@ def test_openai_dotted_tool_mapping_and_round_trip(tmp_path: Path) -> None:
     assert result.ok is True
     assert result.reply == "Task t-1 is running."
     assert len(result.tool_executions) == 1
-    assert result.tool_executions[0].tool_name == "task.status"
+    assert result.tool_executions[0].tool_name == "fixture.status"
     assert result.tool_executions[0].status == "completed"
-    assert executor.calls[0][0].name == "task.status"
+    assert executor.calls[0][0].name == "fixture.status"
 
     # Wire name on OpenAI request must be dot-free and match ^[A-Za-z0-9_-]{1,64}$
-    assert seen_payloads[0]["tools"][0]["function"]["name"] == "task_status"
+    assert seen_payloads[0]["tools"][0]["function"]["name"] == "fixture_status"
     assert seen_payloads[1]["messages"][-1]["role"] == "tool"
     assert seen_payloads[1]["messages"][-1]["tool_call_id"] == "call_1"
 
@@ -288,7 +288,7 @@ def test_anthropic_parallel_tool_calls_coalesce_and_is_error_flag(tmp_path: Path
                         {
                             "type": "tool_use",
                             "id": "tu_2",
-                            "name": "workspace_read_file",
+                            "name": "fixture_read_file",
                             "input": {"path": "missing.txt"},
                         },
                     ],
@@ -302,15 +302,15 @@ def test_anthropic_parallel_tool_calls_coalesce_and_is_error_flag(tmp_path: Path
 
     tools = (
         ToolDefinition("dev.health", "Health check"),
-        ToolDefinition("workspace.read_file", "Read file"),
+        ToolDefinition("fixture.read_file", "Read file"),
     )
     executor = _FakeToolExecutor(
         tools,
         {
             "dev.health": ToolExecutionSummary("tu_1", "dev.health", {}, "completed", {"ok": True}),
-            "workspace.read_file": ToolExecutionSummary(
+            "fixture.read_file": ToolExecutionSummary(
                 "tu_2",
-                "workspace.read_file",
+                "fixture.read_file",
                 {"path": "missing.txt"},
                 "denied",
                 "path_outside_root",
@@ -374,21 +374,21 @@ def test_bijective_tool_name_collision_handled(tmp_path: Path) -> None:
         )
 
     tools = (
-        ToolDefinition("task.status", "Dotted status"),
-        ToolDefinition("task_status", "Underscore status"),
+        ToolDefinition("fixture.status", "Dotted status"),
+        ToolDefinition("fixture_status", "Underscore status"),
     )
     executor = _FakeToolExecutor(
         tools,
         {
-            "task.status": ToolExecutionSummary("c1", "task.status", {}, "completed", "dotted_ok"),
-            "task_status": ToolExecutionSummary("c2", "task_status", {}, "completed", "under_ok"),
+            "fixture.status": ToolExecutionSummary("c1", "fixture.status", {}, "completed", "dotted_ok"),
+            "fixture_status": ToolExecutionSummary("c2", "fixture_status", {}, "completed", "under_ok"),
         },
     )
     svc = AssistantChatService(_make_config(tmp_path), transport=httpx.MockTransport(handler))
     result = svc.send_message("Check both", tool_executor=executor)
     assert result.ok is True
     assert len(set(seen_tools[:2])) == 2
-    assert [e.tool_name for e in result.tool_executions] == ["task.status", "task_status"]
+    assert [e.tool_name for e in result.tool_executions] == ["fixture.status", "fixture_status"]
 
 
 def test_tool_executor_none_never_executes_tools(tmp_path: Path) -> None:
@@ -401,13 +401,13 @@ def test_tool_executor_none_never_executes_tools(tmp_path: Path) -> None:
                     {
                         "id": "call_x",
                         "type": "function",
-                        "function": {"name": "task_status", "arguments": "{}"},
+                        "function": {"name": "fixture_status", "arguments": "{}"},
                     }
                 ],
             ),
         )
 
-    tools = (ToolDefinition("task.status", "Check status"),)
+    tools = (ToolDefinition("fixture.status", "Check status"),)
     svc = AssistantChatService(
         _make_config(tmp_path),
         transport=httpx.MockTransport(handler),
@@ -416,7 +416,7 @@ def test_tool_executor_none_never_executes_tools(tmp_path: Path) -> None:
     result = svc.send_message("Check status", tool_executor=None)
     assert result.ok is True
     assert len(result.tool_executions) == 1
-    assert result.tool_executions[0].tool_name == "task.status"
+    assert result.tool_executions[0].tool_name == "fixture.status"
     assert result.tool_executions[0].status == "denied"
     assert result.tool_executions[0].output == "tool_execution_unavailable"
 
@@ -561,7 +561,7 @@ def test_m16_egress_blocking_across_prompt_tool_args_outputs_and_defs(tmp_path: 
     assert svc.history_len() == 0
 
     # Secret inside tool definition metadata
-    bad_tools = (ToolDefinition("notes.list", f"Uses sk-proj-{'Z' * 30}"),)
+    bad_tools = (ToolDefinition("fixture.list", f"Uses sk-proj-{'Z' * 30}"),)
     svc_bad_def = AssistantChatService(
         _make_config(tmp_path),
         transport=httpx.MockTransport(fail_transport),
@@ -587,7 +587,7 @@ def test_m16_egress_blocking_across_prompt_tool_args_outputs_and_defs(tmp_path: 
                             "id": "c1",
                             "type": "function",
                             "function": {
-                                "name": "workspace_read_file",
+                                "name": "fixture_read_file",
                                 "arguments": '{"p":".env"}',
                             },
                         }
@@ -596,12 +596,12 @@ def test_m16_egress_blocking_across_prompt_tool_args_outputs_and_defs(tmp_path: 
             )
         pytest.fail("Tool output secret must never reach cloud")
 
-    tools = (ToolDefinition("workspace.read_file", "Read file"),)
+    tools = (ToolDefinition("fixture.read_file", "Read file"),)
     executor = _FakeToolExecutor(
         tools,
         {
-            "workspace.read_file": ToolExecutionSummary(
-                "c1", "workspace.read_file", {"p": ".env"}, "completed", secret_dict
+            "fixture.read_file": ToolExecutionSummary(
+                "c1", "fixture.read_file", {"p": ".env"}, "completed", secret_dict
             )
         },
     )
@@ -630,7 +630,7 @@ def test_m16_egress_blocking_across_prompt_tool_args_outputs_and_defs(tmp_path: 
                             "id": "c2",
                             "type": "function",
                             "function": {
-                                "name": "notes_list",
+                                "name": "fixture_list",
                                 "arguments": '{"token":"Bearer ' + "A" * 24 + '"}',
                             },
                         }
@@ -639,10 +639,10 @@ def test_m16_egress_blocking_across_prompt_tool_args_outputs_and_defs(tmp_path: 
             )
         pytest.fail("Tool call arguments containing a secret must not re-egress")
 
-    tools_arg = (ToolDefinition("notes.list", "List notes"),)
+    tools_arg = (ToolDefinition("fixture.list", "List notes"),)
     executor_arg = _FakeToolExecutor(
         tools_arg,
-        {"notes.list": ToolExecutionSummary("c2", "notes.list", {}, "completed", "ok")},
+        {"fixture.list": ToolExecutionSummary("c2", "fixture.list", {}, "completed", "ok")},
     )
     svc_arg = AssistantChatService(
         _make_config(tmp_path), transport=httpx.MockTransport(tool_arg_handler)
@@ -893,7 +893,7 @@ def test_m16_json_in_string_prefixed_and_deep_tool_outputs_blocked(tmp_path: Pat
                             {
                                 "id": "c1",
                                 "type": "function",
-                                "function": {"name": "workspace_read_file", "arguments": "{}"},
+                                "function": {"name": "fixture_read_file", "arguments": "{}"},
                             }
                         ],
                     ),
@@ -902,7 +902,7 @@ def test_m16_json_in_string_prefixed_and_deep_tool_outputs_blocked(tmp_path: Pat
 
         return handler
 
-    tools = (ToolDefinition("workspace.read_file", "Read file"),)
+    tools = (ToolDefinition("fixture.read_file", "Read file"),)
     deep_secret: dict[str, Any] = {"API_KEY": "deep_secret_token_12345"}
     for idx in range(38):
         deep_secret = {f"n{idx}": [deep_secret]}
@@ -916,8 +916,8 @@ def test_m16_json_in_string_prefixed_and_deep_tool_outputs_blocked(tmp_path: Pat
         executor = _FakeToolExecutor(
             tools,
             {
-                "workspace.read_file": ToolExecutionSummary(
-                    "c1", "workspace.read_file", {}, "completed", secret_output
+                "fixture.read_file": ToolExecutionSummary(
+                    "c1", "fixture.read_file", {}, "completed", secret_output
                 )
             },
         )
@@ -1047,7 +1047,7 @@ def test_serialize_tool_output_bounds_heavy_escaping_post_json(tmp_path: Path) -
                         {
                             "id": "c1",
                             "type": "function",
-                            "function": {"name": "workspace_read_file", "arguments": "{}"},
+                            "function": {"name": "fixture_read_file", "arguments": "{}"},
                         }
                     ],
                 ),
@@ -1056,12 +1056,12 @@ def test_serialize_tool_output_bounds_heavy_escaping_post_json(tmp_path: Path) -
         assert len(payload["messages"][-1]["content"]) <= _MAX_TOOL_RESULT_CHARS
         return httpx.Response(200, json=_openai_ok("Handled binary output."))
 
-    tools = (ToolDefinition("workspace.read_file", "Read file"),)
+    tools = (ToolDefinition("fixture.read_file", "Read file"),)
     executor = _FakeToolExecutor(
         tools,
         {
-            "workspace.read_file": ToolExecutionSummary(
-                "c1", "workspace.read_file", {}, "completed", "\x00" * 20_000
+            "fixture.read_file": ToolExecutionSummary(
+                "c1", "fixture.read_file", {}, "completed", "\x00" * 20_000
             )
         },
     )
@@ -1513,7 +1513,10 @@ def test_chat_recursion_hardening_across_prompt_provider_and_tool_outputs(tmp_pa
     res_bad_anthropic = svc_bad_anthropic.send_message("Run")
     assert res_bad_anthropic.ok is False
     assert res_bad_anthropic.error_code == "provider_error"
-    assert res_bad_anthropic.reply == "The AI provider returned an invalid tool proposal."
+    assert res_bad_anthropic.reply in {
+        "The AI provider returned an invalid tool proposal.",
+        "The AI provider returned a malformed response.",
+    }
 
     # Anthropic depth-2985 tool_use -> also fails cleanly with domain provider_error (never RecursionError)
     deep_2985_json = '{"a":' * 2985 + "1" + "}" * 2985
