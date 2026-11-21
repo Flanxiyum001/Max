@@ -1,0 +1,38 @@
+name: MAX offline native model research
+
+on:
+  pull_request:
+    branches: [max]
+    paths:
+      - "src/max_core/native_intelligence/**"
+      - "tests/test_native_intelligence*.py"
+      - "pyproject.toml"
+      - ".github/workflows/native-intelligence.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  native-model-cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install CPU-only PyTorch
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'setuptools>=84.1.0,<85'
+          python -m pip install 'torch>=2.6,<3' --index-url https://download.pytorch.org/whl/cpu
+      - name: Install MAX model and validation extras
+        run: python -m pip install -e '.[dev,native-intelligence]'
+      - name: Check formatting, lint and typing
+        run: |
+          python -m ruff check src/max_core/native_intelligence tests/test_native_intelligence*.py
+          python -m ruff format --check src/max_core/native_intelligence tests/test_native_intelligence*.py
+          python -m mypy --no-warn-unused-ignores src/max_core/native_intelligence
+      - name: Train and evaluate tiny model without cloud APIs
+        run: python -m pytest -q -ra tests/test_native_intelligence.py tests/test_native_intelligence_evaluation.py

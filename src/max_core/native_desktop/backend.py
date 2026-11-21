@@ -6,25 +6,41 @@ The strong bootstrap token never leaves this Python process.
 
 from __future__ import annotations
 
+import asyncio
+import os
 import re
+import stat
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from secrets import token_hex
 from typing import TYPE_CHECKING, Any, TypeAlias
 from uuid import UUID, uuid4
 
+import httpx
 from fastapi.testclient import TestClient
 from sqlalchemy import Connection, Engine, create_engine, event, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError, SQLAlchemyError
 
+from max_core.activity_view import TaskActivity, task_activity
+from max_core.agent_harness import ActivityEvent, AgentHarness
 from max_core.api import create_app
 from max_core.config import Settings
+from max_core.gateway import (
+    ChatMessage,
+    Gateway,
+    GatewayRequest,
+    HTTPAdapter,
+    InferenceDestination,
+    Privacy,
+)
+from max_core.gateway_trial import TrialConfigurationError, TrialSettings
 from max_core.local_config import DesktopConfig, load_desktop_config
 from max_core.models import Base
+from max_core.persona import with_persona
 from max_core.store import TaskStore
 
 if TYPE_CHECKING:
@@ -140,7 +156,26 @@ def _create_local_sqlite_store(url_str: str) -> tuple[Engine, TaskStore]:
             or "?" in url_str
         ):
             raise NativeDesktopError("invalid_local_database_configuration")
-        Path(db_name).parent.mkdir(parents=True, exist_ok=True)
+        db_path = Path(db_name)
+        db_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        # The durable journal contains task details, Trust decisions and memory.
+        # Never follow an existing SQLite-file symlink or open a shared Unix DB.
+        if db_path.is_symlink():
+            raise NativeDesktopError("unsafe_sqlite_path")
+        try:
+            descriptor = os.open(
+                db_path,
+                os.O_CREAT | os.O_EXCL | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+            )
+        except FileExistsError:
+            info = db_path.lstat()
+            if not stat.S_ISREG(info.st_mode):
+                raise NativeDesktopError("unsafe_sqlite_path") from None
+            if os.name == "posix" and (info.st_uid != os.getuid() or info.st_mode & 0o077):
+                raise NativeDesktopError("unsafe_sqlite_permissions") from None
+        else:
+            os.close(descriptor)
         engine = create_engine(
             url_str,
             connect_args={"check_same_thread": False, "timeout": 30.0},
@@ -181,6 +216,16 @@ class DesktopSnapshot:
     storage_status: str
     tasks: tuple[TaskRecord, ...]
     approvals: tuple[ApprovalRecord, ...]
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class LocalModelReply:
+    """Owner-visible model text only; no tool execution or private repr."""
+
+    state: str
+    text: str = field(repr=False)
+    proposed_tools: tuple[str, ...] = ()
+    error_code: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -582,6 +627,86 @@ class NativeDesktopCore:
             return tuple(events)
         finally:
             self._exit_call()
+
+    def activity(self, task_id: str) -> TaskActivity:
+        """Read only authoritative task state and the bounded, owner-scoped journal.
+
+        Do not deserialize model/tool payloads, accept pseudo-live claims or infer
+        active coding from a generic task objective.
+        """
+        self._enter_call()
+        try:
+            events = self.timeline(task_id)
+            item = self._call("GET", f"/v1/tasks/{task_id}")
+            if not isinstance(item, dict) or not isinstance(item.get("state"), str):
+                raise NativeDesktopError("invalid_core_response")
+            try:
+                return task_activity(item["state"], events)
+            except ValueError:
+                raise NativeDesktopError("invalid_core_response") from None
+        finally:
+            self._exit_call()
+
+    def ask_local(
+        self,
+        prompt: str,
+        *,
+        on_activity: Callable[[ActivityEvent], None] | None = None,
+        client: httpx.AsyncClient | None = None,
+    ) -> LocalModelReply:
+        """One manual, non-persistent, explicitly verified-local model turn.
+
+        Supplying an HTTP client is solely a transport seam for mock-only tests;
+        no call is made unless the owner explicitly initiates this method.
+        """
+        if not isinstance(prompt, str) or not 1 <= len(prompt.strip()) <= 2000:
+            raise NativeDesktopError("invalid_model_prompt")
+        try:
+            settings = TrialSettings.from_env()
+        except TrialConfigurationError:
+            raise NativeDesktopError("local_model_not_configured") from None
+        if settings.spec.inference_destination != InferenceDestination.VERIFIED_LOCAL:
+            raise NativeDesktopError("local_model_only")
+        try:
+            request = GatewayRequest(
+                request_id=uuid4().hex,
+                messages=(ChatMessage("user", prompt.strip()),),
+                privacy=Privacy.CONFIDENTIAL,
+                max_input_tokens=min(4096, settings.spec.context_tokens - 512),
+                max_output_tokens=512,
+                cloud_allowed=False,
+                local_only=True,
+                allow_fallback=False,
+            )
+            if settings.persona_enabled:
+                request = with_persona(request)
+        except ValueError:
+            raise NativeDesktopError("invalid_model_prompt") from None
+
+        async def one_turn() -> LocalModelReply:
+            async def invoke(transport: httpx.AsyncClient) -> LocalModelReply:
+                harness = AgentHarness(
+                    Gateway((settings.spec,), HTTPAdapter(transport)),
+                    deadline_seconds=45,
+                )
+                result = await harness.run(request, on_activity=on_activity)
+                if result.response is None:
+                    return LocalModelReply("failed", "", (), result.error_code)
+                return LocalModelReply(
+                    result.state,
+                    result.response.content,
+                    tuple(proposal.name for proposal in result.response.tool_proposals),
+                )
+
+            if client is not None:
+                return await invoke(client)
+            async with httpx.AsyncClient(trust_env=False) as transport:
+                return await invoke(transport)
+
+        try:
+            return asyncio.run(one_turn())
+        except Exception:
+            raise NativeDesktopError("local_model_unavailable") from None
 
     def provider_status(self) -> ProviderStatus:
         """Return secret-free provider status for the desktop session."""

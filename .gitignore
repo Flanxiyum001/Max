@@ -23,3 +23,8 @@ venv/
 *.db
 private/
 secrets/
+
+# Research checkpoints must not be committed; weights can memorize training content
+*.pt
+*.pth
+*.safetensors

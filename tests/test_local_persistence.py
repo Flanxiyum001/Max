@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -839,3 +840,43 @@ def test_whitespace_only_env_api_key_falls_through_while_control_chars_fail_clos
     )
     assert cfg_newline.openai is None
     assert cfg_newline.active_provider is None
+
+
+def test_sqlite_journal_is_private_and_rejects_insecure_existing_files(
+    tmp_path: Path,
+) -> None:
+    """Task, Trust and memory records must not default to world-readable files."""
+    if os.name != "posix":
+        pytest.skip("Unix owner and filesystem mode checks")
+    path = tmp_path / "secure_storage" / "journal.sqlite3"
+    url = f"sqlite+pysqlite:///{path.as_posix()}"
+    core = NativeDesktopCore(database_url=url)
+    try:
+        core.create_task("Personal task record")
+    finally:
+        core.close()
+    assert path.stat().st_mode & 0o077 == 0
+    assert path.parent.stat().st_mode & 0o077 == 0
+
+    path.chmod(0o644)
+    with pytest.raises(NativeDesktopError, match="unsafe_sqlite_permissions"):
+        NativeDesktopCore(database_url=url)
+
+    path.chmod(0o600)
+    recovered = NativeDesktopCore(database_url=url)
+    try:
+        assert len(recovered.snapshot().tasks) == 1
+    finally:
+        recovered.close()
+
+
+def test_sqlite_db_symlink_is_rejected_before_schema_access(tmp_path: Path) -> None:
+    if os.name != "posix":
+        pytest.skip("POSIX symlink tests")
+    outside = tmp_path / "outside.json"
+    outside.write_text('{"important":"private"}', encoding="utf-8")
+    linked = tmp_path / "linked.sqlite3"
+    linked.symlink_to(outside)
+    with pytest.raises(NativeDesktopError, match="unsafe_sqlite_path"):
+        NativeDesktopCore(database_url=f"sqlite+pysqlite:///{linked.as_posix()}")
+    assert outside.read_text(encoding="utf-8") == '{"important":"private"}'

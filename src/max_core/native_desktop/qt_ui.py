@@ -8,6 +8,7 @@ never imported by the regular headless MAX Core/server process.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import threading
 from collections.abc import Callable
@@ -58,6 +59,7 @@ from max_core.gateway.adapters import _chunked_scan_messages, _walk_strings
 from max_core.gateway.privacy_guard import contains_high_confidence_secret
 from max_core.local_config import DesktopConfig
 from max_core.local_tools import LocalToolExecutor, LocalToolRegistry
+from max_core.native_desktop.title_bar import AccentStrip, IslandState, IslandTitleBar
 from max_core.native_desktop.backend import (
     ApprovalResolution,
     DesktopSnapshot,
@@ -550,6 +552,12 @@ class MaxWindow(QMainWindow):
         self._in_flight_chats = 0
         self._pending_approval_count = 0
         self._task_ids: list[str] = []
+        self._history: list[int] = [0]
+        self._history_index = 0
+        # Keep an OS frame available on tiling window managers.
+        self._custom_frame = os.environ.get("MAX_NATIVE_SYSTEM_FRAME") != "yes"
+        if self._custom_frame:
+            self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
 
         voice_caps = self._voice.capabilities()
         self._speak_enabled = bool(self._config.tts_enabled_default and voice_caps.tts_available)
@@ -558,9 +566,29 @@ class MaxWindow(QMainWindow):
         self._speak_poll_timer.setInterval(150)
         self._speak_poll_timer.timeout.connect(self._poll_speaking_state)
 
+        outer = QWidget()
+        outer.setObjectName("root")
+        self.setCentralWidget(outer)
+        shell = QVBoxLayout(outer)
+        shell.setContentsMargins(0, 0, 0, 0)
+        shell.setSpacing(0)
+        self.title_bar = IslandTitleBar(self)
+        self.title_bar.back.connect(self.go_back)
+        self.title_bar.forward.connect(self.go_forward)
+        self.title_bar.inbox.connect(lambda: self.switch(2))
+        self.title_bar.help.connect(self.show_help)
+        if not self._custom_frame:
+            for button in (
+                self.title_bar.min_button,
+                self.title_bar.max_button,
+                self.title_bar.close_button,
+            ):
+                button.hide()
+        shell.addWidget(self.title_bar)
+        shell.addWidget(AccentStrip())
         root = QWidget()
         root.setObjectName("root")
-        self.setCentralWidget(root)
+        shell.addWidget(root, 1)
         frame = QHBoxLayout(root)
         frame.setContentsMargins(0, 0, 0, 0)
         frame.setSpacing(0)
@@ -651,6 +679,7 @@ class MaxWindow(QMainWindow):
             )
         self._refresh_provider_and_voice_labels()
         self._sync_orb()
+        self._sync_island()
         QTimer.singleShot(50, self.refresh)
 
     def _default_notice_text(self) -> str:
@@ -970,15 +999,47 @@ class MaxWindow(QMainWindow):
             f"◇  Voice  —  {_format_voice_status(caps).removeprefix('Voice: ')}"
         )
 
-    def switch(self, index: int) -> None:
+    def switch(self, index: int, *, record: bool = True) -> None:
         if not 0 <= index < self.stack.count():
             return
+        if record and index != self._history[self._history_index]:
+            del self._history[self._history_index + 1 :]
+            self._history.append(index)
+            self._history = self._history[-50:]
+            self._history_index = len(self._history) - 1
+        self.title_bar.set_history(
+            self._history_index > 0, self._history_index < len(self._history) - 1
+        )
         self.stack.setCurrentIndex(index)
         self.crumb.setText("MAX  /  " + ("Overview", "Tasks", "Trust", "System")[index])
         for n, button in enumerate(self.nav):
             button.setProperty("active", "true" if n == index else "false")
             button.style().unpolish(button)
             button.style().polish(button)
+
+    def go_back(self) -> None:
+        if self._history_index > 0:
+            self._history_index -= 1
+            self.switch(self._history[self._history_index], record=False)
+
+    def go_forward(self) -> None:
+        if self._history_index < len(self._history) - 1:
+            self._history_index += 1
+            self.switch(self._history[self._history_index], record=False)
+
+    def show_help(self) -> None:
+        self.notice.setText(
+            "Commands: /status, /tasks, /trust, /tools, /voice, /task <objective>. "
+            "Alt+Left/Right navigate, Ctrl+K focuses the command bar."
+        )
+
+    def _sync_island(self) -> None:
+        if any(work.action == "model" for work in self._running.values()):
+            self.title_bar.island.set_state(IslandState.THINKING)
+        elif self._quiet:
+            self.title_bar.island.set_state(IslandState.QUIET)
+        else:
+            self.title_bar.island.set_state(IslandState.IDLE)
 
     def toggle_quiet(self) -> None:
         self._quiet = not self._quiet
