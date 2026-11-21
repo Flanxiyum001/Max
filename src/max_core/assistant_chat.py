@@ -530,18 +530,32 @@ class AssistantChatService:
         self,
         tool_executor: ToolExecutor | None,
     ) -> tuple[ToolDefinition, ...]:
+        """Do not advertise private local reads to a cloud provider.
+
+        A model's call to a read-only tool is NOT consent to send its output
+        (filenames, task details, notes, or file contents) off the device.
+        Owner-approved export must be a separate, host-enforced capability.
+        """
+        private_reads = {
+            "workspace.list_files",
+            "workspace.read_file",
+            "notes.list",
+            "task.list",
+            "task.status",
+            "system.status",
+        }
         if tool_executor is None:
-            return self._base_tools
-        executor_tools = tuple(tool_executor.tool_definitions())
-        if not self._base_tools:
-            return executor_tools
-        seen = {tool.name for tool in executor_tools}
-        merged = list(executor_tools)
-        for tool in self._base_tools:
-            if tool.name not in seen:
-                seen.add(tool.name)
-                merged.append(tool)
-        return tuple(merged)
+            candidates = self._base_tools
+        else:
+            executor_tools = tuple(tool_executor.tool_definitions())
+            seen = {tool.name for tool in executor_tools}
+            merged = list(executor_tools)
+            for tool in self._base_tools:
+                if tool.name not in seen:
+                    seen.add(tool.name)
+                    merged.append(tool)
+            candidates = tuple(merged)
+        return tuple(tool for tool in candidates if tool.name not in private_reads)
 
     def _prepare_request(
         self,
