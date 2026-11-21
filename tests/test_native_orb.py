@@ -52,12 +52,10 @@ def test_typing_reveals_input_and_escape_clears(orb) -> None:  # type: ignore[no
     assert window.input.text() == "" and window.input.isHidden()
 
 
-def test_unconfigured_model_fails_honestly(orb) -> None:  # type: ignore[no-untyped-def]
+def test_unconfigured_model_fails_honestly(orb, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
     app, window = orb
     for key in ("MAX_TRIAL_DESTINATION", "MAX_TRIAL_MODEL", "MAX_TRIAL_ENDPOINT"):
-        import os
-
-        os.environ.pop(key, None)
+        monkeypatch.delenv(key, raising=False)
     window.input.setText("hello")
     window.send()
     assert window.orb.state == "thinking"
@@ -66,3 +64,44 @@ def test_unconfigured_model_fails_honestly(orb) -> None:  # type: ignore[no-unty
         app.processEvents()
     assert window.orb.state == "error"
     assert "No model connected" in window.answer.text()
+
+
+def test_previous_answer_cannot_hide_new_answer(orb) -> None:  # type: ignore[no-untyped-def]
+    _, window = orb
+    window._show_answer("first response")
+    assert window._hide_timer.isActive()
+    window._show_answer(None)
+    assert not window._hide_timer.isActive()
+    window._show_answer("second response")
+    assert window.answer.text() == "second response"
+    assert window._hide_timer.isActive()
+
+
+def test_close_is_deferred_during_active_local_call(orb) -> None:  # type: ignore[no-untyped-def]
+    app, window = orb
+    window._busy = True
+    assert not window.close()  # no blocking call to the worker thread
+    assert window.isVisible()
+    assert window._close_requested
+    window._busy = False
+    window._failed("unavailable")
+    app.processEvents()
+    assert not window.isVisible()
+    assert window.core._closed
+
+
+def test_idle_window_close_releases_local_core(orb) -> None:  # type: ignore[no-untyped-def]
+    _, window = orb
+    assert not window.core._closed
+    assert window.close()
+    assert window.core._closed
+    assert window.core.engine is None
+
+
+def test_new_reply_restarts_idle_timer(orb) -> None:  # type: ignore[no-untyped-def]
+    _, window = orb
+    window._failed("unavailable")
+    assert window._state_timer.isActive() and window.orb.state == "error"
+    window._state_timer.stop()
+    window._idle_after_reply()
+    assert window.orb.state == "idle"
