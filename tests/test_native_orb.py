@@ -105,3 +105,16 @@ def test_new_reply_restarts_idle_timer(orb) -> None:  # type: ignore[no-untyped-
     window._state_timer.stop()
     window._idle_after_reply()
     assert window.orb.state == "idle"
+
+
+def test_model_tool_proposal_is_never_reported_as_executed(orb) -> None:  # type: ignore[no-untyped-def]
+    _, window = orb
+    from max_core.native_desktop.backend import LocalModelReply
+
+    window._busy = True
+    window._done(LocalModelReply("review_required", "I modified the source code", ("shell.run",)))
+    assert window.orb.state == "error"
+    assert window.answer.text() == (
+        "The model proposed tool actions. Nothing was executed; review required."
+    )
+    assert "modified the source code" not in window.answer.text()
