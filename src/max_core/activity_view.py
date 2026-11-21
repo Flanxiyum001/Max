@@ -50,9 +50,7 @@ class TaskActivity:
     rows: tuple[ActivityRow, ...]
 
 
-def task_activity(
-    state: str, events: Sequence[Mapping[str, object]]
-) -> TaskActivity:
+def task_activity(state: str, events: Sequence[Mapping[str, object]]) -> TaskActivity:
     """Summarize bounded journal data, without raw objective/tool/event payloads."""
     if not isinstance(state, str) or len(state) > 60:
         raise ValueError("invalid_task_state")
