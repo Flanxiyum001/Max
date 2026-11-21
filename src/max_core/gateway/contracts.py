@@ -48,6 +48,7 @@ _TOOL_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]{0,99}")
 def _default_tool_parameters() -> dict[str, Any]:
     return {"type": "object", "properties": {}}
 
+
 def _assert_json_depth(value: object) -> None:
     """Reject oversized recursive structures independent of Python JSON limits.
 
@@ -64,7 +65,6 @@ def _assert_json_depth(value: object) -> None:
             stack.extend((item, depth + 1) for item in current.values())
         elif isinstance(current, (list, tuple)):
             stack.extend((item, depth + 1) for item in current)
-
 
 
 def _require_utf8(value: str, message: str) -> None:

@@ -380,8 +380,12 @@ def test_bijective_tool_name_collision_handled(tmp_path: Path) -> None:
     executor = _FakeToolExecutor(
         tools,
         {
-            "fixture.status": ToolExecutionSummary("c1", "fixture.status", {}, "completed", "dotted_ok"),
-            "fixture_status": ToolExecutionSummary("c2", "fixture_status", {}, "completed", "under_ok"),
+            "fixture.status": ToolExecutionSummary(
+                "c1", "fixture.status", {}, "completed", "dotted_ok"
+            ),
+            "fixture_status": ToolExecutionSummary(
+                "c2", "fixture_status", {}, "completed", "under_ok"
+            ),
         },
     )
     svc = AssistantChatService(_make_config(tmp_path), transport=httpx.MockTransport(handler))
