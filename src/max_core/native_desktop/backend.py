@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import re
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from secrets import token_hex
-from typing import Any, TypeAlias
+from typing import TYPE_CHECKING, Any, TypeAlias
 from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
@@ -24,6 +26,20 @@ from max_core.config import Settings
 from max_core.local_config import DesktopConfig, load_desktop_config
 from max_core.models import Base
 from max_core.store import TaskStore
+
+if TYPE_CHECKING:
+    import httpx
+
+    from max_core.assistant_chat import (
+        AssistantChatService,
+        ChatTurnResult,
+        ProviderStatus,
+        ToolExecutionSummary,
+    )
+    from max_core.gateway.contracts import ToolDefinition, ToolProposal
+    from max_core.local_tools import LocalToolExecutor, LocalToolRegistry
+    from max_core.persona import ReplyMode
+    from max_core.voice.controller import VoiceCapabilities, VoiceController
 
 TaskRecord: TypeAlias = dict[str, Any]
 TimelineRecord: TypeAlias = dict[str, Any]
@@ -167,6 +183,28 @@ class DesktopSnapshot:
     approvals: tuple[ApprovalRecord, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class ToolDescriptor:
+    """Display-safe metadata for a registered local tool."""
+
+    name: str
+    description: str
+    risk_tier: str
+    requires_approval: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ApprovalResolution:
+    """Result of an owner Trust decision plus any automatic in-session continuation."""
+
+    approval: ApprovalRecord
+    chat_result: ChatTurnResult | None = None
+    tool_summary: ToolExecutionSummary | None = None
+
+
+_MAX_CONTINUATION_CACHE = 64
+
+
 class NativeDesktopCore:
     """Private TestClient ASGI transport, not an HTTP server or public desktop API."""
 
@@ -176,6 +214,10 @@ class NativeDesktopCore:
         database_url: str | None = None,
         store: TaskStore | None = None,
         config: DesktopConfig | None = None,
+        chat_transport: httpx.AsyncBaseTransport | None = None,
+        chat_service: AssistantChatService | None = None,
+        tool_executor: LocalToolExecutor | None = None,
+        voice_controller: VoiceController | None = None,
     ) -> None:
         self.config = config
         effective_url = (
@@ -191,9 +233,23 @@ class NativeDesktopCore:
         self._task_lock = threading.Lock()
         self._lifecycle_cond = threading.Condition()
         self._close_lock = threading.Lock()
+        self._bridge_lock = threading.RLock()
+        self._continuation_lock = threading.Lock()
+        self._thread_local = threading.local()
         self._closed = False
         self._resources_closed = False
         self._active_calls = 0
+
+        self._chat_transport = chat_transport
+        self._chat_service: AssistantChatService | None = chat_service
+        self._chat_service_injected = chat_service is not None
+        self._tool_registry: LocalToolRegistry | None = None
+        self._tool_executor: LocalToolExecutor | None = tool_executor
+        self._tool_executor_injected = tool_executor is not None
+        self._voice_controller: VoiceController | None = voice_controller
+        self._pending_direct_tools: dict[str, tuple[ToolProposal, str | None]] = {}
+        self._approval_continuations: dict[str, ChatTurnResult] = {}
+        self._direct_continuations: dict[str, ToolExecutionSummary] = {}
 
         effective_store = store
         settings_db = safe_db
@@ -209,11 +265,13 @@ class NativeDesktopCore:
             settings_db = None
 
         try:
+            self._app = create_app(
+                Settings(bearer_token=self._owner_token, database_url=settings_db),
+                store=effective_store,
+            )
+            self._task_store: TaskStore | None = self._app.state.task_store
             self._client = TestClient(
-                create_app(
-                    Settings(bearer_token=self._owner_token, database_url=settings_db),
-                    store=effective_store,
-                ),
+                self._app,
                 base_url="http://localhost",
                 raise_server_exceptions=False,
             )
@@ -228,28 +286,170 @@ class NativeDesktopCore:
         """Read-only access to the owned local SQLite engine when active."""
         return self._owned_engine
 
+    @property
+    def has_injected_chat_service(self) -> bool:
+        """True if a custom chat_service was explicitly supplied."""
+        with self._bridge_lock:
+            return self._chat_service_injected
+
     @classmethod
-    def from_env(cls, *, config: DesktopConfig | None = None) -> NativeDesktopCore:
+    def from_env(
+        cls,
+        *,
+        config: DesktopConfig | None = None,
+        chat_transport: httpx.AsyncBaseTransport | None = None,
+        chat_service: AssistantChatService | None = None,
+        tool_executor: LocalToolExecutor | None = None,
+        voice_controller: VoiceController | None = None,
+    ) -> NativeDesktopCore:
         """Load local desktop configuration (SQLite by default, or PostgreSQL via MAX_DATABASE_URL)."""
         try:
             resolved = config if config is not None else load_desktop_config()
-            return cls(database_url=resolved.database_url, config=resolved)
+            return cls(
+                database_url=resolved.database_url,
+                config=resolved,
+                chat_transport=chat_transport,
+                chat_service=chat_service,
+                tool_executor=tool_executor,
+                voice_controller=voice_controller,
+            )
         except NativeDesktopError:
             raise
         except (OSError, ValueError):
             raise NativeDesktopError("invalid_local_database_configuration") from None
 
+    def _effective_config(self) -> DesktopConfig:
+        if self.config is not None:
+            return self.config
+        cwd = Path.cwd().resolve()
+        return DesktopConfig(
+            database_url="",
+            is_sqlite_local=False,
+            workspace_root=cwd,
+            notes_dir=(cwd / "notes").resolve(),
+            active_provider=None,
+            openai=None,
+            anthropic=None,
+        )
+
+    def _get_tool_registry(self) -> LocalToolRegistry:
+        with self._bridge_lock:
+            if self._tool_registry is None:
+                from max_core.local_tools import LocalToolRegistry
+
+                self._tool_registry = LocalToolRegistry(
+                    config=self._effective_config(),
+                    core=self,
+                    task_store=self._task_store,
+                )
+            return self._tool_registry
+
+    def _get_tool_executor(self) -> LocalToolExecutor | None:
+        with self._bridge_lock:
+            if self._tool_executor is None and not self._tool_executor_injected:
+                if self._task_store is None:
+                    return None
+                from max_core.local_tools import LocalToolExecutor
+
+                self._tool_executor = LocalToolExecutor(
+                    registry=self._get_tool_registry(),
+                    core=self,
+                    task_store=self._task_store,
+                    config=self._effective_config(),
+                    lifecycle_guard=self.call_guard,
+                )
+            return self._tool_executor
+
+    def _get_chat_service(self) -> AssistantChatService:
+        with self._bridge_lock:
+            if self._chat_service is None:
+                from max_core.assistant_chat import AssistantChatService
+
+                self._chat_service = AssistantChatService(
+                    self._effective_config(),
+                    transport=self._chat_transport,
+                    tools=self._get_tool_registry().tool_definitions(),
+                )
+            return self._chat_service
+
+    def _get_voice_controller(self) -> VoiceController:
+        with self._bridge_lock:
+            if self._voice_controller is None:
+                from max_core.voice.controller import VoiceController
+
+                self._voice_controller = VoiceController(config=self._effective_config())
+            return self._voice_controller
+
+    @property
+    def tool_registry(self) -> LocalToolRegistry:
+        return self._get_tool_registry()
+
+    @property
+    def tool_executor(self) -> LocalToolExecutor | None:
+        return self._get_tool_executor()
+
+    @property
+    def chat_service(self) -> AssistantChatService:
+        return self._get_chat_service()
+
+    @property
+    def voice_controller(self) -> VoiceController:
+        return self._get_voice_controller()
+
+    def configure_chat(
+        self,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+        chat_service: AssistantChatService | None = None,
+        tool_executor: LocalToolExecutor | None = None,
+    ) -> None:
+        """Configure or replace chat transport, service, or tool executor after core creation."""
+        with self._bridge_lock:
+            if tool_executor is not None:
+                self._tool_executor = tool_executor
+                self._tool_executor_injected = True
+            if chat_service is not None:
+                self._chat_service = chat_service
+                self._chat_service_injected = True
+            elif transport is not None:
+                self._chat_transport = transport
+                if (
+                    self._chat_service is not None
+                    and not self._chat_service_injected
+                    and not self._chat_service.pending_approval_ids()
+                    and self._chat_service.history_len() == 0
+                ):
+                    self._chat_service = None
+
+    def configure_voice(self, voice_controller: VoiceController) -> None:
+        """Attach a configured VoiceController instance for lifecycle management."""
+        with self._bridge_lock:
+            self._voice_controller = voice_controller
+
     def _enter_call(self) -> None:
+        depth = int(getattr(self._thread_local, "depth", 0))
         with self._lifecycle_cond:
-            if self._closed:
+            if depth == 0 and self._closed:
                 raise NativeDesktopError("local_core_unavailable")
             self._active_calls += 1
+        self._thread_local.depth = depth + 1
 
     def _exit_call(self) -> None:
+        depth = int(getattr(self._thread_local, "depth", 0))
+        self._thread_local.depth = max(0, depth - 1)
         with self._lifecycle_cond:
             self._active_calls -= 1
             if self._active_calls == 0:
                 self._lifecycle_cond.notify_all()
+
+    @contextmanager
+    def call_guard(self) -> Iterator[None]:
+        """Protect Core resources and owned SQLite engine for the duration of a call."""
+        self._enter_call()
+        try:
+            yield
+        finally:
+            self._exit_call()
 
     def _call(
         self,
@@ -383,10 +583,144 @@ class NativeDesktopCore:
         finally:
             self._exit_call()
 
+    def provider_status(self) -> ProviderStatus:
+        """Return secret-free provider status for the desktop session."""
+        with self._bridge_lock:
+            chat = self._chat_service
+        if chat is not None:
+            return chat.provider_status()
+        from max_core.assistant_chat import ProviderStatus
+
+        cfg = self._effective_config().active_provider
+        if cfg is None:
+            return ProviderStatus(configured=False, provider=None, model_id=None)
+        configured = isinstance(cfg.api_key, str) and bool(cfg.api_key.strip())
+        return ProviderStatus(configured=configured, provider=cfg.provider, model_id=cfg.model_id)
+
+    def send_chat_message(self, user_text: str) -> ChatTurnResult:
+        """Send a user chat message through AssistantChatService with local tools."""
+        with self.call_guard():
+            executor = self._get_tool_executor()
+            return self._get_chat_service().send_message(user_text, tool_executor=executor)
+
+    def resume_chat_approval(self, approval_id: str) -> ChatTurnResult:
+        """Resume a paused chat turn for an approval owned by this session."""
+        with self.call_guard():
+            executor = self._get_tool_executor()
+            if executor is None:
+                from max_core.assistant_chat import ChatTurnResult
+
+                status = self.provider_status()
+                return ChatTurnResult(
+                    ok=False,
+                    reply="Local task storage is not ready to resume tool approvals.",
+                    provider=status.provider,
+                    model_id=status.model_id,
+                    error_code="task_store_not_ready",
+                )
+            return self._get_chat_service().resume_approval(approval_id, tool_executor=executor)
+
+    def clear_chat_history(self) -> None:
+        """Clear in-memory conversation history and pending chat approvals."""
+        with self._bridge_lock:
+            if self._chat_service is not None:
+                self._chat_service.clear_history()
+
+    def set_reply_mode(self, mode: ReplyMode) -> None:
+        """Update the persona reply mode on the chat coordinator."""
+        self._get_chat_service().set_reply_mode(mode)
+
+    def list_tools(self) -> tuple[ToolDescriptor, ...]:
+        """Return display-safe descriptors for all registered local tools."""
+        registry = self._get_tool_registry()
+        descriptors: list[ToolDescriptor] = []
+        for definition in registry.tool_definitions():
+            spec = registry.get_spec(definition.name)
+            if spec is None:
+                continue
+            descriptors.append(
+                ToolDescriptor(
+                    name=spec.name,
+                    description=spec.description,
+                    risk_tier=spec.risk_tier.value,
+                    requires_approval=spec.requires_approval,
+                )
+            )
+        return tuple(descriptors)
+
+    def tool_definitions(self) -> tuple[ToolDefinition, ...]:
+        """Return Gateway ToolDefinition contracts for registered local tools."""
+        return self._get_tool_registry().tool_definitions()
+
+    def execute_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        *,
+        call_id: str | None = None,
+        approval_id: str | None = None,
+        task_id: str | None = None,
+    ) -> ToolExecutionSummary:
+        """Invoke an allowlisted local tool directly through LocalToolExecutor."""
+        from max_core.assistant_chat import ToolExecutionSummary
+        from max_core.gateway.contracts import ToolProposal
+
+        resolved_call_id = (
+            call_id if isinstance(call_id, str) and call_id else f"tool-{uuid4().hex[:12]}"
+        )
+        resolved_args: dict[str, object] = dict(arguments) if isinstance(arguments, dict) else {}
+        with self.call_guard():
+            executor = self._get_tool_executor()
+            if executor is None:
+                return ToolExecutionSummary(
+                    call_id=resolved_call_id,
+                    tool_name=name if isinstance(name, str) else "",
+                    arguments=resolved_args,
+                    status="failed",
+                    output="task_store_not_ready",
+                    approval_id=approval_id,
+                    task_id=task_id,
+                )
+            proposal = ToolProposal(
+                call_id=resolved_call_id,
+                name=name,
+                arguments=resolved_args,
+            )
+            summary = executor.execute(proposal, approval_id=approval_id, task_id=task_id)
+            if summary.status == "awaiting_approval" and summary.approval_id:
+                with self._continuation_lock:
+                    if len(self._pending_direct_tools) >= _MAX_CONTINUATION_CACHE:
+                        oldest = next(iter(self._pending_direct_tools))
+                        self._pending_direct_tools.pop(oldest, None)
+                    self._pending_direct_tools[summary.approval_id] = (proposal, summary.task_id)
+            return summary
+
+    def voice_capabilities(self) -> VoiceCapabilities:
+        """Inspect local voice hardware and STT/TTS readiness."""
+        return self._get_voice_controller().capabilities()
+
+    def _store_approval_continuation(self, approval_id: str, result: ChatTurnResult) -> None:
+        with self._continuation_lock:
+            if len(self._approval_continuations) >= _MAX_CONTINUATION_CACHE:
+                oldest = next(iter(self._approval_continuations))
+                self._approval_continuations.pop(oldest, None)
+            self._approval_continuations[approval_id] = result
+
+    def _store_direct_continuation(self, approval_id: str, summary: ToolExecutionSummary) -> None:
+        with self._continuation_lock:
+            if len(self._direct_continuations) >= _MAX_CONTINUATION_CACHE:
+                oldest = next(iter(self._direct_continuations))
+                self._direct_continuations.pop(oldest, None)
+            self._direct_continuations[approval_id] = summary
+
+    def pop_approval_continuation(self, approval_id: str) -> ChatTurnResult | None:
+        """Retrieve and clear any stored chat continuation result for an approval ID."""
+        with self._continuation_lock:
+            return self._approval_continuations.pop(approval_id, None)
+
     def decide_approval(self, approval_id: str, approve: bool) -> ApprovalRecord:
         """Record an explicit owner approval or denial against a pending Trust grant."""
-        self._enter_call()
-        try:
+        with self.call_guard():
             try:
                 if (
                     not isinstance(approval_id, str)
@@ -409,9 +743,59 @@ class NativeDesktopCore:
                 or result.get("state") not in {"approved", "denied"}
             ):
                 raise NativeDesktopError("invalid_core_response")
+
+            with self._bridge_lock:
+                chat_service = self._chat_service
+            if chat_service is not None and approval_id in chat_service.pending_approval_ids():
+                executor = self._get_tool_executor()
+                if executor is not None:
+                    try:
+                        chat_result = chat_service.resume_approval(
+                            approval_id, tool_executor=executor
+                        )
+                    except Exception:
+                        from max_core.assistant_chat import ChatTurnResult
+
+                        status = self.provider_status()
+                        chat_result = ChatTurnResult(
+                            ok=False,
+                            reply=(
+                                "Approval decision was saved, but resuming the assistant "
+                                "turn failed."
+                            ),
+                            provider=status.provider,
+                            model_id=status.model_id,
+                            error_code="provider_error",
+                        )
+                    self._store_approval_continuation(approval_id, chat_result)
+            else:
+                with self._continuation_lock:
+                    pending_direct = self._pending_direct_tools.pop(approval_id, None)
+                if pending_direct is not None:
+                    proposal, pending_task_id = pending_direct
+                    executor = self._get_tool_executor()
+                    if executor is not None:
+                        summary = executor.execute(
+                            proposal, approval_id=approval_id, task_id=pending_task_id
+                        )
+                        self._store_direct_continuation(approval_id, summary)
+
             return result
-        finally:
-            self._exit_call()
+
+    def decide_approval_with_continuation(
+        self, approval_id: str, approve: bool
+    ) -> ApprovalResolution:
+        """Record a Trust decision and return any in-session chat/tool continuation outcome."""
+        with self.call_guard():
+            approval = self.decide_approval(approval_id, approve)
+            with self._continuation_lock:
+                chat_result = self._approval_continuations.pop(approval_id, None)
+                tool_summary = self._direct_continuations.pop(approval_id, None)
+            return ApprovalResolution(
+                approval=approval,
+                chat_result=chat_result,
+                tool_summary=tool_summary,
+            )
 
     def close(self) -> None:
         with self._lifecycle_cond:
@@ -421,6 +805,17 @@ class NativeDesktopCore:
         with self._close_lock:
             with self._task_lock:
                 self._pending_task = None
+            with self._continuation_lock:
+                self._pending_direct_tools.clear()
+                self._approval_continuations.clear()
+                self._direct_continuations.clear()
+            with self._bridge_lock:
+                voice = self._voice_controller
+            if voice is not None:
+                try:
+                    voice.revoke_microphone()
+                except Exception:
+                    pass
             if not self._resources_closed:
                 self._resources_closed = True
                 try:

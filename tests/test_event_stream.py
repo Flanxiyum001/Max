@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.testclient import WebSocketTestSession
 from starlette.websockets import WebSocketDisconnect
 
 from max_core.api import create_app
@@ -81,6 +84,33 @@ def ticket(client: TestClient, *, origin: str = ORIGIN) -> str:
     return str(result.json()["ticket"])
 
 
+def _close_socket_cleanly(socket: WebSocketTestSession) -> None:
+    async def _drain() -> None:
+        for _ in range(10):
+            await asyncio.sleep(0)
+
+    socket.close(1000)
+    socket.portal.call(_drain)
+
+
+@contextmanager
+def _open_event_socket(
+    client: TestClient,
+    token: str,
+    *,
+    origin: str = ORIGIN,
+) -> Iterator[WebSocketTestSession]:
+    with client.websocket_connect(
+        "/v1/events/ws",
+        headers={"Host": "localhost:8765", "Origin": origin},
+        subprotocols=["max-events-v1", f"max-ticket.{token}"],
+    ) as socket:
+        try:
+            yield socket
+        finally:
+            _close_socket_cleanly(socket)
+
+
 def test_ticket_api_requires_bearer_and_accepted_origin(store: TaskStore) -> None:
     with TestClient(
         create_app(Settings(bearer_token=TEST_TOKEN), store),
@@ -102,11 +132,7 @@ def test_authenticated_socket_emits_metadata_without_objective(store: TaskStore)
         base_url=ORIGIN,
     ) as client:
         token = ticket(client)
-        with client.websocket_connect(
-            "/v1/events/ws",
-            headers={"Host": "localhost:8765", "Origin": ORIGIN},
-            subprotocols=["max-events-v1", f"max-ticket.{token}"],
-        ) as socket:
+        with _open_event_socket(client, token) as socket:
             hello = socket.receive_json()
             assert hello == {"type": "hello", "last_sequence": 0, "recovery": "refetch"}
             created = client.post(
@@ -138,11 +164,7 @@ def test_socket_refuses_replay_bad_origin_and_missing_protocol(store: TaskStore)
             ):
                 pass
         # The bad-origin handshake cannot spend a token.
-        with client.websocket_connect(
-            "/v1/events/ws",
-            headers={"Host": "localhost:8765", "Origin": ORIGIN},
-            subprotocols=["max-events-v1", f"max-ticket.{token}"],
-        ) as socket:
+        with _open_event_socket(client, token) as socket:
             assert socket.receive_json()["type"] == "hello"
         with pytest.raises(WebSocketDisconnect):
             with client.websocket_connect(

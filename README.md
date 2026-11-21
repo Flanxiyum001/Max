@@ -1,121 +1,162 @@
 # MAX
 
-**My personal AI assistant. Built as a personal project.**
+**My personal AI assistant. Built as a single-owner personal project.**
 
-MAX is my long-term project to build a personal, voice-first AI assistant that works across my devices, understands what I want to accomplish, and helps me carry out tasks safely and reliably.
+MAX is my project to build a personal, voice-capable AI assistant that stays under my control, tracks work durably, gates consequential actions behind explicit approval, and respects my privacy boundaries.
 
-I'm designing MAX as **my own assistant and software stack**: its identity, experience, orchestration, memory, permissions, task execution, and skill system are defined by this project. I may use established libraries or external integrations where they are genuinely necessary, but they are implementation details—not MAX's identity.
+I'm designing MAX so that I own its orchestration, trust rules, memory model, tool allowlist, and interface contracts. External libraries and cloud model providers are replaceable adapters behind boundaries that I enforce in code.
 
-> **Status (2026-11-05):** Foundation and architecture documents are merged, along with **five owner-merged local-development milestones** (Core, durable tasks, dual-format Gateway, limited Trust/verification, and a local read-only task timeline). Milestone 6 adds a lifecycle CLI on a separate owner-review branch. MAX is **not yet an autonomous assistant, connected AI model, desktop/mobile client or production service**. Features below remain goals unless explicitly marked implemented.
-
-## What I want MAX to do
-
-- **Be present when I need it.** A floating cyan-and-blue holographic orb on my desktop, with clear listening, thinking, speaking, and working states.
-- **Talk naturally.** Wake-word or push-to-talk interaction, responsive speech, interruptions, and an original refined British-English voice.
-- **Help me get things done.** Plan work, use approved tools, coordinate specialized agents, save progress, and show evidence of what actually happened.
-- **Remember the right things.** Keep useful personal preferences, project context, and task history while letting me review, correct, export, or delete them.
-- **Improve over time.** Evaluate outcomes, learn from corrections, and safely add or refine skills without silently changing its permissions.
-- **Work across my devices.** Windows 11 and Arch Linux/Hyprland desktop companions, with an iPhone browser interface.
-- **Respect my boundaries.** Ask before consequential actions, protect sensitive information, and never mistake a model's suggestion for permission.
-
-## The MAX architecture
-
-I'm organizing MAX around a set of modules I control:
-
-| Module | Responsibility |
-| --- | --- |
-| **MAX Core** | Understand goals, plan tasks, coordinate workers |
-| **MAX Gateway** | Route requests through a model-independent interface |
-| **MAX Trust** | Enforce permissions, approvals, and audit rules |
-| **MAX Memory** | Store and retrieve useful context with provenance |
-| **MAX Skills** | Inspect, test, register, and roll back capabilities |
-| **MAX Voice** | Handle speech, wake-up, and interruption |
-| **MAX Presence** | Render the desktop companion and mobile interface |
-| **MAX Nodes** | Execute authorized work on enrolled devices |
-| **MAX Evolution** | Evaluate improvements and support bounded recovery |
-| **MAX Connect** | Connect optional personal services and communication channels |
-
-These are logical parts of **one personal project**, not a claim that ten standalone services already exist. The architecture is designed to keep the core independent of any one AI provider or third-party framework.
-
-## How I'm building it
-
-I want MAX to be dependable before it becomes complicated. My development approach is to design the security boundaries first, implement small working pieces, test real outcomes, and only then expand the system.
-
-MAX will never be allowed to grant itself permissions, treat external content as trusted instructions, or report an action as complete without evidence. Sensitive operations require explicit confirmation. Payment authentication secrets do not belong in assistant memory.
-
-## Current implementation — merged milestones #1–#4
-
-I have an **internal local-development Python/FastAPI Core**, not a publicly hosted assistant. The local CLI binds to `127.0.0.1` and uses a strong but **temporary single-owner bootstrap token**, which is **not adequate for remote or high-risk authorization**.
-
-| Completed review milestone | What is actually in the repository | What is **not** yet delivered |
-| --- | --- | --- |
-| **1 — Core bootstrap** | Local auth/config/health API, redacted access logs and CI | Production accounts, multi-device sessions or app UI |
-| **2 — Durable tasks** | PostgreSQL/Alembic task store, idempotency, cancellation, checkpoint/lease and internal outbox methods | Actual task worker, external effect dispatcher or backup proof |
-| **3 — Model Gateway** | Mock-tested OpenAI Chat Completions and Anthropic Messages text adapters, streaming, privacy and admission cost checks | Connected FreeLLMAPI/provider account, exact billing/quotas, real model output |
-| **4 — MAX Trust** | Only one allowed read-only `task.status` capability, task/actor/session/device-bound owner approvals, single-use ledger and fixture-based independent verification | Real external observer, MFA, production authorization or consequential tools |
-| **5 — Task timeline** | Signed, owner-bound, read-only paginated task event history and local terminal viewer | Task workers, real-world activity or production client |
-
-Historically verified CI for merged PR #7 reported **125 passing tests on Python 3.11 and 125 on 3.13**, with an ephemeral PostgreSQL database. This **does not verify any live provider, actual device or real-world action**. My setup and boundaries are in [Core setup](docs/CORE_BOOTSTRAP.md), [task persistence](docs/TASK_PERSISTENCE.md), [gateway implementation](docs/GATEWAY_IMPLEMENTATION.md) and [Trust implementation](docs/TRUST_IMPLEMENTATION.md).
-
-The [Milestone 5 local read-only timeline](docs/TASK_TIMELINE.md) is now merged. A separate **review-only Milestone 6** adds [interactive local task lifecycle commands](docs/TASK_LIFECYCLE.md): create a non-sensitive development task with a replay key, retrieve state, reuse the timeline, request cancellation, then read recorded state again. It adds **no** autonomous agent, worker or real-world execution.
-
-The [Phase 0 current-state audit](docs/PHASE0_AUDIT.md), [53-row requirements matrix](docs/REQUIREMENT_TRACEABILITY.md) and [architecture exit criteria](docs/PHASE0_EXIT_CRITERIA.md) distinguish plans from evidence. Payments, deployment, shell actions, document sharing and remote computer control remain unavailable. This CLI must still pass CI and owner review before merge.
-
-## Planned platforms
-
-| Platform | Experience |
-| --- | --- |
-| Windows 11 | Floating desktop orb, background voice, gaming-aware quiet mode |
-| Arch Linux + Hyprland | Desktop companion and authorized local execution |
-| iPhone | Responsive private web companion |
-
-Platform-specific behavior will be validated on real devices. In particular, Wayland overlay behavior and mobile background voice are not assumed to work without testing.
-
-## Project documentation
-
-- [Architecture](ARCHITECTURE.md)
-- [Product specification](docs/PRODUCT_SPECIFICATION.md)
-- [Technical design](docs/TECHNICAL_DESIGN.md)
-- [Security architecture](docs/SECURITY_ARCHITECTURE.md)
-- [Roadmap](docs/ROADMAP.md)
-- [Implementation plan](docs/IMPLEMENTATION_PLAN.md)
-- [Research and technology evaluation](docs/RESEARCH_FINDINGS.md)
-- [Architecture diagrams](docs/ARCHITECTURE_DIAGRAMS.md)
-- [Phase 0 current-state audit](docs/PHASE0_AUDIT.md)
-- [Requirement-to-code traceability](docs/REQUIREMENT_TRACEABILITY.md)
-- [Architecture exit criteria](docs/PHASE0_EXIT_CRITERIA.md)
-
-The [MAX identity](MAX.md), [personality](SOUL.md), and [operating model](CORE.md) describe how I want the assistant to behave. [AGENTS.md](AGENTS.md) contains separate instructions for coding workers; the future runtime must enforce security in code rather than relying on Markdown alone.
+> **Current build status:** MAX now has a working **local desktop build** on Windows (`start-max.cmd` / `python -m max_core.native_desktop`) with an in-process FastAPI Core, automatic local SQLite persistence, live multi-turn OpenAI or Anthropic text chat, a bounded 10-tool allowlist gated by MAX Trust, interactive Trust Inbox approvals, and opt-in push-to-talk / text-to-speech voice controls. It remains a single-owner local build—not a hosted service, multi-user product, or unattended OS automation agent.
 
 ---
 
-**MAX is a personal project. I'm building it for myself, one verified capability at a time.**
+## Quick Start (Windows Local Desktop)
 
+### 1. Launch the desktop app
 
-## Milestone 7 — bounded local developer worker (review branch)
+Double-click **`start-max.cmd`**, or run it from PowerShell:
 
-I'm adding my first **manually invoked, strictly allowlisted local task execution** in a separate review-only milestone. The only operations are a constant static status response and bounded integer addition, using typed JSON data. The worker uses PostgreSQL leases and checkpoints, can acknowledge a cancellation **only after its operation stops**, quarantines interrupted/uncertain tasks and records outcomes as **awaiting independent verification**, not completed. No model, general code execution, shell, network tool, personal-file access, or agent orchestration is enabled. See [bounded worker limits and local test commands](docs/BOUNDED_WORKER.md). This work is not merged or deployed unless I review and approve its PR.
+```powershell
+.\start-max.cmd
+```
 
+On first run, `start-max.cmd` creates `.venv` (using Python 3.11+) and installs the package with optional Qt desktop dependencies (`pip install -e ".[desktop]"`), then launches `python -m max_core.native_desktop`.
 
-## Milestone 8 — independent `dev.add` evidence observer (owner-review branch)
+For an offscreen verification check without keeping a window open:
 
-I can now manually ask a **separate trusted, local arithmetic observer** to recompute the expected answer for a previously executed, non-sensitive `dev.add` task. Unlike the bounded worker, this observer independently reads the persisted input, recomputes the mathematical answer, and asks the existing `IndependentVerifier` to record a provenance-bound, idempotent verdict. A supported result may complete the task; mismatches and unavailable evidence do not. **This proves mathematical-answer correctness, not that the original worker actually ran or that any external effect occurred.** It adds no model, browser, shell, unrestricted files, remote listener or deployment. See [independent evidence observer](docs/INDEPENDENT_EVIDENCE_OBSERVER.md) for commands, constraints and migration precautions. This is review-only until the owner merges the separate PR.
+```powershell
+$env:QT_QPA_PLATFORM = "offscreen"
+.\.venv\Scripts\python.exe -m max_core.native_desktop --smoke-test
+```
 
-## Milestone 10 — MCP connections (review branch)
+### 2. Configure an OpenAI or Anthropic API key (no code edits required)
 
-A new [MCP discovery library](docs/MCP_DISCOVERY.md) initializes explicitly
-configured HTTPS MCP servers and lists bounded tool metadata using the official
-Python SDK. Multiple servers keep separate identities. Discovery does not grant
-permission to execute a tool. Plugin installation and the personal PC workflow
-(wake, isolated coding, PR/CI verification, safe shutdown and reporting) remain
-unimplemented; their implementation sequence and device prerequisites are in
-the milestone document. No live MCP account or personal device was accessed.
+Configuration is loaded in this order of precedence: **`environment variables > config.json > .env > defaults`**.
 
+- **Option A — Local `.env` file (recommended for quick local testing):**
+  Copy `.env.example` to `.env` in the repository root and set your key:
 
-## Milestone 13 — opt-in safe cloud-to-local text trial (review branch)
+  ```dotenv
+  MAX_LLM_PROVIDER=openai
+  OPENAI_API_KEY=your-openai-key
+  # Or use Anthropic:
+  # MAX_LLM_PROVIDER=anthropic
+  # ANTHROPIC_API_KEY=your-anthropic-key
+  MAX_COST_USD=0.05
+  ```
 
-An additional [cloud-to-local fallback trial](docs/M13_LOCAL_FALLBACK_TRIAL.md) can reuse the existing gateway with a separately owner-verified OpenAI-compatible loopback model. Safe failover covers cloud 429/503 and definite connection-establishment errors only. It does not infer real locality from a proxy URL, install models, execute tools or make MAX autonomous. Real-device smoke tests and owner approval remain required.
+  `.env` is gitignored—never commit real keys or tokens.
 
-## Milestone 12 — reviewed memory records (owner-review branch)
+- **Option B — User config JSON outside the repository:**
+  Create `%LOCALAPPDATA%\MAX\config.json` on Windows (or point `MAX_CONFIG_PATH` to any JSON file):
 
-A separate [provenance-first memory foundation](docs/M12_MEMORY_FOUNDATION.md) introduces SQL-backed **pending** suggestions, explicit owner approval, confidence decay and hard erasure. This is library-level work only: there is no automatic learning, graph/vector search, user-facing memory interface or deployed production database. Cloud/local model connections and MCP tool execution remain separate, unverified security gates.
+  ```json
+  {
+    "active_provider": "openai",
+    "max_cost_usd": 0.05,
+    "providers": {
+      "openai": {
+        "api_key": "your-openai-key",
+        "model_id": "gpt-4o-mini"
+      }
+    }
+  }
+  ```
+
+- **Option C — Process environment variables:**
+  Set `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `MAX_LLM_PROVIDER` (`openai`, `anthropic`, or `auto`), `MAX_OPENAI_MODEL`, `MAX_ANTHROPIC_MODEL`, or `MAX_COST_USD` in your shell before launching.
+
+If no API key is configured, MAX still launches cleanly and shows an actionable configuration prompt when you send a chat message.
+
+### 3. Local storage (SQLite by default, optional local PostgreSQL)
+
+- **Default zero-setup SQLite:** When `MAX_DATABASE_URL` is unset, MAX initializes a local WAL-mode SQLite database outside the Git working tree at:
+  - Windows: `%LOCALAPPDATA%\MAX\max_desktop.sqlite3`
+  - POSIX: `$XDG_DATA_HOME/max/max_desktop.sqlite3` (or `~/.local/share/max/max_desktop.sqlite3`)
+  - Override path anytime with `MAX_LOCAL_DB_PATH` or `MAX_DESKTOP_DB_URL`.
+- **Optional local PostgreSQL:** If you set `MAX_DATABASE_URL` (must be loopback `127.0.0.1` / `localhost` / `::1` with Alembic migrations applied), MAX uses that PostgreSQL instance instead.
+- **Important `.env` note:** If your `.env` defines `MAX_DATABASE_URL` for PostgreSQL development while PostgreSQL is stopped or unmigrated, the desktop app will report `task_store_not_ready` (`Local database is not ready`) instead of falling back silently. Comment out `MAX_DATABASE_URL` in `.env` (or set `MAX_LOCAL_DB_PATH`) to use the local SQLite database.
+
+---
+
+## What Works in This Local Build
+
+### Native Desktop Window (`max_core.native_desktop`)
+- **In-process Core bridge (`backend.py`)**: Uses FastAPI's in-process ASGI `TestClient` with an ephemeral per-run bearer token—no open TCP port, no external HTTP listener, and no browser token handoff.
+- **Four-tab workspace (`qt_ui.py`)**:
+  - **Overview**: Cyan/turquoise holographic orb (`IDENTITY.md`, driven by `OrbReducer`), live multi-turn assistant chat transcript, tool execution outcomes panel, voice controls, and provider/storage summary cards.
+  - **Tasks**: Persistent Task Journal (`Local SQLite ready` or `Local PostgreSQL ready`) to queue tracked tasks (`1–500` characters) and inspect signed task timeline events across restarts.
+  - **Trust**: Interactive **Trust Inbox** listing pending `ApprovalGrant` items persisted in the database, with explicit **Approve selected** and **Deny selected** buttons.
+  - **System**: Live Core/storage readiness and honest capability inventory.
+- **Command & chat bar**: Supports `/help`, `/status`, `/tasks`, `/trust`, `/tools`, `/voice`, and `/task <objective>`, and sends all other input to live assistant chat off the UI thread (`QThreadPool`).
+- **Quiet mode**: Stops orb animation in-window and revokes active microphone capture; it does not modify OS-level notification settings.
+
+### Live Cloud Text Chat (`max_core.assistant_chat`, `max_core.gateway`)
+- Connects over `httpx` to **OpenAI** (`/v1/chat/completions`, default `gpt-4o-mini`) or **Anthropic** (`/v1/messages`, default `claude-sonnet-4-5`).
+- Applies `with_persona()` (`SOUL.md` / `persona.py`), per-turn spend caps (`MAX_COST_USD`), and pre-egress credential inspection (`privacy_guard`) so secrets or API-key-like strings are blocked locally before leaving the process.
+- Surfaces missing keys, `401`/`403` auth errors, `429` rate limits, `5xx` errors, timeouts, and network errors as sanitized status messages without leaking API keys or raw tracebacks.
+
+### Bounded Local Tools & MAX Trust (`max_core.local_tools`, `max_core.trust`)
+The assistant can propose only the 10 typed, allowlisted tools below—all validated against strict JSON schemas and audited in `max_trust_audit` (metadata only, never plaintext secrets):
+
+| Risk Tier | Behavior | Tools |
+| --- | --- | --- |
+| **R0** (read-only / deterministic) | Auto-audited and executed immediately | `dev.health`, `dev.add`, `system.status`, `task.status`, `task.list`, `workspace.list_files`, `workspace.read_file`, `notes.list` |
+| **R1 / R2** (state-changing) | Creates a single-use `ApprovalGrant` in **Trust Inbox**; runs only after explicit **Approve** click | `task.create` (`R1`), `notes.save` (`R2`) |
+
+- `workspace.list_files` and `workspace.read_file` are confined to `MAX_WORKSPACE_ROOT` (defaulting to the current working directory) and block `.git`, `.venv`, `.env*`, private keys, and `.sqlite3`/`.db` files.
+- `notes.save` and `notes.list` operate only inside `MAX_NOTES_DIR` (defaulting to `%LOCALAPPDATA%\MAX\notes` on Windows).
+- Any undeclared tool (for example `shell.run`) is denied before execution.
+
+### Voice Interaction (`max_core.voice`)
+- **Opt-in Push-to-Talk STT**: Bounded microphone capture (`QtMicrophoneRecorder` + `LocalActivationGate`) starts only on an explicit **Push to Talk** click—never automatically on startup. Audio is transcribed via OpenAI `/v1/audio/transcriptions` (`whisper-1`).
+  - *Note:* Speech-to-text requires `OPENAI_API_KEY` even if you choose `MAX_LLM_PROVIDER=anthropic` for text chat.
+  - All speech transcripts enter the chat flow strictly as untrusted user text—never as direct slash commands or self-approved tool calls.
+- **Text-to-Speech (TTS)**: Uses local Qt `QTextToSpeech` (`winrt` / `sapi` on Windows where available) honoring `MAX_VOICE_LOCALE=en-GB` and `MAX_VOICE_PRESENTATION=feminine` preferences when matching OS voices exist, controlled by the **Speak: on/off** toggle and **Stop** barge-in button (`BargeInGate`).
+- **Graceful headless/hardware fallback**: Under `QT_QPA_PLATFORM=offscreen` or when no microphone/audio device is present, MAX stays usable and reports the fallback state clearly without crashing.
+
+---
+
+## External Components, Licenses, Costs & Trust Boundaries
+
+| Component | Role | License | Cost & Trust Boundary |
+| --- | --- | --- | --- |
+| **FastAPI / Starlette / Uvicorn** | In-process Core API & local schemas | MIT / BSD-3-Clause | Local open-source dependencies; desktop binds no TCP socket |
+| **SQLAlchemy / Alembic / psycopg** | Task Journal, Trust & audit persistence | MIT / LGPL-3.0 | Local SQLite (default) or user-configured loopback PostgreSQL |
+| **httpx** | Cloud LLM & OpenAI STT HTTP client | BSD-3-Clause | Outbound HTTPS only on explicit chat or STT turn; `trust_env=False` |
+| **PySide6** (`[desktop]` extra) | Native desktop UI, `QTextToSpeech`, `QAudioSource` | LGPLv3 / Commercial Qt | Local UI & OS speech/audio bindings |
+| **OpenAI API** | Chat Completions + Whisper STT (`/v1/audio/transcriptions`) | Proprietary cloud API | User-billed API key; bounded by `MAX_COST_USD` and `privacy_guard`; responses treated as untrusted |
+| **Anthropic API** | Messages API for text & tool proposals | Proprietary cloud API | User-billed API key; bounded by `MAX_COST_USD` and `privacy_guard`; responses treated as untrusted |
+| **Windows `winrt` / `sapi` voices** | Local OS speech synthesis via Qt | OS / Platform runtime | Local OS voices only; no celebrity/actor voice cloning |
+
+---
+
+## What Is Still Planned / Not Implemented
+
+To keep verified capabilities distinct from future design goals, the following are **not** included in this build:
+
+- **No unrestricted OS/shell/browser control** or unattended background computer automation.
+- **No live MCP tool execution inside the desktop chat loop** (`max_core.mcp` contains discovery contracts only).
+- **No always-on wake-word daemon, global OS-wide hotkeys, or gaming overlay**.
+- **No Arch Linux / Hyprland real-device verification** or **iPhone mobile web client** in this desktop build.
+- **No signed standalone `.exe` installer** (launch runs from `.venv` via `start-max.cmd`).
+- **No multi-user accounts or hosted/remote deployment**.
+
+---
+
+## Architecture & Project Documentation
+
+- [Identity & principles](MAX.md) · [Personality](SOUL.md) · [Operating model](CORE.md) · [Visual & voice identity](IDENTITY.md) · [Security baseline](SECURITY.md)
+- [Engineering rules](AGENTS.md) · [Architecture overview](ARCHITECTURE.md)
+- Detailed design records in [`docs/`](docs/): [Product specification](docs/PRODUCT_SPECIFICATION.md), [Technical design](docs/TECHNICAL_DESIGN.md), [Security architecture](docs/SECURITY_ARCHITECTURE.md), [Roadmap](docs/ROADMAP.md).
+
+## Development & Verification Commands
+
+```powershell
+.\.venv\Scripts\ruff.exe check src tests
+.\.venv\Scripts\ruff.exe format --check src tests
+.\.venv\Scripts\mypy.exe src/max_core
+.\.venv\Scripts\pytest.exe -q
+$env:QT_QPA_PLATFORM = "offscreen"
+.\.venv\Scripts\python.exe -m max_core.native_desktop --smoke-test
+```
