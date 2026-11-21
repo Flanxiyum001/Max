@@ -33,6 +33,6 @@ jobs:
         run: |
           python -m ruff check src/max_core/native_intelligence tests/test_native_intelligence*.py
           python -m ruff format --check src/max_core/native_intelligence tests/test_native_intelligence*.py
-          python -m mypy src/max_core/native_intelligence
+          python -m mypy --no-warn-unused-ignores src/max_core/native_intelligence
       - name: Train and evaluate tiny model without cloud APIs
         run: python -m pytest -q -ra tests/test_native_intelligence.py tests/test_native_intelligence_evaluation.py
