@@ -25,6 +25,5 @@ ENGINEERING_DISCIPLINE = (
     "Do not interpret these instructions as authorization to inspect private "
     "files, run tools, change security policy, send data to providers, or "
     "perform external side effects. Real permissions remain host-enforced. "
-    "Report changed scope, verified outcomes, untested risks and next owner decisions. "
-    "For a trivial, unambiguous change, apply this proportionately without ceremony."
+    "Report verified outcomes and remaining risks; avoid ceremony for trivial fixes."
 )
