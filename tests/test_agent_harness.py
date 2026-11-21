@@ -84,6 +84,8 @@ def test_malformed_or_duplicate_proposals_fail_closed() -> None:
             proposals=(ToolProposal("duplicate", "a", {}), ToolProposal("duplicate", "b", {}))
         ),
         response(proposals=(ToolProposal("c1", "unsafe/tool", {}),)),
+        response(proposals=(ToolProposal(["unsafe"], "safe_tool", {}),)),
+        replace(response(), content=123),
         replace(response(), request_id="wrong-id"),
     ]
     for item in bad:
