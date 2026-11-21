@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Mapping, Sequence
 from decimal import Decimal
 
-from max_core.gateway.adapters import HTTPAdapter
+from max_core.gateway.adapters import HTTPAdapter, request_has_high_confidence_secret
 from max_core.gateway.catalogue import (
     ApprovalState,
     CapabilityMetadata,
@@ -25,7 +25,6 @@ from max_core.gateway.contracts import (
 )
 from max_core.gateway.evaluation import OfflineEvaluationBook
 from max_core.gateway.normalize import actual_cost
-from max_core.gateway.privacy_guard import contains_high_confidence_secret
 from max_core.gateway.task_planner import (
     PlanningError,
     TaskKind,
@@ -156,7 +155,12 @@ class Gateway:
 
     def eligible(self, request: GatewayRequest) -> tuple[ModelSpec, ...]:
         result: list[ModelSpec] = []
-        blocked_cloud_text = contains_high_confidence_secret(request.messages)
+        blocked_cloud_text = request_has_high_confidence_secret(request.messages, request.tools)
+        needed_capabilities = (
+            request.required_capabilities | {"tools"}
+            if request.tools
+            else request.required_capabilities
+        )
         for spec in self._models:
             if request.allowed_models and spec.model_id not in request.allowed_models:
                 continue
@@ -164,7 +168,7 @@ class Gateway:
                 continue
             if request.allowed_regions and spec.region not in request.allowed_regions:
                 continue
-            if not request.required_capabilities <= spec.capabilities:
+            if not needed_capabilities <= spec.capabilities:
                 continue
             if request.max_input_tokens + request.max_output_tokens > spec.context_tokens:
                 continue

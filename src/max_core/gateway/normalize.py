@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import json
 import re
 from decimal import Decimal
@@ -18,6 +19,55 @@ from max_core.gateway.contracts import (
 MAX_TEXT = 128_000
 MAX_ARGS = 32_000
 MAX_TOOLS = 16
+MAX_ARG_DEPTH = 512
+
+_SNAPSHOT_SUFFIX_RE = re.compile(
+    r"-(?:(?P<iso_y>20\d{2})-(?P<iso_m>\d{2})-(?P<iso_d>\d{2})"
+    r"|(?P<compact_y>20\d{2})(?P<compact_m>\d{2})(?P<compact_d>\d{2})"
+    r"|(?P<short_m>\d{2})(?P<short_d>\d{2}))$"
+)
+
+
+def _valid_snapshot_match(match: re.Match[str] | None) -> bool:
+    if match is None:
+        return False
+    if match.group("iso_y") is not None:
+        year, month, day = (
+            int(match.group("iso_y")),
+            int(match.group("iso_m")),
+            int(match.group("iso_d")),
+        )
+    elif match.group("compact_y") is not None:
+        year, month, day = (
+            int(match.group("compact_y")),
+            int(match.group("compact_m")),
+            int(match.group("compact_d")),
+        )
+    else:
+        year, month, day = (
+            2024,
+            int(match.group("short_m")),
+            int(match.group("short_d")),
+        )
+    try:
+        datetime.date(year, month, day)
+    except ValueError:
+        return False
+    return True
+
+
+def model_matches(expected: str, actual: object) -> bool:
+    """Match exact model IDs and dated provider snapshots without cross-model drift."""
+    if not isinstance(actual, str) or not actual:
+        return False
+    if actual == expected:
+        return True
+    if _valid_snapshot_match(_SNAPSHOT_SUFFIX_RE.search(expected)):
+        return False
+    base = expected.removesuffix("-latest") if expected.endswith("-latest") else expected
+    if not actual.startswith(base):
+        return False
+    return _valid_snapshot_match(_SNAPSHOT_SUFFIX_RE.fullmatch(actual[len(base) :]))
 
 
 def _mapping(value: Any) -> dict[str, Any]:
@@ -37,22 +87,67 @@ def _int_count(value: Any) -> int | None:
 def _text(value: Any) -> str:
     if not isinstance(value, str) or len(value) > MAX_TEXT:
         raise GatewayError("malformed_provider_response")
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise GatewayError("malformed_provider_response") from None
     return value
 
 
+def _reject_json_constant(_value: str) -> Any:
+    raise ValueError("non_finite_json_constant")
+
+
+def _exceeds_depth(value: Any, max_depth: int = MAX_ARG_DEPTH) -> bool:
+    stack: list[tuple[Any, int]] = [(value, 0)]
+    while stack:
+        current, depth = stack.pop()
+        if depth > max_depth:
+            return True
+        if isinstance(current, dict):
+            for item in current.values():
+                if isinstance(item, (dict, list)):
+                    stack.append((item, depth + 1))
+        elif isinstance(current, list):
+            for item in current:
+                if isinstance(item, (dict, list)):
+                    stack.append((item, depth + 1))
+    return False
+
+
 def _tool(call_id: Any, name: Any, arguments: Any) -> ToolProposal:
-    if not isinstance(call_id, str) or not 1 <= len(call_id) <= 128:
+    if (
+        not isinstance(call_id, str)
+        or not 1 <= len(call_id) <= 128
+        or any(ch in call_id for ch in ("\r", "\n", "\x00"))
+    ):
         raise GatewayError("invalid_tool_proposal")
+    try:
+        call_id.encode("utf-8")
+    except UnicodeEncodeError:
+        raise GatewayError("invalid_tool_proposal") from None
     if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.-]{0,99}", name):
         raise GatewayError("invalid_tool_proposal")
     if isinstance(arguments, str):
         if len(arguments) > MAX_ARGS:
             raise GatewayError("invalid_tool_proposal")
         try:
-            arguments = json.loads(arguments)
-        except (json.JSONDecodeError, ValueError):
+            arguments = json.loads(arguments, parse_constant=_reject_json_constant)
+        except (json.JSONDecodeError, ValueError, RecursionError):
             raise GatewayError("invalid_tool_proposal") from None
-    if not isinstance(arguments, dict) or len(json.dumps(arguments)) > MAX_ARGS:
+    if not isinstance(arguments, dict) or _exceeds_depth(arguments):
+        raise GatewayError("invalid_tool_proposal")
+    try:
+        encoded = json.dumps(
+            arguments,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        encoded_bytes = encoded.encode("utf-8")
+    except (TypeError, ValueError, RecursionError):
+        raise GatewayError("invalid_tool_proposal") from None
+    if len(encoded_bytes) > MAX_ARGS:
         raise GatewayError("invalid_tool_proposal")
     return ToolProposal(call_id=call_id, name=name, arguments=arguments)
 
@@ -105,8 +200,13 @@ def normalize_openai(data: Any, request_id: str, spec: ModelSpec) -> GatewayResp
         function = _mapping(call.get("function"))
         tools.append(_tool(call.get("id"), function.get("name"), function.get("arguments")))
     finish_reason = choice.get("finish_reason")
-    if finish_reason is not None and not isinstance(finish_reason, str):
-        raise GatewayError("malformed_provider_response")
+    if finish_reason is not None:
+        if not isinstance(finish_reason, str):
+            raise GatewayError("malformed_provider_response")
+        try:
+            finish_reason.encode("utf-8")
+        except UnicodeEncodeError:
+            raise GatewayError("malformed_provider_response") from None
     usage = _usage(obj.get("usage"), "prompt_tokens", "completion_tokens")
     return GatewayResponse(
         request_id,
@@ -143,8 +243,13 @@ def normalize_anthropic(data: Any, request_id: str, spec: ModelSpec) -> GatewayR
     if len(content) > MAX_TEXT:
         raise GatewayError("malformed_provider_response")
     stop_reason = obj.get("stop_reason")
-    if stop_reason is not None and not isinstance(stop_reason, str):
-        raise GatewayError("malformed_provider_response")
+    if stop_reason is not None:
+        if not isinstance(stop_reason, str):
+            raise GatewayError("malformed_provider_response")
+        try:
+            stop_reason.encode("utf-8")
+        except UnicodeEncodeError:
+            raise GatewayError("malformed_provider_response") from None
     usage = _usage(obj.get("usage"), "input_tokens", "output_tokens")
     return GatewayResponse(
         request_id,
