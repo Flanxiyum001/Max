@@ -321,6 +321,13 @@ class OrbWindow(QWidget):
         if reply.state == "failed":
             self._failed(reply.error_code or "unavailable")
             return
+        if reply.state == "review_required" or reply.proposed_tools:
+            # A proposed tool is not an executed action. Do not display a
+            # potentially misleading model completion claim as task evidence.
+            self.orb.set_state(ERROR)
+            self._state_timer.start(2500)
+            self._show_answer("The model proposed tool actions. Nothing was executed; review required.")
+            return
         self.orb.set_state(SPEAKING)
         self._state_timer.start(2500)
         self._show_answer(reply.text.strip() or "…")
