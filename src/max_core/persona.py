@@ -10,6 +10,7 @@ import re
 from dataclasses import dataclass, replace
 from enum import StrEnum
 
+from max_core.engineering_skill import ENGINEERING_DISCIPLINE
 from max_core.gateway.contracts import ChatMessage, GatewayRequest
 
 
@@ -22,6 +23,7 @@ class ReplyMode(StrEnum):
 
     CONVERSATION = "conversation"
     WORK = "work"
+    ENGINEERING = "engineering"
     BRIEFING = "briefing"
     FOCUS = "focus"
 
@@ -54,6 +56,10 @@ _MODES: dict[ReplyMode, str] = {
         "Be operational and precise. Separate planned, in-progress, blocked and "
         "independently verified work; provide concise evidence and next actions."
     ),
+    ReplyMode.ENGINEERING: (
+        "Apply the first-party MAX Engineering Discipline only to this explicit "
+        "coding/review assignment; respect trusted host scope and permissions."
+    ),
     ReplyMode.BRIEFING: (
         "Summarise the most useful information first, label unknowns, avoid "
         "inventing calendar events or completed tasks, and keep it easy to scan."
@@ -69,7 +75,8 @@ def persona_message(mode: ReplyMode = ReplyMode.CONVERSATION) -> ChatMessage:
     """A fixed trusted system message; no owner data or provider identifiers."""
     if not isinstance(mode, ReplyMode):
         raise PersonaError("invalid_reply_mode")
-    return ChatMessage("system", _BASE + " " + _MODES[mode])
+    guidance = " " + ENGINEERING_DISCIPLINE if mode == ReplyMode.ENGINEERING else ""
+    return ChatMessage("system", _BASE + " " + _MODES[mode] + guidance)
 
 
 def with_persona(
