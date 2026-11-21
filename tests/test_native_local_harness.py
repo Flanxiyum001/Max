@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
-
 import httpx
 import pytest
 
@@ -60,7 +58,9 @@ def test_local_model_turn_has_real_events_but_never_runs_tools(
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     backend = NativeDesktopCore()
     try:
-        result = backend.ask_local("explain the implementation", on_activity=observed.append, client=client)
+        result = backend.ask_local(
+            "explain the implementation", on_activity=observed.append, client=client
+        )
         assert result.state == "review_required"
         assert result.proposed_tools == ("repo.read",)
         assert "Fixture response" in result.text
