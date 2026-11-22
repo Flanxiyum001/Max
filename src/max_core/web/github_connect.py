@@ -348,7 +348,9 @@ class WebGitHubConnector:
             token = self._token
         try:
             clean = validated_arguments(entry.observation, entry.policy, arguments)
-            return _run_in_fresh_thread(asyncio.run, self._dispatch(token, entry, clean, generation))
+            return _run_in_fresh_thread(
+                asyncio.run, self._dispatch(token, entry, clean, generation)
+            )
         except ToolError:
             raise
         except Exception:
