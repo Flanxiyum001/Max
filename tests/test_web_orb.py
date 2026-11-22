@@ -395,3 +395,51 @@ def test_piper_voice_urls_and_validation() -> None:
     off = PiperSpeaker({"MAX_PIPER": "off"}, Path("/nonexistent"))
     off.start()
     assert not off.wait(1) and not off.ready
+
+
+# --- accurate hearing (M34) ------------------------------------------------------
+
+
+def test_stt_prompt_includes_vocab_and_context() -> None:
+    from max_core.web.app import stt_prompt
+
+    p = stt_prompt("Pourush, Aventas, FreeLLMAPI", "Should I set a reminder for the meeting?")
+    assert p.startswith("Hey MAX.") and "Aventas" in p and "reminder for the meeting" in p
+    assert len(stt_prompt("x, " * 500, "y " * 1000)) < 900
+
+
+@pytest.mark.parametrize("raw", ["Thanks for watching.", "  thanks for watching! ", "you"])
+def test_known_whisper_hallucinations_are_dropped(raw: str) -> None:
+    from max_core.web.app import clean_transcript
+
+    assert clean_transcript(raw) == ""
+
+
+def test_clean_transcript_keeps_real_speech() -> None:
+    from max_core.web.app import clean_transcript
+
+    assert clean_transcript(" Thank you,  set a timer\nfor five minutes ") == (
+        "Thank you, set a timer for five minutes"
+    )
+
+
+def test_transcribe_sends_last_reply_as_context() -> None:
+    from max_core.gateway import ChatMessage
+
+    seen: list[str] = []
+
+    async def fake_stt(audio: bytes, content_type: str, cfg) -> str:  # type: ignore[no-untyped-def]
+        seen.append(cfg.prompt)
+        return "yes please"
+
+    class Sess(FakeSession):
+        history = [ChatMessage("user", "hi"), ChatMessage("assistant", "Want me to email Asha?")]
+
+    sess = Sess()
+    env = {**BACKUP_ENV, "MAX_STT_VOCAB": "Asha"}
+    client = TestClient(create_app(env, session_factory=lambda: sess, transcriber=fake_stt))
+    login(client)
+    client.get("/api/state")  # creates the session
+    res = client.post("/api/transcribe", content=b"x" * 500, headers={"content-type": "audio/webm"})
+    assert res.json() == {"text": "yes please"}
+    assert "Want me to email Asha?" in seen[0] and "Words that may come up: Asha." in seen[0]
