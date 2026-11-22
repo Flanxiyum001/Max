@@ -205,13 +205,13 @@ class WebMCPHub:
                             "tools": len(self._connections[service].tools)
                             if service in self._connections
                             else 0,
-                            "ephemeral": not self._vault.available,
+                            "ephemeral": not self._vault.durable,
                         }
                         for service in CATALOG
                     },
                 },
                 "catalog": ("github", *CATALOG),
-                "vault_persistent": self._vault.available,
+                "vault_persistent": self._vault.durable,
             }
 
     async def _get_json(
