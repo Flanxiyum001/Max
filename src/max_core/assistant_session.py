@@ -32,6 +32,7 @@ from max_core.tools import Tool, ToolError, ToolParam, ToolRegistry, ToolRisk
 if TYPE_CHECKING:
     from max_core.native_desktop.backend import NativeDesktopCore
     from max_core.web.github_connect import WebGitHubConnector
+    from max_core.web.mcp_hub import WebMCPHub
 
 ApproveFn = Callable[[str, dict[str, Any]], bool]
 MAX_HISTORY = 30
@@ -95,7 +96,7 @@ class AssistantSession:
         tool_http: Callable[[], httpx.Client] | None = None,
         routes: Mapping[TaskKind, str] | None = None,
         mcp_core: NativeDesktopCore | None = None,
-        github_connector: WebGitHubConnector | None = None,
+        github_connector: WebGitHubConnector | WebMCPHub | None = None,
     ) -> None:
         self.settings = settings
         base = settings.spec.model_id
@@ -256,7 +257,7 @@ class AssistantSession:
         if self._github_connector is None:
             return
         self.registry = ToolRegistry(
-            tuple(tool for tool in self.registry if not tool.name.startswith("mcp.github."))
+            tuple(tool for tool in self.registry if not tool.name.startswith("mcp."))
         )
         for tool in self._github_connector.tools_for_session():
             self.registry.register(tool)
