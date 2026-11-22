@@ -26,8 +26,14 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
+
+from max_core.web.github_connect import (
+    GitHubConnectionError,
+    WebGitHubConnector,
+    github_connect_intent,
+)
 
 STATIC = Path(__file__).parent / "static"
 COOKIE = "max_web"
@@ -63,6 +69,7 @@ class Job:
     error: str | None = None
     detail: str | None = None
     approval: dict[str, Any] | None = None
+    connect: dict[str, str] | None = None
     steps: list[str] = field(default_factory=list)
     _event: threading.Event = field(default_factory=threading.Event)
     _allowed: bool = False
@@ -247,6 +254,7 @@ def create_app(
     transcriber: Any = None,
     tts_backup: Any = None,
     piper: Any = None,
+    github_connector: WebGitHubConnector | None = None,
 ) -> FastAPI:
     env = dict(os.environ if env is None else env)
     passcode = env.get("MAX_WEB_PASSCODE", "")
@@ -263,6 +271,7 @@ def create_app(
     stt = stt_config(env)
     stt_vocab = env.get("MAX_STT_VOCAB", "")
     hear = transcriber or transcribe
+    github = github_connector if github_connector is not None else WebGitHubConnector(env)
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     login_limit = RateLimiter(8, 600)
@@ -297,7 +306,7 @@ def create_app(
                     if session_factory is not None:
                         state["session"] = session_factory()
                     else:
-                        state["session"] = _default_session(env)
+                        state["session"] = _default_session(env, github_connector=github)
                 except Exception as exc:
                     state["error"] = "model_not_configured"
                     # TrialConfigurationError messages are fixed codes, never secrets.
@@ -366,13 +375,73 @@ def create_app(
             "error": state["error"],
             "tools": sorted(t.name for t in sess.registry) if sess is not None else [],
             "stt_ready": stt is not None,
+            "github": github.status(),
         }
+
+    @app.post("/api/connect/github/start")
+    def start_github(request: Request) -> dict[str, str]:
+        require(request)
+        if not ask_limit.allow(_client_ip(request)):
+            raise HTTPException(429, "slow_down")
+        try:
+            return {"url": github.start()}
+        except GitHubConnectionError as exc:
+            raise HTTPException(503, exc.code) from None
+
+    @app.get("/api/connect/github/callback")
+    def github_callback(state: str = "", code: str = "", error: str = "") -> RedirectResponse:
+        # GitHub sends a cross-site browser navigation: SameSite=Strict cookies
+        # are intentionally absent. The short-lived, one-use OAuth state is
+        # the CSRF token, created ONLY by the authenticated owner.
+        if error or not state or not code:
+            return RedirectResponse("/?github=denied", status_code=303)
+        try:
+            github.finish(state, code)
+        except GitHubConnectionError:
+            return RedirectResponse("/?github=failed", status_code=303)
+        return RedirectResponse("/?github=connected", status_code=303)
+
+    @app.post("/api/connect/github/disconnect")
+    def disconnect_github(request: Request) -> dict[str, bool]:
+        require(request)
+        github.disconnect()
+        return {"ok": True}
 
     @app.post("/api/ask")
     def ask(body: AskBody, request: Request) -> dict[str, str]:
         require(request)
         if not ask_limit.allow(_client_ip(request)):
             raise HTTPException(429, "slow_down")
+        intent = github_connect_intent(body.text)
+        if intent is not None:
+            # Host-routed intent: the model cannot fabricate OAuth links or
+            # authorize external accounts by including instructions in text.
+            if any(j.status in {"running", "approval"} for j in jobs.values()):
+                raise HTTPException(409, "busy")
+            job = Job(uuid.uuid4().hex, status="done")
+            if intent == "disconnect":
+                github.disconnect()
+                job.answer = "GitHub disconnected. Its MCP tools are no longer available."
+            elif not github.configured:
+                job.answer = (
+                    "I can set up GitHub for you, but this MAX server still needs "
+                    "its GitHub OAuth application configured by the operator. "
+                    "I will not ask you to paste tokens into chat."
+                )
+                job.connect = {"service": "github", "action": "needs_configuration"}
+            elif github.status()["connected"]:
+                job.answer = "GitHub is already connected to MAX."
+                job.connect = {"service": "github", "action": "connected"}
+            else:
+                job.answer = (
+                    "I'll handle the GitHub MCP endpoint and tools. "
+                    "Approve the GitHub authorization in your browser to continue. "
+                    "GitHub OAuth may request broad repository access; "
+                    "every remote tool invocation still requires your approval."
+                )
+                job.connect = {"service": "github", "action": "authorize"}
+            jobs[job.id] = job
+            return {"job": job.id}
         sess = session()
         if sess is None:
             raise HTTPException(503, state["error"] or "model_not_configured")
@@ -426,6 +495,7 @@ def create_app(
             "error": job.error,
             "detail": job.detail,
             "approval": job.approval,
+            "connect": job.connect,
             "steps": job.steps[-6:],
         }
 
@@ -512,7 +582,9 @@ def create_app(
     return app
 
 
-def _default_session(env: dict[str, str]) -> Any:
+def _default_session(
+    env: dict[str, str], *, github_connector: WebGitHubConnector | None = None
+) -> Any:
     from max_core.assistant_session import AssistantSession, SessionOptions
     from max_core.gateway_trial import TrialSettings
 
@@ -525,7 +597,9 @@ def _default_session(env: dict[str, str]) -> Any:
         enable_web=options.enable_web,
         host_tools=False,
     )
-    return AssistantSession(TrialSettings.from_env(env), options)
+    return AssistantSession(
+        TrialSettings.from_env(env), options, github_connector=github_connector
+    )
 
 
 def main() -> int:
