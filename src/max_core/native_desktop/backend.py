@@ -51,10 +51,10 @@ if TYPE_CHECKING:
         ChatTurnResult,
         ProviderStatus,
         ToolExecutionSummary,
+        ToolExecutor,
     )
     from max_core.gateway.contracts import ToolDefinition, ToolProposal
     from max_core.local_tools import LocalToolExecutor, LocalToolRegistry
-    from max_core.assistant_chat import ToolExecutor
     from max_core.mcp_execute import MCPToolExecutor
     from max_core.persona import ReplyMode
     from max_core.voice.controller import VoiceCapabilities, VoiceController
@@ -415,12 +415,10 @@ class NativeDesktopCore:
                 return primary
             if self._combined_executor is not None:
                 return self._combined_executor
-            from max_core.mcp_execute import CompositeToolExecutor, MCPToolExecutor
-
             # No network on startup or tool registration. Only approved snapshots
             # can be advertised, and every execution still requires Trust approval.
             from max_core.mcp_desktop import MCPSettingsError
-            from max_core.mcp_execute import McpExecuteError
+            from max_core.mcp_execute import CompositeToolExecutor, McpExecuteError, MCPToolExecutor
 
             try:
                 connections, reviewed = self._mcp_manager.runtime()
@@ -848,7 +846,11 @@ class NativeDesktopCore:
     def tool_definitions(self) -> tuple[ToolDefinition, ...]:
         """Return Gateway ToolDefinition contracts for enabled tools."""
         executor = self._get_tool_executor()
-        return tuple(executor.tool_definitions()) if executor is not None else self._get_tool_registry().tool_definitions()
+        return (
+            tuple(executor.tool_definitions())
+            if executor is not None
+            else self._get_tool_registry().tool_definitions()
+        )
 
     def execute_tool(
         self,
