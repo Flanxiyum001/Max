@@ -27,6 +27,7 @@ from max_core.gateway.contracts import ToolDefinition, ToolProposal
 from max_core.local_config import DesktopConfig
 from max_core.native_desktop.backend import NativeDesktopCore, NativeDesktopError
 from max_core.persistence import _is_expired
+from max_core.planner import PlanError, PlanService
 from max_core.store import StoreError, TaskStore
 from max_core.trust import (
     ActorContext,
@@ -443,7 +444,7 @@ def _validate_execute_python(arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 class LocalToolRegistry:
-    """Fixed host registry of 14 bounded, deterministic local tools."""
+    """Fixed host registry of 15 bounded, deterministic local tools."""
 
     def __init__(
         self,
@@ -649,6 +650,26 @@ class LocalToolRegistry:
                 requires_approval=True,
                 validate=_validate_task_create,
                 handler=self._handle_task_create,
+            ),
+            LocalToolSpec(
+                name="task.plan",
+                description=(
+                    "Break an objective with explicit structure (numbered steps, bullets, "
+                    "semicolons, or 'then') into a dependency-ordered multi-step task plan "
+                    "(requires Trust approval; deterministic, never model-invented)."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "objective": {"type": "string", "minLength": 1, "maxLength": 500}
+                    },
+                    "required": ["objective"],
+                    "additionalProperties": False,
+                },
+                risk_tier=RiskTier.R1,
+                requires_approval=True,
+                validate=_validate_task_create,
+                handler=self._handle_task_plan,
             ),
             LocalToolSpec(
                 name="notes.save",
@@ -1241,6 +1262,45 @@ class LocalToolRegistry:
             "objective": task.objective,
             "state": task.state,
             "revision": task.revision,
+            "created": created,
+        }
+
+    def _handle_task_plan(
+        self,
+        args: dict[str, Any],
+        call_id: str | None,
+        approval_id: str | None,
+    ) -> dict[str, object]:
+        if self._task_store is None:
+            raise LocalToolError("task_store_not_ready", status="failed")
+        if approval_id is not None:
+            idempotency_key = f"trust-{approval_id}"[:92]
+        else:
+            digest = hashlib.sha256((call_id or uuid4().hex).encode("utf-8")).hexdigest()[:32]
+            idempotency_key = f"plan-{digest}"
+        planner = PlanService(self._task_store.engine, self._task_store)
+        try:
+            parent, steps, created = planner.create_plan(
+                self._owner_id, args["objective"], idempotency_key
+            )
+        except PlanError as error:
+            raise LocalToolError(error.code, status="failed") from None
+        except StoreError:
+            raise LocalToolError("task_create_failed", status="failed") from None
+        return {
+            "task_id": parent.id,
+            "parent_objective": parent.objective,
+            "state": parent.state,
+            "steps": [
+                {
+                    "task_id": step.task_id,
+                    "position": step.position,
+                    "objective": step.objective,
+                    "state": step.state,
+                    "ready": step.ready,
+                }
+                for step in steps
+            ],
             "created": created,
         }
 

@@ -17,6 +17,7 @@
 | faster-whisper | [Project](https://github.com/SYSTRAN/faster-whisper) | Local STT | Actual latency/GPU fit unknown; benchmark device | MIT implementation; model licenses vary |
 | Piper | [Project code/license](https://github.com/rhasspy/piper/blob/master/LICENSE.md) | Offline TTS | Original voice quality/license and maintained implementation must be verified | MIT referenced code; weights individually licensed |
 | Google Drive API | [Scopes](https://developers.google.com/workspace/drive/api/guides/api-specific-auth), [revision retention](https://developers.google.com/workspace/drive/api/guides/manage-revisions) | File/export destination | Not durable DB or sole backup; restricted scopes, quota, OAuth and purged revisions | Account storage + operational/API quotas |
+| APScheduler | [Official docs](https://apscheduler.readthedocs.io/en/3.x/) | Recurring scheduled background jobs | M36 recurring triggers need only a strict 5-field cron matcher and one 60 s ticker thread; the library adds job stores/executor machinery for state MAX already owns in `max_trigger_rules`, and a background scheduler with implicit concurrency weakens the single-tick, one-fire-per-minute guarantee | MIT, small; **deferred** — re-evaluate when second-resolution, timezone-aware or persisted schedules are actually required |
 
 ## Selection rubric for each dependency
 
