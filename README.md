@@ -114,6 +114,11 @@ The trusted local tool registry contains 10 typed allowlisted tools, validated a
 - Add trusted HTTPS MCP servers via the System tab; explicitly discover schemas and enable individual tools. Never inherits ChatGPT connector tokens. Credential values remain outside the profile and the repository.
 - Every invocation is Trust-gated with a single-use approval and live schema-drift checks. See [configuration, GitHub setup and limitations](docs/MCP_DESKTOP.md).
 
+### MAX MCP Connections Hub (Render web orb)
+- Say or type “MAX, connect to Cloudflare”, “connect to Railway”, “connect to Figma”, and other supported apps. Or open **Apps** in the orb to manage connections.
+- OAuth server metadata, CIMD/DCR registration (where supported), exact-call approvals and an encrypted server-side credential vault replace per-app token environment variables. Render provides the public HTTPS URL automatically.
+- GitHub currently remains an exception requiring an OAuth App registered once for MAX. See [Connection Hub, storage, supported providers and limitations](docs/MCP_CONNECTION_HUB.md).
+
 ### One-command GitHub connection in the Render web orb
 - Say or type "MAX, connect to GitHub". MAX initiates the trusted browser OAuth flow, completes the GitHub MCP connection and discovers compatible tools after owner authorization.
 - Remote tools remain blocked until each exact action is approved. Say "MAX, disconnect GitHub" to revoke the current server-side session.
