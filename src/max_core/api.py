@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+from pathlib import Path
 from secrets import token_hex
 from typing import Annotated, Literal
 from uuid import UUID
@@ -29,9 +31,11 @@ from max_core.connect import ConnectService, DraftView
 from max_core.desktop.assets import desktop_asset
 from max_core.event_stream import EventStreamError, LocalEventBus, OneUseTickets, loopback_origins
 from max_core.observability import configure_access_logger
+from max_core.planner import PlanError, PlanService, PlanStep
 from max_core.security import BootstrapBearerAuth
 from max_core.store import StoreError, TaskStore, TaskView, create_store
 from max_core.timeline import TaskTimeline, TimelinePage
+from max_core.triggers import TriggerError, TriggerRuleView, TriggerRunView, TriggerService
 from max_core.trust import GrantView, TrustError, TrustService
 
 
@@ -55,6 +59,99 @@ class NewConnectEvent(BaseModel):
 class NewTask(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     objective: str = Field(min_length=1, max_length=500)
+
+
+class NewTriggerRule(BaseModel):
+    """Cron is a strict 5-field local matcher; the service re-validates every field."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    kind: Literal["briefing.daily", "notes.digest", "repo.status"]
+    schedule: str = Field(min_length=9, max_length=64)
+
+
+class PlanStepResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    task_id: str
+    objective: str
+    state: str
+    position: int
+    ready: bool
+
+
+class PlanResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    task: TaskView
+    steps: list[PlanStepResponse]
+
+
+class TriggerRuleResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    kind: str
+    schedule: str
+    enabled: bool
+    last_fired_minute: str | None
+    created_at: str
+
+
+class TriggerRunResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    rule_id: str
+    kind: str
+    state: str
+    output: str
+    proposal_json: str | None
+    approval_id: str | None
+    created_at: str
+
+
+def _plan_error(error: PlanError) -> HTTPException:
+    return HTTPException(status_code=error.status_code, detail=error.code)
+
+
+def _trigger_error(error: TriggerError) -> HTTPException:
+    return HTTPException(status_code=error.status_code, detail=error.code)
+
+
+def _plan_response(task: TaskView, steps: tuple[PlanStep, ...]) -> PlanResponse:
+    return PlanResponse(
+        task=task,
+        steps=[
+            PlanStepResponse(
+                task_id=step.task_id,
+                objective=step.objective,
+                state=step.state,
+                position=step.position,
+                ready=step.ready,
+            )
+            for step in steps
+        ],
+    )
+
+
+def _rule_response(rule: TriggerRuleView) -> TriggerRuleResponse:
+    return TriggerRuleResponse(
+        id=rule.id,
+        kind=rule.kind,
+        schedule=rule.schedule,
+        enabled=rule.enabled,
+        last_fired_minute=rule.last_fired_minute,
+        created_at=rule.created_at.isoformat(),
+    )
+
+
+def _run_response(run: TriggerRunView) -> TriggerRunResponse:
+    return TriggerRunResponse(
+        id=run.id,
+        rule_id=run.rule_id,
+        kind=run.kind,
+        state=run.state,
+        output=run.output,
+        proposal_json=run.proposal_json,
+        approval_id=run.approval_id,
+        created_at=run.created_at.isoformat(),
+    )
 
 
 def _error(error: StoreError) -> HTTPException:
@@ -102,6 +199,26 @@ def require_connect(request: Request) -> ConnectService:
     return service
 
 
+def require_plan(request: Request) -> PlanService:
+    service: PlanService | None = request.app.state.plan_service
+    if service is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Task persistence is not configured",
+        )
+    return service
+
+
+def require_triggers(request: Request) -> TriggerService:
+    service: TriggerService | None = request.app.state.trigger_service
+    if service is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Task persistence is not configured",
+        )
+    return service
+
+
 def create_app(settings: Settings | None = None, store: TaskStore | None = None) -> FastAPI:
     """Fail configuration validation before constructing a service."""
     config = settings if settings is not None else Settings.from_env()
@@ -134,6 +251,21 @@ def create_app(settings: Settings | None = None, store: TaskStore | None = None)
     app.state.trust_service = TrustService(task_store.engine) if task_store is not None else None
     app.state.connect_service = (
         ConnectService(task_store.engine) if task_store is not None else None
+    )
+    app.state.plan_service = (
+        PlanService(task_store.engine, task_store) if task_store is not None else None
+    )
+    app.state.trigger_service = (
+        TriggerService(
+            task_store.engine,
+            TrustService(task_store.engine),
+            notes_dir=(Path(env_dir) if (env_dir := os.environ.get("MAX_NOTES_DIR")) else None),
+            workspace_root=(
+                Path(env_root) if (env_root := os.environ.get("MAX_WORKSPACE_ROOT")) else None
+            ),
+        )
+        if task_store is not None
+        else None
     )
 
     @app.middleware("http")
@@ -308,6 +440,98 @@ def create_app(settings: Settings | None = None, store: TaskStore | None = None)
             return connect_service.dismiss("owner", str(draft_id))
         except StoreError as exc:
             raise _error(exc) from None
+
+    @app.post("/v1/tasks/plan", dependencies=[Depends(auth)])
+    def create_plan(
+        payload: NewTask,
+        idempotency_key: Annotated[str, Header(min_length=8, max_length=92)],
+        response: Response,
+        planner: Annotated[PlanService, Depends(require_plan)],
+    ) -> PlanResponse:
+        try:
+            parent, steps, created = planner.create_plan(
+                "owner", payload.objective, idempotency_key
+            )
+        except PlanError as exc:
+            raise _plan_error(exc) from None
+        if not created:
+            response.status_code = 200
+        return _plan_response(parent, steps)
+
+    @app.get("/v1/tasks/{task_id}/plan", dependencies=[Depends(auth)])
+    def task_plan(
+        task_id: UUID, planner: Annotated[PlanService, Depends(require_plan)]
+    ) -> PlanResponse:
+        try:
+            view = planner.plan_view("owner", str(task_id))
+        except PlanError as exc:
+            raise _plan_error(exc) from None
+        return _plan_response(view.parent, view.steps)
+
+    @app.post("/v1/tasks/{task_id}/complete", dependencies=[Depends(auth)])
+    def complete_plan_step(
+        task_id: UUID, planner: Annotated[PlanService, Depends(require_plan)]
+    ) -> PlanResponse:
+        """Owner-verified step completion; the view flags the next ready step for resume."""
+        try:
+            view = planner.complete_step("owner", str(task_id))
+        except PlanError as exc:
+            raise _plan_error(exc) from None
+        return _plan_response(view.parent, view.steps)
+
+    @app.post("/v1/triggers", status_code=201, dependencies=[Depends(auth)])
+    def create_trigger_rule(
+        payload: NewTriggerRule,
+        triggers: Annotated[TriggerService, Depends(require_triggers)],
+    ) -> TriggerRuleResponse:
+        try:
+            return _rule_response(triggers.add_rule("owner", payload.kind, payload.schedule))
+        except TriggerError as exc:
+            raise _trigger_error(exc) from None
+
+    @app.get("/v1/triggers", dependencies=[Depends(auth)])
+    def list_trigger_rules(
+        triggers: Annotated[TriggerService, Depends(require_triggers)],
+    ) -> list[TriggerRuleResponse]:
+        return [_rule_response(rule) for rule in triggers.list_rules("owner")]
+
+    @app.delete("/v1/triggers/{rule_id}", status_code=204, dependencies=[Depends(auth)])
+    def remove_trigger_rule(
+        rule_id: UUID, triggers: Annotated[TriggerService, Depends(require_triggers)]
+    ) -> Response:
+        try:
+            triggers.remove_rule("owner", str(rule_id))
+        except TriggerError as exc:
+            raise _trigger_error(exc) from None
+        return Response(status_code=http_status.HTTP_204_NO_CONTENT)
+
+    @app.get("/v1/triggers/runs", dependencies=[Depends(auth)])
+    def list_trigger_runs(
+        triggers: Annotated[TriggerService, Depends(require_triggers)],
+        limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    ) -> list[TriggerRunResponse]:
+        try:
+            return [_run_response(run) for run in triggers.runs("owner", limit)]
+        except TriggerError as exc:
+            raise _trigger_error(exc) from None
+
+    @app.post("/v1/triggers/runs/{run_id}/promote", dependencies=[Depends(auth)])
+    def promote_trigger_run(
+        run_id: UUID, triggers: Annotated[TriggerService, Depends(require_triggers)]
+    ) -> TriggerRunResponse:
+        try:
+            return _run_response(triggers.promote_run("owner", str(run_id)))
+        except TriggerError as exc:
+            raise _trigger_error(exc) from None
+
+    @app.post("/v1/triggers/runs/{run_id}/dismiss", dependencies=[Depends(auth)])
+    def dismiss_trigger_run(
+        run_id: UUID, triggers: Annotated[TriggerService, Depends(require_triggers)]
+    ) -> TriggerRunResponse:
+        try:
+            return _run_response(triggers.dismiss_run("owner", str(run_id)))
+        except TriggerError as exc:
+            raise _trigger_error(exc) from None
 
     @app.post("/v1/events/ticket", dependencies=[Depends(auth)])
     def issue_event_ticket(request: Request, response: Response) -> dict[str, str | int]:
