@@ -370,9 +370,8 @@ class WebMCPHub:
         if isinstance(scopes, list) and "openid" in scopes:
             params["scope"] = "openid"
         authorization_endpoint = metadata.get("authorization_endpoint")
-        if (
-            not isinstance(authorization_endpoint, str)
-            or not _trusted_url(authorization_endpoint, provider)
+        if not isinstance(authorization_endpoint, str) or not _trusted_url(
+            authorization_endpoint, provider
         ):
             raise MCPHubError("mcp_oauth_authorization_endpoint_invalid")
         return authorization_endpoint + "?" + urlencode(params)
