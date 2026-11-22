@@ -60,7 +60,9 @@ def test_discovery_requires_explicit_review_and_pins_schema(
     assert manager.runtime() == ((), ())
 
 
-def test_missing_token_blocks_enabled_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_missing_token_blocks_enabled_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     manager = MCPDesktopManager(tmp_path / "profile.json", env={})
     manager.add("github", "https://example.test/mcp", "MAX_MCP_GITHUB_TOKEN")
     # No network; just simulate a reviewed local configuration.
