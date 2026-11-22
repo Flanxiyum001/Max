@@ -9,14 +9,14 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from fastapi.testclient import TestClient
 
-from max_core.mcp_discovery import ObservedTool
+from max_core.mcp_discovery import MCPConnection, ObservedTool
 from max_core.tools import ToolError, ToolRisk
+from max_core.web.app import create_app
 from max_core.web.github_connect import (
     GitHubConnectionError,
     WebGitHubConnector,
     github_connect_intent,
 )
-from max_core.web.app import create_app
 
 CONFIG = {
     "MAX_WEB_PASSCODE": "correct horse battery",
@@ -46,9 +46,9 @@ def observation(*, nested: bool = False) -> ObservedTool:
 
 
 def authed(client: TestClient) -> None:
-    assert client.post(
-        "/api/login", json={"passcode": CONFIG["MAX_WEB_PASSCODE"]}
-    ).status_code == 200
+    assert (
+        client.post("/api/login", json={"passcode": CONFIG["MAX_WEB_PASSCODE"]}).status_code == 200
+    )
 
 
 def test_owner_voice_command_routes_to_oauth_intent_without_model() -> None:
@@ -68,10 +68,12 @@ def test_owner_voice_command_routes_to_oauth_intent_without_model() -> None:
 
 
 def test_no_oauth_app_configuration_never_fabricates_working_connection() -> None:
-    client = TestClient(create_app(
-        {"MAX_WEB_PASSCODE": CONFIG["MAX_WEB_PASSCODE"], "MAX_WEB_INSECURE_COOKIE": "yes"},
-        session_factory=lambda: None,
-    ))
+    client = TestClient(
+        create_app(
+            {"MAX_WEB_PASSCODE": CONFIG["MAX_WEB_PASSCODE"], "MAX_WEB_INSECURE_COOKIE": "yes"},
+            session_factory=lambda: None,
+        )
+    )
     authed(client)
     job = client.post("/api/ask", json={"text": "connect to GitHub"}).json()["job"]
     assert client.get(f"/api/job/{job}").json()["connect"]["action"] == "needs_configuration"
@@ -84,7 +86,9 @@ def test_server_only_oauth_state_pkce_and_callback_validation() -> None:
     url = connector.start()
     parsed = urlsplit(url)
     assert (parsed.scheme, parsed.hostname, parsed.path) == (
-        "https", "github.com", "/login/oauth/authorize"
+        "https",
+        "github.com",
+        "/login/oauth/authorize",
     )
     query = parse_qs(parsed.query)
     assert query["redirect_uri"] == [CONFIG["MAX_GITHUB_OAUTH_CALLBACK_URL"]]
@@ -109,8 +113,8 @@ def test_real_callback_consumes_one_use_state_and_discovers_tools(
         assert verifier
         return ("ghu_token_that_must_never_be_in_responses", "Flanxiyum001")
 
-    async def fake_discover(connection: object) -> tuple[ObservedTool, ...]:
-        assert getattr(connection, "bearer_token") == "ghu_token_that_must_never_be_in_responses"
+    async def fake_discover(connection: MCPConnection) -> tuple[ObservedTool, ...]:
+        assert connection.bearer_token == "ghu_token_that_must_never_be_in_responses"
         return (observation(), observation(nested=True))
 
     monkeypatch.setattr(connector, "_exchange", fake_exchange)
@@ -132,9 +136,12 @@ def test_real_callback_consumes_one_use_state_and_discovers_tools(
     assert "ghu_token" not in str(status)
     assert len(connector.tools_for_session()) == 1
     assert connector.tools_for_session()[0].risk == ToolRisk.EFFECTFUL
-    assert client.get(
-        "/api/connect/github/callback", params={"state": state, "code": "replay"}
-    ).headers["location"] == "/?github=failed"
+    assert (
+        client.get(
+            "/api/connect/github/callback", params={"state": state, "code": "replay"}
+        ).headers["location"]
+        == "/?github=failed"
+    )
 
     disconnected = client.post("/api/connect/github/disconnect")
     assert disconnected.status_code == 200
@@ -164,8 +171,11 @@ def test_bad_callback_and_public_route_do_not_expose_connection() -> None:
     client = TestClient(create_app(CONFIG, session_factory=lambda: None), follow_redirects=False)
     assert client.post("/api/connect/github/start").status_code == 401
     assert client.post("/api/connect/github/disconnect").status_code == 401
-    assert client.get(
-        "/api/connect/github/callback", params={"state": "bad", "code": "test"}
-    ).headers["location"] == "/?github=failed"
+    assert (
+        client.get("/api/connect/github/callback", params={"state": "bad", "code": "test"}).headers[
+            "location"
+        ]
+        == "/?github=failed"
+    )
     authed(client)
     assert client.get("/api/state").json()["github"]["connected"] is False
