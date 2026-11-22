@@ -49,3 +49,20 @@ MAX_WEB_PASSCODE=... MAX_WEB_INSECURE_COOKIE=yes python -m max_core.web   # http
 ```
 
 Rollback: revert this PR and delete the Render service.
+
+## Siri-style voice (added)
+
+- **Tap the orb / Space** → chime, listens, and **sends by itself** when you stop talking.
+- **“Hey MAX”** (toggle top-right, off by default, remembered per browser): while the
+  tab is open and visible, the browser listens for “Hey MAX” / “OK MAX”. Say
+  “Hey MAX, what's the weather?” in one go, or “Hey MAX”, pause, then ask.
+  In Chrome this means microphone audio is streamed to Google's speech service the
+  whole time it is on; it stops when the tab is hidden or the toggle is off.
+- **Follow-up:** after a spoken answer MAX listens ~6 s more for a follow-up, then
+  goes back to waiting.
+- **Living orb:** the orb swells and glows with your voice while listening and with
+  MAX's voice while speaking (Web Audio level meter).
+
+Tested in headless Chromium with a simulated speech recogniser and fake mic
+(wake + command, wake then pause, follow-up, silence, approval by voice); not yet
+with a real microphone.

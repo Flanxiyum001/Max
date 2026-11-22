@@ -26,13 +26,13 @@ function frame() {
   const w = innerWidth, h = innerHeight, cx = w / 2, cy = h * 0.42;
   const err = state === "error";
   const rim = err ? [255, 90, 90] : [90, 230, 255];
-  const breathe = 1 + 0.012 * Math.sin(t * 1.3) + 0.02 * energy * Math.sin(t * 6);
+  const breathe = 1 + 0.012 * Math.sin(t * 1.3) + 0.02 * energy * Math.sin(t * 6) + 0.09 * level;
   const r = Math.min(w, h) * 0.24 * breathe;
   ctx.clearRect(0, 0, w, h);
 
   // halo
   let g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 1.28);
-  const a = (110 + 90 * energy) / 255;
+  const a = Math.min(1, (110 + 90 * energy + 120 * level) / 255);
   g.addColorStop(0.74, rgba(...rim, a)); g.addColorStop(0.84, rgba(...rim, a / 3));
   g.addColorStop(1, rgba(0, 0, 0, 0));
   ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, r * 1.28, 0, 7); ctx.fill();
@@ -157,6 +157,7 @@ async function boot() {
   hint.textContent = "type to talk · space or tap the orb to speak";
   if (!s.model_ready) { setState("error", 3000); show(ERRORS.model_not_configured); }
   else show("Hello. I'm here.", 4000);
+  saveWake();
 }
 
 // ---------------------------------------------------------------- conversation
@@ -179,8 +180,9 @@ async function ask(text, spoken) {
       busy = false; pendingJob = null;
       if (j.status === "done") {
         setState("speaking"); show(j.answer);
-        if (spoken) await say(j.answer); else setState("speaking", 2500);
-      } else { setState("error", 2500); show(ERRORS[j.error] || ERRORS.model_unavailable); }
+        if (spoken) { followUp = true; await say(j.answer); } else setState("speaking", 2500);
+        if (!followUp) resumeWake();
+      } else { setState("error", 2500); show(ERRORS[j.error] || ERRORS.model_unavailable); resumeWake(); }
       return;
     }
   } catch (err) {
@@ -206,43 +208,161 @@ async function answerApproval(allow) {
 $("allow").onclick = () => answerApproval(true);
 $("deny").onclick = () => answerApproval(false);
 
-// ---------------------------------------------------------------- voice out
-async function say(text) {
-  try {
-    const res = await api("/api/speak", { text: text.slice(0, 2000) });
-    const url = URL.createObjectURL(await res.blob());
-    stopSpeaking(); audio = new Audio(url); setState("speaking");
-    audio.onended = () => { URL.revokeObjectURL(url); audio = null; if (!busy) setState("idle"); };
-    await audio.play();
-  } catch { setState("speaking", 2500); }
+// ---------------------------------------------------------------- sound level → orb
+// level (0..1) comes from the mic while listening and from MAX's voice while speaking.
+let level = 0, audioCtx = null, analyser = null, levelSource = null, micStream = null;
+function ensureAudio() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioCtx.createAnalyser(); analyser.fftSize = 512;
+  }
+  if (audioCtx.state === "suspended") audioCtx.resume();
 }
-function stopSpeaking() { if (audio) { audio.pause(); audio = null; if (!busy) setState("idle"); } }
+function connectLevel(node) {
+  try { if (levelSource) levelSource.disconnect(); } catch {}
+  levelSource = node; node.connect(analyser);
+}
+const buf = new Uint8Array(512);
+function sampleLevel() {
+  if (analyser && (state === "listening" || state === "speaking")) {
+    analyser.getByteTimeDomainData(buf);
+    let sum = 0; for (const v of buf) { const d = (v - 128) / 128; sum += d * d; }
+    level += (Math.min(1, Math.sqrt(sum / buf.length) * 4) - level) * 0.35;
+  } else level *= 0.85;
+  requestAnimationFrame(sampleLevel);
+}
+requestAnimationFrame(sampleLevel);
+async function startMicLevel() {
+  try {
+    ensureAudio();
+    if (!micStream) micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    connectLevel(audioCtx.createMediaStreamSource(micStream));
+  } catch {}
+}
+function stopMicLevel() {
+  if (micStream) { micStream.getTracks().forEach((tr) => tr.stop()); micStream = null; }
+}
+function chime(up) {
+  try {
+    ensureAudio();
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain(), now = audioCtx.currentTime;
+    o.type = "sine";
+    o.frequency.setValueAtTime(up ? 660 : 880, now);
+    o.frequency.exponentialRampToValueAtTime(up ? 990 : 520, now + 0.16);
+    g.gain.setValueAtTime(0.0001, now); g.gain.exponentialRampToValueAtTime(0.12, now + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+    o.connect(g).connect(audioCtx.destination); o.start(now); o.stop(now + 0.25);
+  } catch {}
+}
 
-// ---------------------------------------------------------------- voice in (browser speech recognition)
+// ---------------------------------------------------------------- voice out
+let followUp = false;
+function say(text) {
+  return new Promise(async (done) => {
+    try {
+      const res = await api("/api/speak", { text: text.slice(0, 2000) });
+      const url = URL.createObjectURL(await res.blob());
+      const wantFollowUp = followUp;
+      stopSpeaking(); followUp = wantFollowUp; audio = new Audio(url); setState("speaking");
+      try { ensureAudio(); const src = audioCtx.createMediaElementSource(audio);
+            src.connect(audioCtx.destination); connectLevel(src); } catch {}
+      audio.onended = () => {
+        URL.revokeObjectURL(url); audio = null;
+        if (!busy) setState("idle");
+        done();
+        if (followUp) { followUp = false; setTimeout(() => startListening({ followUp: true }), 250); }
+      };
+      await audio.play();
+    } catch {
+      // Speech failed (no audio, autoplay blocked…): still offer the follow-up turn.
+      setState("speaking", 2500); done();
+      if (followUp) { followUp = false; setTimeout(() => startListening({ followUp: true }), 600); }
+      else resumeWake();
+    }
+  });
+}
+function stopSpeaking() { followUp = false; if (audio) { audio.pause(); audio = null; if (!busy) setState("idle"); } }
+
+// ---------------------------------------------------------------- voice in (Siri-style)
+// • tap / Space: listen once; sends by itself when you stop talking
+// • "Hey MAX" (opt-in): always listening for the wake phrase while this tab is open
+// • after a spoken answer MAX keeps listening ~6 s for a follow-up
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-function toggleListening() {
-  if (!authed || busy) return;
+const WAKE = /\b(?:hey|hi|ok|okay)[\s,]+max\b[\s,.!?]*/i;
+let wakeOn = localStorage.getItem("max_wake") === "on";
+let wakeRec = null, wakeWanted = false;
+
+function startListening(opts = {}) {
+  if (!authed || busy || listening) return;
   if (!SR) { setState("error", 2500); show("This browser can't listen. Try Chrome or Edge.", 4000); return; }
-  if (listening) { recognition && recognition.stop(); return; }
-  stopSpeaking();
+  stopSpeaking(); stopWake();
   recognition = new SR(); recognition.lang = navigator.language || "en-US";
   recognition.interimResults = true; recognition.continuous = false;
-  let finalText = "";
+  let finalText = "", heardAnything = false;
+  const silenceTimer = opts.followUp ? setTimeout(() => { if (!heardAnything) recognition.abort(); }, 6000) : null;
   recognition.onresult = (e) => {
+    heardAnything = true;
     let interim = "";
     for (const r of e.results) (r.isFinal ? (finalText = r[0].transcript) : (interim += r[0].transcript));
     show(`“${finalText || interim}”`, 0);
   };
-  recognition.onerror = (e) => { listening = false; setState("error", 2500);
-    show(e.error === "not-allowed" ? "Microphone permission was denied." : "I didn't catch that.", 3500); };
-  recognition.onend = () => {
-    listening = false;
-    if (finalText.trim()) ask(finalText.trim(), true);
-    else if (state === "listening") { setState("idle"); show("I didn't hear anything.", 3000); }
+  recognition.onerror = (e) => {
+    if (e.error === "not-allowed") { setState("error", 2500); show("Microphone permission was denied.", 3500); wakeOn = false; saveWake(); }
   };
-  listening = true; setState("listening"); show("Listening…", 0); recognition.start();
+  recognition.onend = () => {
+    clearTimeout(silenceTimer); listening = false; stopMicLevel();
+    const text = finalText.trim();
+    if (text) { chime(false); ask(text, true); }
+    else { if (state === "listening") setState("idle"); if (!opts.followUp) show("I didn't hear anything.", 2500); else show(""); resumeWake(); }
+  };
+  listening = true; setState("listening"); chime(true);
+  show(opts.followUp ? "…" : "Listening…", 0);
+  startMicLevel();
+  try { recognition.start(); } catch { listening = false; setState("idle"); }
+}
+function toggleListening() {
+  if (listening) { recognition && recognition.stop(); return; }
+  startListening();
 }
 canvas.addEventListener("click", toggleListening);
+
+function startWake() {
+  if (!SR || !wakeOn || !authed || listening || busy || audio || wakeRec) return;
+  wakeWanted = true;
+  wakeRec = new SR(); wakeRec.lang = navigator.language || "en-US";
+  wakeRec.continuous = true; wakeRec.interimResults = true;
+  wakeRec.onresult = (e) => {
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const said = e.results[i][0].transcript;
+      const m = said.match(WAKE);
+      if (!m) continue;
+      const rest = said.slice(m.index + m[0].length).trim();
+      if (e.results[i].isFinal && rest.length > 2) {   // "Hey MAX, what's the weather?"
+        stopWake(); chime(true); chime(false); show(`“${rest}”`, 0); ask(rest, true); return;
+      }
+      if (!rest) { stopWake(); setTimeout(() => startListening(), 150); return; }  // "Hey MAX" … pause
+    }
+  };
+  wakeRec.onerror = (e) => { if (e.error === "not-allowed") { wakeOn = false; saveWake(); } };
+  wakeRec.onend = () => { wakeRec = null; if (wakeWanted) setTimeout(startWake, 400); };  // browsers stop it periodically
+  try { wakeRec.start(); } catch { wakeRec = null; }
+}
+function stopWake() { wakeWanted = false; if (wakeRec) { try { wakeRec.abort(); } catch {} wakeRec = null; } }
+function resumeWake() { if (wakeOn) setTimeout(startWake, 300); }
+function saveWake() {
+  localStorage.setItem("max_wake", wakeOn ? "on" : "off");
+  wakeBtn.textContent = wakeOn ? "“Hey MAX”: on" : "“Hey MAX”: off";
+  wakeBtn.classList.toggle("on", wakeOn);
+  if (wakeOn) startWake(); else stopWake();
+}
+const wakeBtn = $("wake");
+wakeBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (!SR) { show("This browser can't listen. Try Chrome or Edge.", 4000); return; }
+  wakeOn = !wakeOn; saveWake();
+  if (wakeOn) show("Say “Hey MAX” any time while this tab is open.", 4000);
+});
+document.addEventListener("visibilitychange", () => { if (document.hidden) stopWake(); else resumeWake(); });
 
 // ---------------------------------------------------------------- keyboard
 document.addEventListener("keydown", (e) => {
