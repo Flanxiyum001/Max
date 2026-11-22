@@ -51,9 +51,7 @@ def fake_transport(
                         "repo": {"full_name": state.get("head_repo", REPO)},
                         "sha": state.get("head", HEAD),
                     },
-                    "base": {
-                        "repo": {"full_name": REPO, "default_branch": "max"}
-                    },
+                    "base": {"repo": {"full_name": REPO, "default_branch": "max"}},
                 },
             )
         if request.url.path.endswith("/workflows/max-pr-sandbox.yml"):
@@ -106,9 +104,7 @@ def test_dispatch_pins_sha_and_never_automatically_merges() -> None:
 def test_changed_sha_stops_dispatch_and_consumes_no_runner_minutes() -> None:
     state: dict[str, Any] = {}
     requested: list[tuple[str, str]] = []
-    sandbox = GitHubPRSandbox(
-        connected_github(), transport=fake_transport(state, requested)
-    )
+    sandbox = GitHubPRSandbox(connected_github(), transport=fake_transport(state, requested))
     preview = sandbox.preview(REPO, 42)
     state["head"] = CHANGED
     with pytest.raises(SandboxError, match="sandbox_pr_changed_retry"):
@@ -119,9 +115,7 @@ def test_changed_sha_stops_dispatch_and_consumes_no_runner_minutes() -> None:
 def test_fork_or_closed_pr_and_unauthorized_owner_denied() -> None:
     state: dict[str, Any] = {"head_repo": "attacker/Max"}
     requested: list[tuple[str, str]] = []
-    sandbox = GitHubPRSandbox(
-        connected_github(), transport=fake_transport(state, requested)
-    )
+    sandbox = GitHubPRSandbox(connected_github(), transport=fake_transport(state, requested))
     with pytest.raises(SandboxError, match="sandbox_only_open_same_repo_prs"):
         sandbox.preview(REPO, 42)
     with pytest.raises(SandboxError, match="sandbox_repo_owner_not_authorized"):
@@ -157,8 +151,9 @@ def test_web_ask_requires_specific_owner_approval() -> None:
 
         def dispatch(self, target: SandboxTarget) -> SandboxRun:
             self.calls += 1
-            return SandboxRun(REPO, 42, HEAD, 93744,
-                              "https://github.com/Flanxiyum001/Max/actions/runs/93744")
+            return SandboxRun(
+                REPO, 42, HEAD, 93744, "https://github.com/Flanxiyum001/Max/actions/runs/93744"
+            )
 
         def status(self, run: SandboxRun) -> dict[str, str]:
             return {"state": "completed", "conclusion": "success"}
@@ -210,10 +205,14 @@ def test_web_denied_approval_does_not_dispatch() -> None:
             raise AssertionError("must not dispatch")
 
     sandbox = DeniedSandbox()
-    client = TestClient(create_app(
-        ENV, github_connector=github, sandbox_runner=sandbox,  # type: ignore[arg-type]
-        session_factory=lambda: None,
-    ))
+    client = TestClient(
+        create_app(
+            ENV,
+            github_connector=github,
+            sandbox_runner=sandbox,  # type: ignore[arg-type]
+            session_factory=lambda: None,
+        )
+    )
     client.post("/api/login", json={"passcode": ENV["MAX_WEB_PASSCODE"]})
     job = client.post("/api/ask", json={"text": "audit PR 42"}).json()["job"]
     assert client.post(f"/api/job/{job}/approve", json={"allow": False}).status_code == 200
@@ -227,7 +226,9 @@ def test_web_denied_approval_does_not_dispatch() -> None:
 
 
 def test_workflow_is_non_privileged_and_does_not_auto_merge() -> None:
-    text = (Path(__file__).resolve().parents[1] / ".github/workflows/max-pr-sandbox.yml").read_text()
+    text = (
+        Path(__file__).resolve().parents[1] / ".github/workflows/max-pr-sandbox.yml"
+    ).read_text()
     assert "workflow_dispatch" in text
     assert "contents: read" in text
     assert "pull-requests: read" in text
