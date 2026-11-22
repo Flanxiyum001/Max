@@ -122,7 +122,10 @@ def _reviewable(observation: ObservedTool) -> _RemoteTool | None:
         for name, descriptor in props.items():
             if not isinstance(descriptor, dict):
                 return None
-            param_type = _SCALAR_TYPES.get(descriptor.get("type"))
+            kind = descriptor.get("type")
+            if not isinstance(kind, str):
+                return None
+            param_type = _SCALAR_TYPES.get(kind)
             if param_type is None:
                 return None
             params.append(
