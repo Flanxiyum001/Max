@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -186,3 +187,56 @@ def test_encrypted_single_vault_persists_without_provider_secrets_in_environment
     assert different.load("railway") is None
     first.delete("railway")
     assert first.load("railway") is None
+
+
+def test_oauth_resource_discovery_and_dynamic_client_registration() -> None:
+    """A provider supporting DCR needs NO per-app client ID or secret in Render."""
+    requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(str(request.url))
+        if request.url.path == "/.well-known/oauth-protected-resource/mcp":
+            return httpx.Response(200, json={
+                "resource": "https://mcp.cloudflare.com/mcp",
+                "authorization_servers": ["https://accounts.cloudflare.com"],
+            })
+        if request.url.path == "/.well-known/oauth-authorization-server":
+            return httpx.Response(200, json={
+                "issuer": "https://accounts.cloudflare.com",
+                "authorization_endpoint": "https://accounts.cloudflare.com/oauth/authorize",
+                "token_endpoint": "https://accounts.cloudflare.com/oauth/token",
+                "registration_endpoint": "https://accounts.cloudflare.com/oauth/register",
+            })
+        if request.url.path == "/oauth/register":
+            assert request.method == "POST"
+            registration = json.loads(request.content)
+            assert registration["redirect_uris"] == [
+                "https://max-test.onrender.com/api/connect/mcp/callback"
+            ]
+            assert registration["token_endpoint_auth_method"] == "none"
+            return httpx.Response(201, json={
+                "client_id": "dcr-issued-max-public-client",
+                "token_endpoint_auth_method": "none",
+            })
+        return httpx.Response(404)
+
+    hub = WebMCPHub(BASE, vault=MemoryVault(), oauth_transport=httpx.MockTransport(handler))
+    url = hub.start("cloudflare")
+    assert url.startswith("https://accounts.cloudflare.com/oauth/authorize?")
+    args = parse_qs(urlsplit(url).query)
+    assert args["client_id"] == ["dcr-issued-max-public-client"]
+    assert args["code_challenge_method"] == ["S256"]
+    assert len(requests) == 3
+
+
+def test_provider_metadata_cannot_redirect_oauth_to_an_untrusted_domain() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/.well-known/oauth-protected-resource/mcp":
+            return httpx.Response(200, json={
+                "authorization_servers": ["https://evil.example.invalid"],
+            })
+        return httpx.Response(404)
+
+    hub = WebMCPHub(BASE, vault=MemoryVault(), oauth_transport=httpx.MockTransport(handler))
+    with pytest.raises(MCPHubError, match="mcp_oauth_issuer_not_trusted"):
+        hub.start("cloudflare")
