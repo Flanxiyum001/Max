@@ -4,6 +4,7 @@ const $ = (id) => document.getElementById(id);
 const canvas = $("orb"), ctx = canvas.getContext("2d");
 const answerEl = $("answer"), input = $("input"), hint = $("hint");
 const loginForm = $("login"), passcode = $("passcode"), choices = $("choices");
+const githubAuth = $("github-auth");
 
 let state = "idle";            // idle | thinking | speaking | listening | error
 let energy = 0, t = 0;
@@ -149,6 +150,7 @@ const DETAILS = {
 // ---------------------------------------------------------------- login
 function showLogin() {
   authed = false; loginForm.classList.remove("hidden"); input.classList.add("hidden");
+  githubAuth.classList.add("hidden");
   hint.textContent = "enter passcode"; passcode.focus();
 }
 loginForm.addEventListener("submit", async (e) => {
@@ -168,12 +170,24 @@ async function boot() {
   hint.textContent = "type to talk · space or tap the orb to speak";
   if (!s.model_ready) { setState("error", 3000); show(ERRORS.model_not_configured); }
   else show("Hello. I'm here.", 4000);
+  const outcome = new URLSearchParams(location.search).get("github");
+  if (outcome === "connected") show(
+    "GitHub authorized. MAX discovered available MCP tools. Each tool call still needs your approval.",
+    11000
+  );
+  if (outcome === "failed") show(
+    "GitHub authorization returned, but MCP discovery failed. Ask MAX to connect again.",
+    10000
+  );
+  if (outcome === "denied") show("GitHub authorization cancelled.", 6000);
+  if (outcome) history.replaceState({}, "", "/");
   saveWake();
 }
 
 // ---------------------------------------------------------------- conversation
 async function ask(text, spoken) {
   if (busy || !text.trim()) return;
+  githubAuth.classList.add("hidden");
   busy = true; setState("thinking"); show("");
   try {
     const { job } = await (await api("/api/ask", { text, voice: spoken })).json();
@@ -190,6 +204,10 @@ async function ask(text, spoken) {
       }
       busy = false; pendingJob = null;
       if (j.status === "done") {
+        if (j.connect?.action === "authorize") {
+          githubAuth.classList.remove("hidden");
+          stopWake();
+        }
         setState("speaking"); show(j.answer);
         if (spoken) { followUp = true; await say(j.answer); } else setState("speaking", 2500);
         if (!followUp) resumeWake();
@@ -216,6 +234,20 @@ async function answerApproval(allow) {
   setState("thinking"); show(allow ? "⋯ allowed" : "⋯ denied", 0);
   try { await api(`/api/job/${pendingJob}/approve`, { allow }); } catch {}
 }
+githubAuth.addEventListener("click", async () => {
+  githubAuth.disabled = true;
+  try {
+    const { url } = await (await api("/api/connect/github/start", {})).json();
+    const destination = new URL(url);
+    if (destination.origin !== "https://github.com") throw new Error("invalid_github_url");
+    window.location.assign(destination.href);
+  } catch (err) {
+    githubAuth.disabled = false;
+    show(err.message === "github_oauth_not_configured"
+      ? "MAX's GitHub OAuth app has not been configured on this server."
+      : "GitHub authorization couldn't start. Try again.", 6500);
+  }
+});
 $("allow").onclick = () => answerApproval(true);
 $("deny").onclick = () => answerApproval(false);
 
