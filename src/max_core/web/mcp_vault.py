@@ -19,7 +19,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import Column, MetaData, String, Table, create_engine, delete, select
 from sqlalchemy.engine import Engine
 
-_ALLOWED = frozenset({"github", "cloudflare", "railway", "notion", "linear", "sentry"})
+_ALLOWED = frozenset({"github", "cloudflare", "railway", "notion", "linear", "sentry", "figma"})
 _METADATA = MetaData()
 _CREDENTIALS = Table(
     "max_mcp_oauth_connections",
