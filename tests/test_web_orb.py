@@ -346,3 +346,52 @@ def test_synthesize_api_request_shape() -> None:
         httpx.AsyncClient = real  # type: ignore[misc]
     assert seen == {"model": "tts-1", "voice": "nova", "input": "hi", "response_format": "mp3",
                     "auth": "Bearer k"}  # fmt: skip
+
+
+# --- Piper voice ------------------------------------------------------------------
+
+
+class FakePiper:
+    ready = True
+
+    def synthesize(self, text: str) -> bytes:
+        return b"RIFF" + text.encode()
+
+
+def test_piper_is_first_choice_and_served_as_wav() -> None:
+    app = create_app(BACKUP_ENV, session_factory=FakeSession, tts=broken_tts, piper=FakePiper())
+    client = TestClient(app)
+    login(client)
+    res = client.post("/api/speak", json={"text": "Hi"})
+    assert res.status_code == 200 and res.content == b"RIFFHi"
+    assert res.headers["content-type"] == "audio/wav"
+
+
+def test_piper_not_ready_falls_back_to_neural_voice(web) -> None:  # type: ignore[no-untyped-def]
+    class Loading(FakePiper):
+        ready = False
+
+    app = create_app(
+        {"MAX_WEB_PASSCODE": PASS, "MAX_WEB_INSECURE_COOKIE": "yes"},
+        session_factory=FakeSession, tts=fake_tts, piper=Loading(),
+    )  # fmt: skip
+    client = TestClient(app)
+    login(client)
+    res = client.post("/api/speak", json={"text": "Hi"})
+    assert res.status_code == 200 and res.headers["content-type"] == "audio/mpeg"
+
+
+def test_piper_voice_urls_and_validation() -> None:
+    from max_core.web.piper_voice import PiperSpeaker, voice_urls
+
+    model, config = voice_urls("en_US-hfc_female-medium")
+    assert model == (
+        "https://huggingface.co/rhasspy/piper-voices/resolve/main/"
+        "en/en_US/hfc_female/medium/en_US-hfc_female-medium.onnx"
+    )
+    assert config == model + ".json"
+    with pytest.raises(ValueError):
+        voice_urls("../../etc/passwd")
+    off = PiperSpeaker({"MAX_PIPER": "off"}, Path("/nonexistent"))
+    off.start()
+    assert not off.wait(1) and not off.ready

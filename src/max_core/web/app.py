@@ -10,6 +10,7 @@ on the web server.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import logging
@@ -209,6 +210,7 @@ def create_app(
     tts: Any = None,
     transcriber: Any = None,
     tts_backup: Any = None,
+    piper: Any = None,
 ) -> FastAPI:
     env = dict(os.environ if env is None else env)
     passcode = env.get("MAX_WEB_PASSCODE", "")
@@ -442,10 +444,16 @@ def create_app(
         if not tts_limit.allow(_client_ip(request)):
             raise HTTPException(429, "slow_down")
         audio = b""
-        try:
-            audio = await speak(body.text, voice, rate, pitch)
-        except Exception as exc:
-            log.warning("neural voice failed: %s", type(exc).__name__)
+        if piper is not None and piper.ready:
+            try:
+                audio = await asyncio.to_thread(piper.synthesize, body.text)
+            except Exception as exc:
+                log.warning("piper voice failed: %s", type(exc).__name__)
+        if not audio:
+            try:
+                audio = await speak(body.text, voice, rate, pitch)
+            except Exception as exc:
+                log.warning("neural voice failed: %s", type(exc).__name__)
         if not audio and backup_cfg is not None:
             try:
                 audio = await backup(body.text, backup_cfg)
@@ -454,7 +462,8 @@ def create_app(
         if not audio:
             # The browser then falls back to its own built-in voice.
             raise HTTPException(503, "tts_unavailable")
-        return Response(audio, media_type="audio/mpeg")
+        kind = "audio/wav" if audio[:4] == b"RIFF" else "audio/mpeg"
+        return Response(audio, media_type=kind)
 
     return app
 
@@ -479,11 +488,16 @@ def main() -> int:
     import uvicorn
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(name)s: %(message)s")
+    from max_core.web.piper_voice import PiperSpeaker
+
+    cache = Path(os.environ.get("MAX_DATA_DIR", "/tmp/max-data")) / "voices"  # noqa: S108
+    speaker = PiperSpeaker(dict(os.environ), cache)
     try:
-        app = create_app()
+        app = create_app(piper=speaker)
     except RuntimeError as exc:
         print(f"MAX web: {exc}")
         return 2
+    speaker.start()
     uvicorn.run(
         app,
         host=os.environ.get("HOST", "0.0.0.0"),  # noqa: S104 - hosted service
