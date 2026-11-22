@@ -230,6 +230,7 @@ class WebMCPHub:
         ) as client:
             resource_urls = [
                 _metadata_url(provider.endpoint, "oauth-protected-resource"),
+                provider.endpoint.rstrip("/") + "/.well-known/oauth-protected-resource",
                 urlunsplit(
                     (
                         urlsplit(provider.endpoint).scheme,
@@ -427,7 +428,14 @@ class WebMCPHub:
             not isinstance(token, str)
             or not 12 <= len(token) <= 8192
             or any(ord(c) < 33 or ord(c) > 126 for c in token)
-            or (refresh is not None and not isinstance(refresh, str))
+            or (
+                refresh is not None
+                and (
+                    not isinstance(refresh, str)
+                    or len(refresh) > 8192
+                    or any(ord(c) < 33 or ord(c) > 126 for c in refresh)
+                )
+            )
         ):
             raise MCPHubError("mcp_oauth_token_invalid")
         deadline = None
