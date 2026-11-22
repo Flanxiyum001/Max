@@ -57,6 +57,7 @@ CATALOG: dict[str, MCPProvider] = {
     "notion": MCPProvider("Notion", "https://mcp.notion.com/mcp", ("notion.com", "makenotion.com")),
     "linear": MCPProvider("Linear", "https://mcp.linear.app/mcp", ("linear.app",)),
     "sentry": MCPProvider("Sentry", "https://mcp.sentry.dev/mcp", ("sentry.dev", "sentry.io")),
+    "figma": MCPProvider("Figma", "https://mcp.figma.com/mcp", ("figma.com",)),
 }
 _SERVICE = re.compile(r"\b(github|cloudflare|railway|notion|linear|sentry)\b", re.I)
 _CONNECT = re.compile(r"\b(connect|link|integrate|set\s*up|setup|sign\s*in|log\s*in)\b", re.I)
