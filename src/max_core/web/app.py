@@ -483,13 +483,10 @@ def create_app(
                 target = sandbox.preview(repository, pr_number)
             except SandboxError as error:
                 job.answer = {
-                    "sandbox_not_installed_or_pr_not_found":
-                        "This repository needs MAX's sandbox workflow installed on its "
-                        "default branch, or that PR does not exist. I haven't run anything.",
-                    "sandbox_repo_owner_not_authorized":
-                        "I only run sandbox jobs in repositories owned by the connected account.",
-                    "sandbox_only_open_same_repo_prs":
-                        "This sandbox currently supports open PRs from branches in the same repository.",
+                    "sandbox_not_installed_or_pr_not_found": "This repository needs MAX's sandbox workflow installed on its "
+                    "default branch, or that PR does not exist. I haven't run anything.",
+                    "sandbox_repo_owner_not_authorized": "I only run sandbox jobs in repositories owned by the connected account.",
+                    "sandbox_only_open_same_repo_prs": "This sandbox currently supports open PRs from branches in the same repository.",
                 }.get(error.args[0], "I couldn't prepare a safe sandbox for that PR.")
                 jobs[job.id] = job
                 return {"job": job.id}
@@ -521,7 +518,11 @@ def create_app(
                         f"at commit {run.head_sha[:12]}. "
                         "The isolated runner will validate that exact commit. "
                         "This is NOT a merge approval. "
-                        + (f"Run: {run.run_url}" if run.run_url else "Check GitHub Actions for the run.")
+                        + (
+                            f"Run: {run.run_url}"
+                            if run.run_url
+                            else "Check GitHub Actions for the run."
+                        )
                     )
                     job.status = "done"
                 except SandboxError as error:
