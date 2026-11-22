@@ -252,3 +252,61 @@ def test_provider_metadata_cannot_redirect_oauth_to_an_untrusted_domain() -> Non
     hub = WebMCPHub(BASE, vault=MemoryVault(), oauth_transport=httpx.MockTransport(handler))
     with pytest.raises(MCPHubError, match="mcp_oauth_issuer_not_trusted"):
         hub.start("cloudflare")
+
+
+# --- API-key services (Render) and the orb-only UI ------------------------------------
+
+
+def _key_hub(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> WebMCPHub:
+    seen: list[MCPConnection] = []
+
+    async def discovery(connection: MCPConnection) -> tuple[ObservedTool, ...]:
+        seen.append(connection)
+        return (_observed("render", "list_services"),)
+
+    monkeypatch.setattr("max_core.web.mcp_hub.discover_tools", discovery)
+    hub = WebMCPHub(BASE, vault=MemoryVault())  # type: ignore[arg-type]
+    hub.seen = seen  # type: ignore[attr-defined]
+    return hub
+
+
+def test_render_connects_with_api_key_not_oauth(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    hub = _key_hub(monkeypatch, tmp_path)
+    assert connection_intent("MAX, connect to Render") == ("connect", "render")
+    with pytest.raises(MCPHubError, match="mcp_needs_api_key"):
+        hub.start("render")
+    with pytest.raises(MCPHubError, match="mcp_api_key_invalid"):
+        hub.connect_with_key("render", "not-a-render-key")
+    assert hub.connect_with_key("render", "rnd_" + "A" * 24) == 1
+    assert hub.seen[0].endpoint == "https://mcp.render.com/mcp"  # type: ignore[attr-defined]
+    assert hub.status()["services"]["render"]["connected"]
+    tools = {t.name: t for t in hub.tools_for_session()}
+    assert tools["mcp.render.list_services"].risk == ToolRisk.EFFECTFUL
+
+
+def test_voice_connect_render_asks_for_key_and_route_stores_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    hub = _key_hub(monkeypatch, tmp_path)
+    client = TestClient(create_app(BASE, mcp_hub=hub))
+    assert client.post("/api/login", json={"passcode": BASE["MAX_WEB_PASSCODE"]}).status_code == 200
+    job = client.post("/api/ask", json={"text": "MAX connect to Render"}).json()["job"]
+    data = client.get(f"/api/job/{job}").json()
+    assert data["connect"] == {
+        "service": "render", "action": "api_key",
+        "url": "https://dashboard.render.com/u/settings#api-keys",
+    }  # fmt: skip
+    assert client.post("/api/connect/mcp/render/key", json={"key": "bad key!"}).status_code == 400
+    ok = client.post("/api/connect/mcp/render/key", json={"key": "rnd_" + "b" * 30})
+    assert ok.json() == {"ok": True, "tools": 1}
+    job = client.post("/api/ask", json={"text": "which apps are connected?"}).json()["job"]
+    answer = client.get(f"/api/job/{job}").json()["answer"]
+    assert answer.startswith("Connected: Render.") and "Cloudflare" in answer
+
+
+def test_key_route_requires_login(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    client = TestClient(create_app(BASE, mcp_hub=_key_hub(monkeypatch, tmp_path)))
+    res = client.post("/api/connect/mcp/render/key", json={"key": "rnd_" + "b" * 30})
+    assert res.status_code == 401
