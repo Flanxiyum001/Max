@@ -111,21 +111,17 @@ def _reviewed_schema(observed: ObservedTool, policy: ReviewedToolPolicy) -> dict
         raise MCPPolicyError("schema_not_reviewed") from None
 
 
-def _arguments_hash(
-    proposal: ToolProposal, policy: ReviewedToolPolicy, schema: dict[str, Any]
-) -> str:
+def _checked_scalar_arguments(
+    arguments: dict[str, Any], policy: ReviewedToolPolicy, schema: dict[str, Any]
+) -> dict[str, Any]:
     if (
-        not isinstance(proposal, ToolProposal)
-        or not isinstance(proposal.call_id, str)
-        or _NAME.fullmatch(proposal.call_id) is None
-        or proposal.name != policy.qualified_name
-        or not isinstance(proposal.arguments, dict)
-        or not set(proposal.arguments) <= policy.allowed_arguments
-        or not set(schema.get("required", [])) <= proposal.arguments.keys()
+        not isinstance(arguments, dict)
+        or not set(arguments) <= policy.allowed_arguments
+        or not set(schema.get("required", [])) <= arguments.keys()
     ):
         raise MCPPolicyError("unreviewed_arguments")
     properties = schema["properties"]
-    for key, value in proposal.arguments.items():
+    for key, value in arguments.items():
         descriptor = properties.get(key)
         if not isinstance(descriptor, dict):
             raise MCPPolicyError("unreviewed_arguments")
@@ -148,15 +144,44 @@ def _arguments_hash(
             choices = descriptor["enum"]
             if not isinstance(choices, list) or value not in choices:
                 raise MCPPolicyError("unreviewed_arguments")
+    return dict(arguments)
+
+
+def _canonical_arguments_bytes(arguments: dict[str, Any]) -> bytes:
     try:
         canonical = json.dumps(
-            proposal.arguments, sort_keys=True, separators=(",", ":"), allow_nan=False
+            arguments, sort_keys=True, separators=(",", ":"), allow_nan=False
         ).encode("utf-8")
     except (TypeError, ValueError, OverflowError, RecursionError):
         raise MCPPolicyError("unreviewed_arguments") from None
     if len(canonical) > 8192:
         raise MCPPolicyError("unreviewed_arguments")
-    return hashlib.sha256(canonical).hexdigest()
+    return canonical
+
+
+def validated_arguments(
+    observation: ObservedTool, policy: ReviewedToolPolicy, arguments: dict[str, Any]
+) -> dict[str, Any]:
+    """Conformance check against the reviewed snapshot; used immediately before dispatch."""
+    if not isinstance(arguments, dict):
+        raise MCPPolicyError("unreviewed_arguments")
+    schema = _reviewed_schema(observation, policy)
+    return _checked_scalar_arguments(arguments, policy, schema)
+
+
+def _arguments_hash(
+    proposal: ToolProposal, policy: ReviewedToolPolicy, schema: dict[str, Any]
+) -> str:
+    if (
+        not isinstance(proposal, ToolProposal)
+        or not isinstance(proposal.call_id, str)
+        or _NAME.fullmatch(proposal.call_id) is None
+        or proposal.name != policy.qualified_name
+        or not isinstance(proposal.arguments, dict)
+    ):
+        raise MCPPolicyError("unreviewed_arguments")
+    checked = _checked_scalar_arguments(proposal.arguments, policy, schema)
+    return hashlib.sha256(_canonical_arguments_bytes(checked)).hexdigest()
 
 
 def review_gateway_proposals(
