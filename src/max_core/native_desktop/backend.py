@@ -759,20 +759,35 @@ class NativeDesktopCore:
 
     def mcp_add_connection(self, ident: str, endpoint: str, token_env: str = "") -> None:
         """Owner-initiated configuration; never called from a model tool."""
+        from max_core.mcp_desktop import MCPSettingsError
+
         with self.call_guard():
-            self._mcp_manager.add(ident, endpoint, token_env)
+            try:
+                self._mcp_manager.add(ident, endpoint, token_env)
+            except MCPSettingsError as error:
+                raise NativeDesktopError(error.code) from None
             self._invalidate_mcp()
 
     def mcp_discover(self, ident: str) -> int:
         """Explicit network discovery invalidates all prior pinned approvals."""
+        from max_core.mcp_desktop import MCPSettingsError
+
         with self.call_guard():
-            count = self._mcp_manager.discover(ident)
+            try:
+                count = self._mcp_manager.discover(ident)
+            except MCPSettingsError as error:
+                raise NativeDesktopError(error.code) from None
             self._invalidate_mcp()
             return count
 
     def mcp_review(self, ident: str, tool_name: str, *, enable: bool) -> None:
+        from max_core.mcp_desktop import MCPSettingsError
+
         with self.call_guard():
-            self._mcp_manager.review(ident, tool_name, enable=enable)
+            try:
+                self._mcp_manager.review(ident, tool_name, enable=enable)
+            except MCPSettingsError as error:
+                raise NativeDesktopError(error.code) from None
             self._invalidate_mcp()
 
     def _invalidate_mcp(self) -> None:
