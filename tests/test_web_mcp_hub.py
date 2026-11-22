@@ -1,0 +1,188 @@
+"""Generic MCP hub: provider catalog, OAuth DCR/CIMD, vault and revocation."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
+
+import pytest
+from fastapi.testclient import TestClient
+
+from max_core.mcp_discovery import MCPConnection, ObservedTool
+from max_core.tools import ToolError, ToolRisk
+from max_core.web.app import create_app
+from max_core.web.mcp_hub import (
+    CATALOG,
+    MCPHubError,
+    WebMCPHub,
+    _trusted_url,
+    connection_intent,
+    public_base_url,
+)
+from max_core.web.mcp_vault import MCPCredentialVault
+
+BASE = {
+    "MAX_WEB_PASSCODE": "long enough web passcode",
+    "MAX_WEB_INSECURE_COOKIE": "yes",
+    "RENDER_EXTERNAL_URL": "https://max-test.onrender.com",
+    "MAX_WEB_SECRET": "one_long_stable_application_secret_for_all_apps",
+}
+
+
+class MemoryVault:
+    available = False
+    durable = False
+
+    def load(self, service: str) -> None:
+        return None
+
+    def save(self, service: str, data: dict[str, object]) -> None:
+        return None
+
+    def delete(self, service: str) -> None:
+        return None
+
+
+def _observed(service: str, name: str = "search") -> ObservedTool:
+    schema = json.dumps(
+        {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return ObservedTool(service, name, schema, hashlib.sha256(schema.encode()).hexdigest(), True)
+
+
+def test_intent_routing_is_curated() -> None:
+    assert connection_intent("MAX connect to Cloudflare") == ("connect", "cloudflare")
+    assert connection_intent("Max, link Railway") == ("connect", "railway")
+    assert connection_intent("Disconnect Notion") == ("disconnect", "notion")
+    assert connection_intent("Summarize my Railway project") is None
+    assert connection_intent("connect to an unknown MCP URL") is None
+    assert "cloudflare" in CATALOG and "railway" in CATALOG
+
+
+def test_trusted_provider_endpoint_and_render_origin() -> None:
+    assert _trusted_url("https://accounts.cloudflare.com/oauth", CATALOG["cloudflare"])
+    assert not _trusted_url("https://cloudflare.com.evil.invalid/oauth", CATALOG["cloudflare"])
+    assert not _trusted_url("http://cloudflare.com/oauth", CATALOG["cloudflare"])
+    assert not _trusted_url("https://user:pass@cloudflare.com/oauth", CATALOG["cloudflare"])
+    assert not _trusted_url("https://127.0.0.1/oauth", CATALOG["cloudflare"])
+    assert public_base_url(BASE) == "https://max-test.onrender.com"
+    assert public_base_url({"RENDER_EXTERNAL_URL": "http://localhost:8000"}) is None
+
+
+def test_owner_can_start_any_catalog_service_without_provider_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hub = WebMCPHub(BASE, vault=MemoryVault())
+    assert hub.configured
+    assert hub.status()["services"]["cloudflare"]["connected"] is False
+
+    async def metadata(_provider: object) -> tuple[str, dict[str, object]]:
+        return "https://accounts.cloudflare.com", {
+            "authorization_endpoint": "https://accounts.cloudflare.com/oauth/authorize",
+            "token_endpoint": "https://accounts.cloudflare.com/oauth/token",
+            "client_id_metadata_document_supported": True,
+        }
+
+    async def register(
+        _service: str, _issuer: str, _meta: dict[str, object]
+    ) -> str:
+        return "https://max-test.onrender.com/.well-known/oauth-client-metadata/max.json"
+
+    monkeypatch.setattr(hub, "_oauth_metadata", metadata)
+    monkeypatch.setattr(hub, "_register_client", register)
+    url = hub.start("cloudflare")
+    params = parse_qs(urlsplit(url).query)
+    assert params["resource"] == ["https://mcp.cloudflare.com/mcp"]
+    assert params["code_challenge_method"] == ["S256"]
+    assert params["redirect_uri"] == [
+        "https://max-test.onrender.com/api/connect/mcp/callback"
+    ]
+    assert "MAX_CLOUDFLARE_TOKEN" not in str(params)
+    assert len(params["state"][0]) > 32
+    assert hub.client_metadata()["client_id"] == params["client_id"][0]
+
+
+def test_server_side_oauth_callback_discovers_and_revokes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hub = WebMCPHub(BASE, vault=MemoryVault())
+
+    async def metadata(_provider: object) -> tuple[str, dict[str, object]]:
+        return "https://railway.com", {
+            "authorization_endpoint": "https://railway.com/oauth/authorize",
+            "token_endpoint": "https://railway.com/oauth/token",
+            "client_id_metadata_document_supported": True,
+            "authorization_response_iss_parameter_supported": True,
+        }
+
+    async def register(*_args: object) -> str:
+        return "https://max-test.onrender.com/.well-known/oauth-client-metadata/max.json"
+
+    async def token(_provider: object, _endpoint: str, payload: dict[str, str]) -> dict[str, str]:
+        assert payload["resource"] == "https://mcp.railway.com"
+        return {
+            "access_token": "fake_secret_provider_token_12345",
+            "refresh_token": "fake_refresh_provider_token_12345",
+        }
+
+    async def discovery(connection: MCPConnection) -> tuple[ObservedTool, ...]:
+        assert connection.endpoint == "https://mcp.railway.com"
+        assert connection.bearer_token == "fake_secret_provider_token_12345"
+        return (_observed("railway"),)
+
+    monkeypatch.setattr(hub, "_oauth_metadata", metadata)
+    monkeypatch.setattr(hub, "_register_client", register)
+    monkeypatch.setattr(hub, "_token_request", token)
+    monkeypatch.setattr("max_core.web.mcp_hub.discover_tools", discovery)
+    state = parse_qs(urlsplit(hub.start("railway")).query)["state"][0]
+    with pytest.raises(MCPHubError, match="mcp_oauth_issuer_mismatch"):
+        hub.finish(state, "code", "https://evil.invalid")
+    state = parse_qs(urlsplit(hub.start("railway")).query)["state"][0]
+    assert hub.finish(state, "code", "https://railway.com") == "railway"
+    assert hub.status()["services"]["railway"]["connected"]
+    tools = hub.tools_for_session()
+    assert len(tools) == 1
+    assert tools[0].name == "mcp.railway.search"
+    assert tools[0].risk == ToolRisk.EFFECTFUL
+    hub.disconnect("railway")
+    assert hub.tools_for_session() == ()
+    with pytest.raises(ToolError, match="mcp_connection_revoked"):
+        tools[0].handler({"query": "secret"})
+
+
+def test_web_api_client_metadata_and_voice_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hub = WebMCPHub(BASE, vault=MemoryVault())
+    client = TestClient(create_app(BASE, mcp_hub=hub, session_factory=lambda: None))
+    assert client.get("/.well-known/oauth-client-metadata/max.json").status_code == 200
+    assert client.post("/api/connect/mcp/railway/start", json={}).status_code == 401
+    assert client.post("/api/login", json={"passcode": BASE["MAX_WEB_PASSCODE"]}).status_code == 200
+    job = client.post("/api/ask", json={"text": "MAX connect to Railway"}).json()["job"]
+    done = client.get(f"/api/job/{job}").json()
+    assert done["connect"] == {"service": "railway", "action": "authorize"}
+    assert "Railway" in done["answer"]
+    assert client.get("/api/state").json()["connections"]["services"]["railway"]["connected"] is False
+    assert client.post("/api/connect/mcp/not-made-up/disconnect", json={}).status_code == 404
+
+
+def test_encrypted_single_vault_persists_without_provider_secrets_in_environment(
+    tmp_path: Path,
+) -> None:
+    env = {**BASE, "MAX_DATA_DIR": str(tmp_path)}
+    first = MCPCredentialVault(env)
+    assert first.available
+    first.save("railway", {"token": "super-secret-railway-access-token"})
+    raw = (tmp_path / "mcp-vault.sqlite3").read_bytes()
+    assert b"super-secret-railway-access-token" not in raw
+    assert b"MAX_RAILWAY_API_KEY" not in raw
+    loaded = MCPCredentialVault(env).load("railway")
+    assert loaded == {"token": "super-secret-railway-access-token"}
+    different = MCPCredentialVault({**env, "MAX_WEB_SECRET": "different_application_secret_123456789"})
+    assert different.load("railway") is None
+    first.delete("railway")
+    assert first.load("railway") is None
