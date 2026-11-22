@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>MAX</title>
+<link rel="stylesheet" href="/static/orb.css">
+</head>
+<body>
+<canvas id="orb" aria-hidden="true"></canvas>
+
+<form id="login" class="hidden" autocomplete="off">
+  <input id="passcode" type="password" placeholder="passcode" aria-label="Passcode" autocomplete="current-password">
+</form>
+
+<div id="answer" role="status" aria-live="polite"></div>
+<div id="choices" class="hidden">
+  <button id="allow" type="button">Allow ⏎</button>
+  <button id="deny" type="button">Deny esc</button>
+</div>
+<input id="input" class="hidden" type="text" maxlength="4000" aria-label="Message to MAX">
+<div id="hint">type to talk · space or tap the orb to speak</div>
+<button id="wake" type="button">“Hey MAX”: off</button>
+
+<script src="/static/orb.js"></script>
+</body>
+</html>

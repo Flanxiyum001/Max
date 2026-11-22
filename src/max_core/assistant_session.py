@@ -62,6 +62,7 @@ class SessionOptions:
     cloud_personal_tools: bool
     enable_shell: bool
     enable_web: bool
+    host_tools: bool = True
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> SessionOptions:
@@ -96,6 +97,7 @@ class AssistantSession:
             enable_shell=options.enable_shell,
             enable_web=options.enable_web,
             http=tool_http,
+            host_tools=options.host_tools,
         )
         self.history: list[ChatMessage] = []
         self._make = request_factory(settings)
