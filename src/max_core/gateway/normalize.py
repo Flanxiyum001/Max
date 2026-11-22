@@ -62,6 +62,10 @@ def model_matches(expected: str, actual: object) -> bool:
         return False
     if actual == expected:
         return True
+    if expected == "auto" or expected.startswith("auto:"):
+        # Owner-configured router model (e.g. FreeLLMAPI "auto", "auto:fast"): the
+        # router picks the real model, so the reply names a different model id.
+        return True
     if _valid_snapshot_match(_SNAPSHOT_SUFFIX_RE.search(expected)):
         return False
     base = expected.removesuffix("-latest") if expected.endswith("-latest") else expected

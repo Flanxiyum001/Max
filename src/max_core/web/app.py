@@ -99,11 +99,69 @@ async def synthesize(text: str, voice: str, rate: str, pitch: str) -> bytes:
     return bytes(audio)
 
 
+@dataclass(frozen=True)
+class SttConfig:
+    url: str
+    api_key: str | None
+    model: str
+    language: str | None
+
+
+def stt_config(env: dict[str, str]) -> SttConfig | None:
+    """Speech-to-text via any OpenAI-compatible /v1/audio/transcriptions endpoint.
+
+    Defaults to the chat provider (e.g. FreeLLMAPI) and its key, so one key covers both.
+    """
+    if env.get("MAX_STT", "").lower() in {"off", "no", "0"}:
+        return None
+    url = env.get("MAX_STT_ENDPOINT", "").strip()
+    if not url:
+        chat = env.get("MAX_TRIAL_ENDPOINT", "").strip()
+        if not chat.endswith("/chat/completions"):
+            return None
+        url = chat[: -len("/chat/completions")] + "/audio/transcriptions"
+    if not url.startswith("https://") and not url.startswith("http://127.0.0.1"):
+        return None
+    return SttConfig(
+        url=url,
+        api_key=env.get("MAX_STT_API_KEY") or env.get("MAX_TRIAL_API_KEY") or None,
+        model=env.get("MAX_STT_MODEL", "whisper-large-v3"),
+        language=env.get("MAX_STT_LANGUAGE") or None,
+    )
+
+
+_STT_PROMPT = "MAX, the owner's personal assistant. Hey MAX."
+
+
+async def transcribe(audio: bytes, content_type: str, cfg: SttConfig) -> str:
+    import httpx
+
+    ext = {"audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "m4a", "audio/wav": "wav",
+           "audio/mpeg": "mp3"}.get(content_type.split(";")[0].strip(), "webm")  # fmt: skip
+    data = {"model": cfg.model, "response_format": "json", "temperature": "0",
+            "prompt": _STT_PROMPT}  # fmt: skip
+    if cfg.language:
+        data["language"] = cfg.language
+    headers = {"Authorization": f"Bearer {cfg.api_key}"} if cfg.api_key else {}
+    async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
+        response = await client.post(
+            cfg.url,
+            data=data,
+            files={"file": (f"speech.{ext}", audio, content_type.split(";")[0])},
+            headers=headers,
+        )
+    if response.status_code >= 400:
+        raise RuntimeError(f"stt_http_{response.status_code}")
+    text = response.json().get("text", "")
+    return text.strip() if isinstance(text, str) else ""
+
+
 def create_app(
     env: dict[str, str] | None = None,
     *,
     session_factory: Any = None,
     tts: Any = None,
+    transcriber: Any = None,
 ) -> FastAPI:
     env = dict(os.environ if env is None else env)
     passcode = env.get("MAX_WEB_PASSCODE", "")
@@ -115,9 +173,12 @@ def create_app(
     rate = env.get("MAX_WEB_VOICE_RATE", "+6%")
     pitch = env.get("MAX_WEB_VOICE_PITCH", "+2Hz")
     speak = tts or synthesize
+    stt = stt_config(env)
+    hear = transcriber or transcribe
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     login_limit = RateLimiter(8, 600)
+    stt_limit = RateLimiter(30, 60)
     ask_limit = RateLimiter(30, 60)
     tts_limit = RateLimiter(40, 60)
     jobs: dict[str, Job] = {}
@@ -214,6 +275,7 @@ def create_app(
             "model_ready": sess is not None,
             "error": state["error"],
             "tools": sorted(t.name for t in sess.registry) if sess is not None else [],
+            "stt_ready": stt is not None,
         }
 
     @app.post("/api/ask")
@@ -298,6 +360,27 @@ def create_app(
         sess = session()
         items = sess.due_reminders() if sess is not None else []
         return {"due": [item["text"] for item in items]}
+
+    @app.post("/api/transcribe")
+    async def transcribe_audio(request: Request) -> dict[str, str]:
+        require(request)
+        if stt is None:
+            raise HTTPException(503, "stt_not_configured")
+        if not stt_limit.allow(_client_ip(request)):
+            raise HTTPException(429, "slow_down")
+        content_type = request.headers.get("content-type", "")
+        if not content_type.startswith("audio/"):
+            raise HTTPException(415, "audio_only")
+        audio = await request.body()
+        if len(audio) > 10_000_000:
+            raise HTTPException(413, "audio_too_large")
+        if len(audio) < 200:
+            raise HTTPException(400, "audio_too_short")
+        try:
+            text = await hear(audio, content_type, stt)
+        except Exception:
+            raise HTTPException(502, "stt_unavailable") from None
+        return {"text": str(text).strip()[:4000]}
 
     @app.post("/api/speak")
     async def speak_text(body: SpeakBody, request: Request) -> Response:
