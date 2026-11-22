@@ -11,6 +11,29 @@ class ConfigurationError(ValueError):
     """An unsafe or incomplete startup configuration (never contains secret values)."""
 
 
+_HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
+_URLSAFE_ALPHABET = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
+
+
+def _is_generated_random_token(token: str) -> bool:
+    """Accept only secrets shaped like secrets.token_hex or secrets.token_urlsafe output."""
+    if len(token) < 32 or any(char.isspace() for char in token):
+        return False
+    if set(token) <= _HEX_DIGITS:
+        return (
+            len(token) % 2 == 0
+            and any(char.isdigit() for char in token)
+            and any(char.isalpha() for char in token)
+        )
+    return (
+        set(token) <= _URLSAFE_ALPHABET
+        and len(token) >= 43
+        and any(char.isupper() for char in token)
+        and any(char.islower() for char in token)
+        and any(char.isdigit() for char in token)
+    )
+
+
 @dataclass(frozen=True, slots=True, repr=False)
 class Settings:
     """Phase 1 bootstrap intentionally supports only a loopback listener."""
@@ -23,9 +46,10 @@ class Settings:
 
     def __post_init__(self) -> None:
         token = self.bearer_token
-        if len(token) < 32 or any(char.isspace() for char in token) or len(set(token)) < 12:
+        if not _is_generated_random_token(token):
             raise ConfigurationError(
-                "MAX_API_BEARER_TOKEN must be a strong random value of at least 32 characters"
+                "MAX_API_BEARER_TOKEN must be a locally generated strong random value such as "
+                "python -c 'import secrets; print(secrets.token_urlsafe(48))'"
             )
         if self.bind_host != "127.0.0.1":
             raise ConfigurationError("MAX_BIND_HOST must be 127.0.0.1 in this milestone")

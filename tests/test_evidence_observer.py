@@ -391,7 +391,8 @@ def test_cli_sensitive_values_not_exposed(
     store: TaskStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     task_id = _record(store)
-    monkeypatch.setenv("MAX_API_BEARER_TOKEN", "test-secret-" + "0123456789abcdef" * 3)
+    fixture_token = "0123456789abcdef" * 4
+    monkeypatch.setenv("MAX_API_BEARER_TOKEN", fixture_token)
     monkeypatch.setenv("MAX_DATABASE_URL", "postgresql+psycopg://SECRET_PASSWORD@127.0.0.1/test")
     monkeypatch.setattr(evidence_observer, "create_store", lambda url: store)
     monkeypatch.setattr(store, "ready", lambda: True)
@@ -400,7 +401,7 @@ def test_cli_sensitive_values_not_exposed(
     captured = capsys.readouterr()
     assert "supported" in captured.out
     assert "SECRET_PASSWORD" not in captured.out + captured.err
-    assert "test-secret-" not in captured.out + captured.err
+    assert fixture_token not in captured.out + captured.err
     assert _objective() not in captured.out + captured.err
 
 

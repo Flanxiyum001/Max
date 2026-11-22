@@ -64,3 +64,28 @@ def test_database_url_is_not_printed_in_settings_repr() -> None:
         bearer_token=TEST_TOKEN, database_url="postgresql+psycopg://example@localhost/test"
     )
     assert "postgresql+psycopg" not in repr(settings)
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "0123456789abcdef" * 4,
+        "3fA9zQ2mKd0wXyVb8nCe4rTg1uJpL5hS7dGnXwRt" + "0123456789abcdefghij",
+        "k8Wq2Nv5Rt7Zx3Mb9Cd1Ef4Gh6Jk0Lm2Pq5rSt8uVwx" + "Yz34",
+    ],
+)
+def test_generated_random_tokens_accepted(token: str) -> None:
+    settings = Settings(bearer_token=token)
+    assert settings.bearer_token == token
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "correct horse battery staple" + "0123456789abcdef0123456789",
+        "correct-horse-battery-staple-plus-more-padding",
+    ],
+)
+def test_passphrase_like_tokens_rejected(token: str) -> None:
+    with pytest.raises(ConfigurationError, match="MAX_API_BEARER_TOKEN"):
+        Settings(bearer_token=token)

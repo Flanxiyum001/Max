@@ -20,16 +20,17 @@ from typing import Any, TypeVar
 from uuid import UUID, uuid4
 
 from sqlalchemy import Engine, select
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from max_core.gateway.contracts import ToolProposal
 from max_core.models import ApprovalGrant, TrustAudit, utc_now
-from max_core.store import _is_expired, _locked
+from max_core.persistence import StoreError, _is_expired, _locked
 
 _ACTOR = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 _TOOL_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,99}$")
 _CALL_ID = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
-_AUDIT_REASON = re.compile(r"^[A-Za-z0-9._:-]{1,60}$")
+_AUDIT_REASON = re.compile(r"^[a-z0-9_]{1,60}$")
 _MAX_CANONICAL_ARGS_BYTES = 131_072
 _TOOL = "task.status"
 
@@ -291,22 +292,29 @@ class TrustService:
         return policy, canonical_args, digest
 
     def record_denial(self, context: ActorContext, action: str, reason: str) -> None:
+        """Best-effort audit; never masks the caller's original error."""
         if not isinstance(context, ActorContext):
             raise TrustError("invalid_actor_scope", 422)
         if action not in {"request", "execute"}:
             raise TrustError("invalid_proposal", 422)
         safe_reason = reason if _AUDIT_REASON.fullmatch(reason) else "policy_denied"
-        with self.sessions.begin() as session:
-            _locked(session, context.task_id, context.owner_id)
-            _audit(
-                session,
-                context.owner_id,
-                context.task_id,
-                None,
-                action,
-                "deny",
-                safe_reason,
-            )
+        try:
+            with self.sessions.begin() as session:
+                try:
+                    _locked(session, context.task_id, context.owner_id)
+                except StoreError:
+                    return
+                _audit(
+                    session,
+                    context.owner_id,
+                    context.task_id,
+                    None,
+                    action,
+                    "deny",
+                    safe_reason,
+                )
+        except SQLAlchemyError:
+            return
 
     def request(
         self, context: ActorContext, proposal: ToolProposal, ttl_seconds: int = 300
@@ -332,19 +340,39 @@ class TrustService:
             state="pending",
             expires_at=utc_now() + timedelta(seconds=ttl_seconds),
         )
-        with self.sessions.begin() as session:
-            _locked(session, context.task_id, context.owner_id)
-            session.add(approval)
-            _audit(
-                session,
-                context.owner_id,
-                context.task_id,
-                approval.id,
-                "request",
-                "pending",
-                "owner_approval_required",
-            )
-        return GrantView.from_record(approval)
+        for attempt in range(2):
+            try:
+                with self.sessions.begin() as session:
+                    _locked(session, context.task_id, context.owner_id)
+                    session.add(approval)
+                    _audit(
+                        session,
+                        context.owner_id,
+                        context.task_id,
+                        approval.id,
+                        "request",
+                        "pending",
+                        "owner_approval_required",
+                    )
+                return GrantView.from_record(approval)
+            except IntegrityError:
+                if attempt:
+                    raise TrustError("duplicate_proposal", 409) from None
+                with self.sessions.begin() as session:
+                    stale = session.scalars(
+                        select(ApprovalGrant).where(
+                            ApprovalGrant.owner_id == context.owner_id,
+                            ApprovalGrant.task_id == context.task_id,
+                            ApprovalGrant.proposal_id == proposal.call_id,
+                            ApprovalGrant.state == "pending",
+                            ApprovalGrant.expires_at <= utc_now(),
+                        )
+                    ).all()
+                    if not stale:
+                        raise TrustError("duplicate_proposal", 409) from None
+                    for grant in stale:
+                        grant.state = "expired"
+        raise TrustError("duplicate_proposal", 409)
 
     def list_pending(self, owner_id: str) -> list[GrantView]:
         if not isinstance(owner_id, str) or not _ACTOR.fullmatch(owner_id):
@@ -443,6 +471,11 @@ class TrustService:
         *,
         allow_reason: str | None = None,
     ) -> tuple[ToolPolicy, dict[str, Any], SafeTaskStatus]:
+        """Consume under row locks, grant row first, then the task row.
+
+        This is the only path that takes both locks; no other method holds a
+        task lock while acquiring a grant lock, so the ordering cannot cycle.
+        """
         if not isinstance(approval_id, str) or not 1 <= len(approval_id) <= 36:
             raise TrustError("approval_not_found", 404)
         try:
@@ -511,13 +544,7 @@ class TrustService:
     ) -> SafeTaskStatus:
         """Atomic consume and fixed read-only task.status, never arbitrary tool dispatch."""
         if not isinstance(proposal, ToolProposal) or proposal.name != _TOOL:
-            # Validate via registry or deny capability without consuming any grant.
             if isinstance(context, ActorContext):
-                try:
-                    self._validate_and_bind(context, proposal)
-                except TrustError as error:
-                    self.record_denial(context, "execute", error.code)
-                    raise
                 self.record_denial(context, "execute", "capability_denied")
             raise TrustError("capability_denied")
         _policy, _canonical_args, task_status = self._consume_grant(

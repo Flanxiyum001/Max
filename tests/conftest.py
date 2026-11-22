@@ -13,7 +13,7 @@ from max_core.models import Base
 from max_core.store import TaskStore
 
 # Public deterministic fixture, NOT a credential for any real environment.
-TEST_TOKEN = "test-token-" + "0123456789abcdef" * 3
+TEST_TOKEN = "0123456789abcdef" * 4
 
 
 @pytest.fixture
