@@ -196,17 +196,23 @@ def test_oauth_resource_discovery_and_dynamic_client_registration() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(str(request.url))
         if request.url.path == "/.well-known/oauth-protected-resource/mcp":
-            return httpx.Response(200, json={
-                "resource": "https://mcp.cloudflare.com/mcp",
-                "authorization_servers": ["https://accounts.cloudflare.com"],
-            })
+            return httpx.Response(
+                200,
+                json={
+                    "resource": "https://mcp.cloudflare.com/mcp",
+                    "authorization_servers": ["https://accounts.cloudflare.com"],
+                },
+            )
         if request.url.path == "/.well-known/oauth-authorization-server":
-            return httpx.Response(200, json={
-                "issuer": "https://accounts.cloudflare.com",
-                "authorization_endpoint": "https://accounts.cloudflare.com/oauth/authorize",
-                "token_endpoint": "https://accounts.cloudflare.com/oauth/token",
-                "registration_endpoint": "https://accounts.cloudflare.com/oauth/register",
-            })
+            return httpx.Response(
+                200,
+                json={
+                    "issuer": "https://accounts.cloudflare.com",
+                    "authorization_endpoint": "https://accounts.cloudflare.com/oauth/authorize",
+                    "token_endpoint": "https://accounts.cloudflare.com/oauth/token",
+                    "registration_endpoint": "https://accounts.cloudflare.com/oauth/register",
+                },
+            )
         if request.url.path == "/oauth/register":
             assert request.method == "POST"
             registration = json.loads(request.content)
@@ -214,10 +220,13 @@ def test_oauth_resource_discovery_and_dynamic_client_registration() -> None:
                 "https://max-test.onrender.com/api/connect/mcp/callback"
             ]
             assert registration["token_endpoint_auth_method"] == "none"
-            return httpx.Response(201, json={
-                "client_id": "dcr-issued-max-public-client",
-                "token_endpoint_auth_method": "none",
-            })
+            return httpx.Response(
+                201,
+                json={
+                    "client_id": "dcr-issued-max-public-client",
+                    "token_endpoint_auth_method": "none",
+                },
+            )
         return httpx.Response(404)
 
     hub = WebMCPHub(BASE, vault=MemoryVault(), oauth_transport=httpx.MockTransport(handler))
@@ -232,9 +241,12 @@ def test_oauth_resource_discovery_and_dynamic_client_registration() -> None:
 def test_provider_metadata_cannot_redirect_oauth_to_an_untrusted_domain() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/.well-known/oauth-protected-resource/mcp":
-            return httpx.Response(200, json={
-                "authorization_servers": ["https://evil.example.invalid"],
-            })
+            return httpx.Response(
+                200,
+                json={
+                    "authorization_servers": ["https://evil.example.invalid"],
+                },
+            )
         return httpx.Response(404)
 
     hub = WebMCPHub(BASE, vault=MemoryVault(), oauth_transport=httpx.MockTransport(handler))
