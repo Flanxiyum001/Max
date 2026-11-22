@@ -607,9 +607,7 @@ def _default_session(
         enable_web=options.enable_web,
         host_tools=False,
     )
-    return AssistantSession(
-        TrialSettings.from_env(env), options, github_connector=github_connector
-    )
+    return AssistantSession(TrialSettings.from_env(env), options, github_connector=github_connector)
 
 
 def main() -> int:
