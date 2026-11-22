@@ -1479,9 +1479,7 @@ class MaxWindow(QMainWindow):
                 return
             arguments_text = json.dumps(recorded[1], indent=2, ensure_ascii=True)
             if len(arguments_text) > 8_192:
-                self.notice.setText(
-                    "MCP arguments exceed the review limit. Deny and retry safely."
-                )
+                self.notice.setText("MCP arguments exceed the review limit. Deny and retry safely.")
                 return
             dialog = QMessageBox(self)
             dialog.setWindowTitle("MAX MCP: approve exact remote action?")
