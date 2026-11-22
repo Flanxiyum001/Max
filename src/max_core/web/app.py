@@ -14,6 +14,7 @@ import asyncio
 import dataclasses
 import hashlib
 import hmac
+import json
 import logging
 import os
 import secrets
@@ -454,10 +455,19 @@ def create_app(
 
         def approve(tool: str, arguments: dict[str, Any]) -> bool:
             job._event.clear()
-            job.approval = {
-                "tool": tool,
-                "arguments": {k: str(v)[:300] for k, v in arguments.items()},
-            }
+            # Remote operation approvals must show EXACT arguments. Never silently
+            # truncate the values the owner is asked to authorize.
+            if tool.startswith("mcp.github."):
+                try:
+                    encoded = json.dumps(arguments, sort_keys=True, ensure_ascii=True)
+                except (TypeError, ValueError):
+                    return False
+                if len(encoded) > 8192:
+                    return False
+                safe_arguments = dict(arguments)
+            else:
+                safe_arguments = {k: str(v)[:300] for k, v in arguments.items()}
+            job.approval = {"tool": tool, "arguments": safe_arguments}
             job.status = "approval"
             answered = job._event.wait(120)
             job.approval = None
