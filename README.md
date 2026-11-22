@@ -6,7 +6,7 @@ MAX is my project to build a personal, voice-capable AI assistant that stays und
 
 I'm designing MAX so that I own its orchestration, trust rules, memory model, tool allowlist, and interface contracts. External libraries and cloud model providers are replaceable adapters behind boundaries that I enforce in code.
 
-> **Current build status:** MAX now has a working **local desktop build** on Windows (`start-max.cmd` / `python -m max_core.native_desktop`) with an in-process FastAPI Core, automatic local SQLite persistence, live multi-turn OpenAI or Anthropic text chat, a bounded 10-tool allowlist gated by MAX Trust, interactive Trust Inbox approvals, and opt-in push-to-talk / text-to-speech voice controls. It remains a single-owner local build—not a hosted service, multi-user product, or unattended OS automation agent.
+> **Current build status:** MAX now has a working **local desktop build** on Windows (`start-max.cmd` / `python -m max_core.native_desktop`) with an in-process FastAPI Core, automatic local SQLite persistence, live multi-turn OpenAI or Anthropic text chat, a bounded local-tool allowlist gated by MAX Trust, plus opt-in reviewed HTTPS MCP tools, interactive Trust Inbox approvals, and opt-in push-to-talk / text-to-speech voice controls. It remains a single-owner local build—not a hosted service, multi-user product, or unattended OS automation agent.
 
 ---
 
@@ -110,6 +110,10 @@ The trusted local tool registry contains 10 typed allowlisted tools, validated a
 - In remote/cloud chat, `dev.health` and `dev.add` may be offered for deterministic safe computation; Trust-gated `task.create` and `notes.save` require an owner approval. **No private local read tool** may be offered automatically. A cloud model's undeclared request to read files is denied.
 - Any undeclared tool (for example `shell.run`) is denied before execution.
 
+### Remote MCP connections (`max_core.mcp_desktop`)
+- Add trusted HTTPS MCP servers via the System tab; explicitly discover schemas and enable individual tools. Never inherits ChatGPT connector tokens. Credential values remain outside the profile and the repository.
+- Every invocation is Trust-gated with a single-use approval and live schema-drift checks. See [configuration, GitHub setup and limitations](docs/MCP_DESKTOP.md).
+
 ### Voice Interaction (`max_core.voice`)
 - **Opt-in Push-to-Talk STT**: Bounded microphone capture (`QtMicrophoneRecorder` + `LocalActivationGate`) starts only on an explicit **Push to Talk** click—never automatically on startup. With an explicitly configured remote provider, **microphone audio is uploaded to the external speech provider** (OpenAI-compatible `/v1/audio/transcriptions`, `whisper-1`). A visible per-recording consent dialog is required before capture; the trusted voice controller blocks remote recording without that consent and clears consent after every turn or cancellation.
   - *Note:* Speech-to-text requires `OPENAI_API_KEY` even if you choose `MAX_LLM_PROVIDER=anthropic` for text chat.
@@ -138,7 +142,7 @@ The trusted local tool registry contains 10 typed allowlisted tools, validated a
 To keep verified capabilities distinct from future design goals, the following are **not** included in this build:
 
 - **No unrestricted OS/shell/browser control** or unattended background computer automation.
-- **No live MCP tool execution inside the desktop chat loop** (`max_core.mcp` contains discovery contracts only).
+- **No local stdio MCP subprocesses or interactive OAuth login** yet. Reviewed HTTPS MCP tools can be enabled individually and executed only after owner approval. See [desktop MCP setup](docs/MCP_DESKTOP.md).
 - **No always-on wake-word daemon, global OS-wide hotkeys, or gaming overlay**.
 - **No Arch Linux / Hyprland real-device verification** or **iPhone mobile web client** in this desktop build.
 - **No signed standalone `.exe` installer** (launch runs from `.venv` via `start-max.cmd`).

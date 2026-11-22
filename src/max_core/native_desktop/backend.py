@@ -51,9 +51,11 @@ if TYPE_CHECKING:
         ChatTurnResult,
         ProviderStatus,
         ToolExecutionSummary,
+        ToolExecutor,
     )
     from max_core.gateway.contracts import ToolDefinition, ToolProposal
     from max_core.local_tools import LocalToolExecutor, LocalToolRegistry
+    from max_core.mcp_execute import MCPToolExecutor
     from max_core.persona import ReplyMode
     from max_core.voice.controller import VoiceCapabilities, VoiceController
 
@@ -289,8 +291,13 @@ class NativeDesktopCore:
         self._chat_service: AssistantChatService | None = chat_service
         self._chat_service_injected = chat_service is not None
         self._tool_registry: LocalToolRegistry | None = None
-        self._tool_executor: LocalToolExecutor | None = tool_executor
+        self._tool_executor: ToolExecutor | None = tool_executor
         self._tool_executor_injected = tool_executor is not None
+        from max_core.mcp_desktop import MCPDesktopManager
+
+        self._mcp_manager = MCPDesktopManager()
+        self._mcp_executor: MCPToolExecutor | None = None
+        self._combined_executor: ToolExecutor | None = None
         self._voice_controller: VoiceController | None = voice_controller
         self._pending_direct_tools: dict[str, tuple[ToolProposal, str | None]] = {}
         self._approval_continuations: dict[str, ChatTurnResult] = {}
@@ -389,7 +396,7 @@ class NativeDesktopCore:
                 )
             return self._tool_registry
 
-    def _get_tool_executor(self) -> LocalToolExecutor | None:
+    def _get_tool_executor(self) -> ToolExecutor | None:
         with self._bridge_lock:
             if self._tool_executor is None and not self._tool_executor_injected:
                 if self._task_store is None:
@@ -403,7 +410,31 @@ class NativeDesktopCore:
                     config=self._effective_config(),
                     lifecycle_guard=self.call_guard,
                 )
-            return self._tool_executor
+            primary = self._tool_executor
+            if primary is None or self._tool_executor_injected:
+                return primary
+            if self._combined_executor is not None:
+                return self._combined_executor
+            # No network on startup or tool registration. Only approved snapshots
+            # can be advertised, and every execution still requires Trust approval.
+            from max_core.mcp_desktop import MCPSettingsError
+            from max_core.mcp_execute import CompositeToolExecutor, McpExecuteError, MCPToolExecutor
+
+            try:
+                connections, reviewed = self._mcp_manager.runtime()
+                if not reviewed or self._task_store is None:
+                    return primary
+                self._mcp_executor = MCPToolExecutor(
+                    task_store=self._task_store,
+                    connections=connections,
+                    reviewed=reviewed,
+                )
+                self._combined_executor = CompositeToolExecutor(primary, self._mcp_executor)
+                return self._combined_executor
+            except (MCPSettingsError, McpExecuteError, ValueError):
+                # Malformed or unauthenticated external configuration never
+                # takes the owner's existing local assistant offline.
+                return primary
 
     def _get_chat_service(self) -> AssistantChatService:
         with self._bridge_lock:
@@ -430,7 +461,7 @@ class NativeDesktopCore:
         return self._get_tool_registry()
 
     @property
-    def tool_executor(self) -> LocalToolExecutor | None:
+    def tool_executor(self) -> ToolExecutor | None:
         return self._get_tool_executor()
 
     @property
@@ -446,7 +477,7 @@ class NativeDesktopCore:
         *,
         transport: httpx.AsyncBaseTransport | None = None,
         chat_service: AssistantChatService | None = None,
-        tool_executor: LocalToolExecutor | None = None,
+        tool_executor: ToolExecutor | None = None,
     ) -> None:
         """Configure or replace chat transport, service, or tool executor after core creation."""
         with self._bridge_lock:
@@ -722,6 +753,48 @@ class NativeDesktopCore:
         configured = isinstance(cfg.api_key, str) and bool(cfg.api_key.strip())
         return ProviderStatus(configured=configured, provider=cfg.provider, model_id=cfg.model_id)
 
+    def mcp_connections(self) -> tuple[dict[str, Any], ...]:
+        """Read-only connection and tool review metadata for the desktop."""
+        return self._mcp_manager.connections()
+
+    def mcp_add_connection(self, ident: str, endpoint: str, token_env: str = "") -> None:
+        """Owner-initiated configuration; never called from a model tool."""
+        from max_core.mcp_desktop import MCPSettingsError
+
+        with self.call_guard():
+            try:
+                self._mcp_manager.add(ident, endpoint, token_env)
+            except MCPSettingsError as error:
+                raise NativeDesktopError(error.code) from None
+            self._invalidate_mcp()
+
+    def mcp_discover(self, ident: str) -> int:
+        """Explicit network discovery invalidates all prior pinned approvals."""
+        from max_core.mcp_desktop import MCPSettingsError
+
+        with self.call_guard():
+            try:
+                count = self._mcp_manager.discover(ident)
+            except MCPSettingsError as error:
+                raise NativeDesktopError(error.code) from None
+            self._invalidate_mcp()
+            return count
+
+    def mcp_review(self, ident: str, tool_name: str, *, enable: bool) -> None:
+        from max_core.mcp_desktop import MCPSettingsError
+
+        with self.call_guard():
+            try:
+                self._mcp_manager.review(ident, tool_name, enable=enable)
+            except MCPSettingsError as error:
+                raise NativeDesktopError(error.code) from None
+            self._invalidate_mcp()
+
+    def _invalidate_mcp(self) -> None:
+        with self._bridge_lock:
+            self._combined_executor = None
+            self._mcp_executor = None
+
     def send_chat_message(self, user_text: str) -> ChatTurnResult:
         """Send a user chat message through AssistantChatService with local tools."""
         with self.call_guard():
@@ -771,11 +844,28 @@ class NativeDesktopCore:
                     requires_approval=spec.requires_approval,
                 )
             )
+        executor = self._get_tool_executor()
+        if executor is not None:
+            for definition in executor.tool_definitions():
+                if definition.name.startswith("mcp."):
+                    descriptors.append(
+                        ToolDescriptor(
+                            name=definition.name,
+                            description=definition.description,
+                            risk_tier="r2_write",
+                            requires_approval=True,
+                        )
+                    )
         return tuple(descriptors)
 
     def tool_definitions(self) -> tuple[ToolDefinition, ...]:
-        """Return Gateway ToolDefinition contracts for registered local tools."""
-        return self._get_tool_registry().tool_definitions()
+        """Return Gateway ToolDefinition contracts for enabled tools."""
+        executor = self._get_tool_executor()
+        return (
+            tuple(executor.tool_definitions())
+            if executor is not None
+            else self._get_tool_registry().tool_definitions()
+        )
 
     def execute_tool(
         self,
@@ -811,7 +901,12 @@ class NativeDesktopCore:
                 name=name,
                 arguments=resolved_args,
             )
-            summary = executor.execute(proposal, approval_id=approval_id, task_id=task_id)
+            from max_core.local_tools import LocalToolExecutor
+
+            if isinstance(executor, LocalToolExecutor):
+                summary = executor.execute(proposal, approval_id=approval_id, task_id=task_id)
+            else:
+                summary = executor.execute(proposal, approval_id=approval_id)
             if summary.status == "awaiting_approval" and summary.approval_id:
                 with self._continuation_lock:
                     if len(self._pending_direct_tools) >= _MAX_CONTINUATION_CACHE:
@@ -900,9 +995,14 @@ class NativeDesktopCore:
                     proposal, pending_task_id = pending_direct
                     executor = self._get_tool_executor()
                     if executor is not None:
-                        summary = executor.execute(
-                            proposal, approval_id=approval_id, task_id=pending_task_id
-                        )
+                        from max_core.local_tools import LocalToolExecutor
+
+                        if isinstance(executor, LocalToolExecutor):
+                            summary = executor.execute(
+                                proposal, approval_id=approval_id, task_id=pending_task_id
+                            )
+                        else:
+                            summary = executor.execute(proposal, approval_id=approval_id)
                         self._store_direct_continuation(approval_id, summary)
 
             return result

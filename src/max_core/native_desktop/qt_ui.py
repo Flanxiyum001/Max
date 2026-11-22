@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -516,7 +517,7 @@ class MaxWindow(QMainWindow):
             core.configure_chat(
                 transport=resolved_transport,
                 chat_service=self._chat_service,
-                tool_executor=self._tool_executor,
+                tool_executor=self._tool_executor if tool_executor is not None else None,
             )
 
         self._orb_reducer = OrbReducer(device_id="desktop")
@@ -552,6 +553,9 @@ class MaxWindow(QMainWindow):
         self._quiet = False
         self._in_flight_chats = 0
         self._pending_approval_count = 0
+        # Pending MCP arguments are kept in memory for exact-action approval.
+        # The Trust journal intentionally does NOT persist sensitive arguments.
+        self._pending_mcp_requests: dict[str, tuple[str, dict[str, object]]] = {}
         self._task_ids: list[str] = []
         self._history: list[int] = [0]
         self._history_index = 0
@@ -967,16 +971,147 @@ class MaxWindow(QMainWindow):
             ("voice", "◇  Voice (Push-to-Talk & TTS)  —  checking…"),
             (
                 "unimplemented_os",
-                "◇  Unrestricted shell, MCP execution & OS hotkeys  —  not enabled",
+                "◇  Unrestricted shell and OS hotkeys  —  not enabled",
             ),
         ):
             lbl = _label(initial, "subtle")
             available.addWidget(lbl)
             self.capability_labels[key] = lbl
         layout.addWidget(capabilities)
+
+        panel, inside = _panel()
+        inside.addWidget(_label("MCP CONNECTIONS  /  OWNER REVIEW", "eyebrow"))
+        inside.addWidget(
+            _label(
+                "HTTPS servers only. Credentials are read from environment variables; "
+                "discovery never enables a tool. Every approved tool call still needs "
+                "one explicit Trust Inbox approval.",
+                "subtle",
+            )
+        )
+        self.mcp_list = QListWidget()
+        self.mcp_list.setMinimumHeight(160)
+        inside.addWidget(self.mcp_list)
+        actions = QHBoxLayout()
+        for title, handler in (
+            ("Add server", self.mcp_add_server),
+            ("Discover", self.mcp_discover_selected),
+            ("Enable tool", lambda: self.mcp_review_selected(True)),
+            ("Disable tool", lambda: self.mcp_review_selected(False)),
+        ):
+            button = _button(title, "secondary")
+            button.clicked.connect(handler)
+            actions.addWidget(button)
+        inside.addLayout(actions)
+        layout.addWidget(panel)
         layout.addStretch(1)
         self._update_capability_labels()
+        self._refresh_mcp_list()
         return page
+
+    def _refresh_mcp_list(self) -> None:
+        if not hasattr(self, "mcp_list"):
+            return
+        self.mcp_list.clear()
+        try:
+            connections = self.core.mcp_connections()
+        except Exception:
+            self.mcp_list.addItem("MCP configuration unavailable; check mcp-servers.json.")
+            return
+        if not connections:
+            self.mcp_list.addItem("No MCP servers configured. Add a trusted HTTPS endpoint.")
+        for connection in connections:
+            ident = connection["id"]
+            authenticated = connection["authenticated"]
+            label = "credential ready" if authenticated else "missing environment credential"
+            header = QListWidgetItem(f"{ident}  •  {label}")
+            header.setData(Qt.ItemDataRole.UserRole, (ident, None))
+            self.mcp_list.addItem(header)
+            for tool in connection["tools"]:
+                enabled = "ENABLED" if tool["enabled"] else "NOT APPROVED"
+                hint = "read-only hint" if tool["read_only_hint"] else "write-capable"
+                entry = QListWidgetItem(f"    {tool['name']}  •  {enabled}  •  {hint}")
+                entry.setData(Qt.ItemDataRole.UserRole, (ident, tool["name"]))
+                self.mcp_list.addItem(entry)
+
+    def _mcp_selection(self) -> tuple[str, str | None] | None:
+        current = self.mcp_list.currentItem()
+        data = current.data(Qt.ItemDataRole.UserRole) if current is not None else None
+        return data if isinstance(data, tuple) and len(data) == 2 else None
+
+    def mcp_add_server(self) -> None:
+        ident, ok = QInputDialog.getText(self, "MCP connection", "Connection ID (e.g. github):")
+        if not ok:
+            return
+        endpoint, ok = QInputDialog.getText(self, "MCP connection", "Trusted HTTPS endpoint:")
+        if not ok:
+            return
+        env_name, ok = QInputDialog.getText(
+            self, "MCP credential", "Token environment variable (blank if public):"
+        )
+        if not ok:
+            return
+        self._run(
+            "mcp_add",
+            lambda: self.core.mcp_add_connection(ident.strip(), endpoint.strip(), env_name.strip()),
+        )
+
+    def mcp_discover_selected(self) -> None:
+        selection = self._mcp_selection()
+        if selection is None:
+            self.notice.setText("Select an MCP server first.")
+            return
+        ident, _ = selection
+        question = (
+            f"Connect to {ident} and discover its tool schemas? "
+            "This resets all previous approvals for this server."
+        )
+        if QMessageBox.question(self, "MCP discovery", question) != QMessageBox.StandardButton.Yes:
+            return
+        self._run("mcp_discover", lambda: self.core.mcp_discover(ident))
+
+    def mcp_review_selected(self, enable: bool) -> None:
+        selection = self._mcp_selection()
+        if selection is None or selection[1] is None:
+            self.notice.setText("Select a discovered tool first.")
+            return
+        ident, name = selection
+        assert name is not None
+        if enable:
+            details = next(
+                (
+                    tool
+                    for connection in self.core.mcp_connections()
+                    if connection["id"] == ident
+                    for tool in connection["tools"]
+                    if tool["name"] == name
+                ),
+                None,
+            )
+            if details is None:
+                return
+            question = (
+                f"Enable {ident}.{name}?\n"
+                f"Schema SHA-256: {details['sha256']}\n"
+                f"Arguments: {', '.join(details['allowed_arguments']) or '(discover first)'}\n"
+                "Remote tools are untrusted and every invocation requires a fresh owner approval."
+            )
+            dialog = QMessageBox(self)
+            dialog.setWindowTitle("Review MCP tool")
+            dialog.setIcon(QMessageBox.Icon.Warning)
+            dialog.setText(question)
+            dialog.setInformativeText("Open Details to inspect the pinned input schema.")
+            dialog.setDetailedText(details["schema_json"])
+            dialog.setStandardButtons(
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            dialog.setDefaultButton(QMessageBox.StandardButton.No)
+            if dialog.exec() != QMessageBox.StandardButton.Yes:
+                return
+        self._run(
+            "mcp_review",
+            lambda: self.core.mcp_review(ident, name, enable=enable),
+        )
 
     def _update_capability_labels(self) -> None:
         if not hasattr(self, "capability_labels"):
@@ -1102,11 +1237,10 @@ class MaxWindow(QMainWindow):
             self.switch(2)
             return
         if lower == "/tools":
-            names = ", ".join(td.name for td in self._tool_registry.tool_definitions())
+            definitions = self.core.tool_definitions()
+            names = ", ".join(td.name for td in definitions)
             self._append_transcript(f"[Tools] Available allowlisted tools: {names}")
-            self.notice.setText(
-                f"Allowlisted tools ({len(self._tool_registry.tool_definitions())}): {names}"
-            )
+            self.notice.setText(f"Allowlisted tools ({len(definitions)}): {names}")
             return
         if lower == "/voice":
             status_line = _format_voice_status(self._voice.capabilities())
@@ -1141,6 +1275,15 @@ class MaxWindow(QMainWindow):
         ):
             self.tool_outcomes_list.clear()
         for summary in summaries:
+            if (
+                summary.tool_name.startswith("mcp.")
+                and summary.status == "awaiting_approval"
+                and summary.approval_id
+            ):
+                self._pending_mcp_requests[summary.approval_id] = (
+                    summary.tool_name,
+                    dict(summary.arguments),
+                )
             preview = _format_tool_output_preview(summary.output)
             text = f"[{summary.status.upper()}] {summary.tool_name} — {preview}"
             self.tool_outcomes_list.addItem(text)
@@ -1325,6 +1468,34 @@ class MaxWindow(QMainWindow):
         if not isinstance(approval_id, str):
             self.notice.setText("Select a pending Trust request first.")
             return
+        tool_name = current.data(Qt.ItemDataRole.UserRole + 1)
+        if approve and isinstance(tool_name, str) and tool_name.startswith("mcp."):
+            recorded = self._pending_mcp_requests.get(approval_id)
+            if recorded is None or recorded[0] != tool_name:
+                self.notice.setText(
+                    "This MCP request has no active argument record. "
+                    "Deny it and ask MAX to propose the operation again."
+                )
+                return
+            arguments_text = json.dumps(recorded[1], indent=2, ensure_ascii=True)
+            if len(arguments_text) > 8_192:
+                self.notice.setText("MCP arguments exceed the review limit. Deny and retry safely.")
+                return
+            dialog = QMessageBox(self)
+            dialog.setWindowTitle("MAX MCP: approve exact remote action?")
+            dialog.setIcon(QMessageBox.Icon.Warning)
+            dialog.setText(f"Approve one remote invocation of {tool_name}?")
+            dialog.setInformativeText(
+                "Exact arguments to send to the MCP server:\n"
+                + arguments_text
+                + "\n\nResults can be shared with your selected AI provider."
+            )
+            dialog.setStandardButtons(
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            dialog.setDefaultButton(QMessageBox.StandardButton.No)
+            if dialog.exec() != QMessageBox.StandardButton.Yes:
+                return
         self.approve_button.setEnabled(False)
         self.deny_button.setEnabled(False)
         self.notice.setText("Recording Trust decision…")
@@ -1368,12 +1539,18 @@ class MaxWindow(QMainWindow):
                 else ApprovalResolution(approval=value)
             )
             state = str(resolution.approval.get("state", "updated"))
+            decided_id = resolution.approval.get("id")
+            if isinstance(decided_id, str):
+                self._pending_mcp_requests.pop(decided_id, None)
             self.notice.setText(f"Trust request {state}.")
             if resolution.chat_result is not None:
                 self._handle_chat_result(resolution.chat_result)
             elif resolution.tool_summary is not None:
                 self._record_tool_outcomes((resolution.tool_summary,))
             self.refresh()
+        elif action in {"mcp_add", "mcp_discover", "mcp_review"}:
+            self._refresh_mcp_list()
+            self.notice.setText("MCP connection settings updated. Review enabled tools before use.")
         elif action == "stt_transcribe":
             self.ptt_button.setText("Push to Talk")
             self.ptt_button.setEnabled(True)
@@ -1400,6 +1577,11 @@ class MaxWindow(QMainWindow):
             "local_core_request_rejected": "Request was rejected by MAX Trust or Core.",
         }
         message = messages.get(code, "Local Core operation unavailable.")
+        if action.startswith("mcp_"):
+            message = (
+                f"MCP action failed ({code}). Check endpoint, credentials and reviewed schema."
+            )
+            self._refresh_mcp_list()
         self.notice.setText(message)
         if action == "snapshot":
             self.online.setText("●  CORE NOT READY")
@@ -1480,6 +1662,7 @@ class MaxWindow(QMainWindow):
             state = str(approval.get("state", "pending"))[:30]
             item = QListWidgetItem(f"{tool}    •    {state.upper()}")
             item.setData(Qt.ItemDataRole.UserRole, approval.get("id"))
+            item.setData(Qt.ItemDataRole.UserRole + 1, tool)
             self.trust_list.addItem(item)
         has_approvals = bool(snapshot.approvals)
         if has_approvals:
