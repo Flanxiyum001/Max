@@ -22,10 +22,12 @@ from sqlalchemy.exc import SQLAlchemyError
 from max_core.assistant_chat import ToolExecutionSummary, ToolStatus
 from max_core.bounded_commands import BoundedCommandError, run_bounded_command
 from max_core.bounded_worker import WorkerError, execute_operation, parse_operation
+from max_core.container_runner import run_python_sandboxed
 from max_core.gateway.contracts import ToolDefinition, ToolProposal
 from max_core.local_config import DesktopConfig
 from max_core.native_desktop.backend import NativeDesktopCore, NativeDesktopError
 from max_core.persistence import _is_expired
+from max_core.planner import PlanError, PlanService
 from max_core.store import StoreError, TaskStore
 from max_core.trust import (
     ActorContext,
@@ -58,8 +60,12 @@ _MAX_DEV_ADD_ABS = 1_000_000
 _ANCHOR_OBJECTIVE = "MAX Assistant local tool session"
 _GIT_TIMEOUT_SECONDS = 30
 _PYTEST_TIMEOUT_SECONDS = 300
+_CODE_TIMEOUT_SECONDS = 120
+_MAX_SCRIPT_CHARS = 32_000
 
-_EXCLUDED_DIR_NAMES = frozenset({".git", ".venv", "__pycache__", "secrets", "private"})
+_EXCLUDED_DIR_NAMES = frozenset(
+    {".git", ".venv", "__pycache__", "secrets", "private", ".max-scratch"}
+)
 _EXCLUDED_FILE_NAMES = frozenset(
     {".env", ".server.log", "id_rsa", "id_ed25519", "credentials.json"}
 )
@@ -425,8 +431,20 @@ def _run_bounded(
         raise LocalToolError(error.code, status="failed") from None
 
 
+def _validate_execute_python(arguments: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(arguments, dict) or set(arguments) != {"script"}:
+        raise LocalToolError("invalid_action_parameters", status="denied")
+    raw = arguments["script"]
+    if not isinstance(raw, str) or not 1 <= len(raw) <= _MAX_SCRIPT_CHARS:
+        raise LocalToolError("invalid_action_parameters", status="denied")
+    if "\x00" in raw:
+        raise LocalToolError("invalid_action_parameters", status="denied")
+    _require_valid_utf8(raw, "invalid_action_parameters")
+    return {"script": raw}
+
+
 class LocalToolRegistry:
-    """Fixed host registry of 13 bounded, deterministic local tools."""
+    """Fixed host registry of 15 bounded, deterministic local tools."""
 
     def __init__(
         self,
@@ -634,6 +652,26 @@ class LocalToolRegistry:
                 handler=self._handle_task_create,
             ),
             LocalToolSpec(
+                name="task.plan",
+                description=(
+                    "Break an objective with explicit structure (numbered steps, bullets, "
+                    "semicolons, or 'then') into a dependency-ordered multi-step task plan "
+                    "(requires Trust approval; deterministic, never model-invented)."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "objective": {"type": "string", "minLength": 1, "maxLength": 500}
+                    },
+                    "required": ["objective"],
+                    "additionalProperties": False,
+                },
+                risk_tier=RiskTier.R1,
+                requires_approval=True,
+                validate=_validate_task_create,
+                handler=self._handle_task_plan,
+            ),
+            LocalToolSpec(
                 name="notes.save",
                 description="Save a personal note in the notes directory (requires Trust approval).",
                 parameters={
@@ -674,6 +712,25 @@ class LocalToolRegistry:
                 requires_approval=True,
                 validate=self._validate_git_diff,
                 handler=self._handle_git_diff,
+            ),
+            LocalToolSpec(
+                name="code.execute_python",
+                description=(
+                    "Run a Python script in an ephemeral, network-disabled, read-only "
+                    "container sandbox with a scratch /work directory (requires Trust approval)."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "script": {"type": "string", "minLength": 1, "maxLength": _MAX_SCRIPT_CHARS}
+                    },
+                    "required": ["script"],
+                    "additionalProperties": False,
+                },
+                risk_tier=RiskTier.R2,
+                requires_approval=True,
+                validate=_validate_execute_python,
+                handler=self._handle_execute_python,
             ),
             LocalToolSpec(
                 name="test.run_pytest",
@@ -1208,6 +1265,45 @@ class LocalToolRegistry:
             "created": created,
         }
 
+    def _handle_task_plan(
+        self,
+        args: dict[str, Any],
+        call_id: str | None,
+        approval_id: str | None,
+    ) -> dict[str, object]:
+        if self._task_store is None:
+            raise LocalToolError("task_store_not_ready", status="failed")
+        if approval_id is not None:
+            idempotency_key = f"trust-{approval_id}"[:92]
+        else:
+            digest = hashlib.sha256((call_id or uuid4().hex).encode("utf-8")).hexdigest()[:32]
+            idempotency_key = f"plan-{digest}"
+        planner = PlanService(self._task_store.engine, self._task_store)
+        try:
+            parent, steps, created = planner.create_plan(
+                self._owner_id, args["objective"], idempotency_key
+            )
+        except PlanError as error:
+            raise LocalToolError(error.code, status="failed") from None
+        except StoreError:
+            raise LocalToolError("task_create_failed", status="failed") from None
+        return {
+            "task_id": parent.id,
+            "parent_objective": parent.objective,
+            "state": parent.state,
+            "steps": [
+                {
+                    "task_id": step.task_id,
+                    "position": step.position,
+                    "objective": step.objective,
+                    "state": step.state,
+                    "ready": step.ready,
+                }
+                for step in steps
+            ],
+            "created": created,
+        }
+
     def _handle_notes_save(
         self,
         args: dict[str, Any],
@@ -1286,6 +1382,21 @@ class LocalToolRegistry:
         result = _run_bounded(self._workspace_root, argv, _GIT_TIMEOUT_SECONDS)
         result["tool"] = "git.diff"
         return result
+
+    def _handle_execute_python(
+        self,
+        args: dict[str, Any],
+        _call_id: str | None,
+        _approval_id: str | None,
+    ) -> dict[str, object]:
+        try:
+            return run_python_sandboxed(
+                self._workspace_root,
+                args["script"],
+                timeout_seconds=_CODE_TIMEOUT_SECONDS,
+            )
+        except BoundedCommandError as error:
+            raise LocalToolError(error.code, status="failed") from None
 
     def _handle_test_run_pytest(
         self,

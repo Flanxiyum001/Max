@@ -99,7 +99,7 @@ class TaskStore:
         try:
             with self.engine.connect() as connection:
                 version = connection.scalar(text("SELECT version_num FROM alembic_version LIMIT 1"))
-                if version != "0007_grant_proposal_uniqueness":
+                if version != "0008_proactive_triggers":
                     return False
                 connection.execute(text("SELECT id FROM max_tasks LIMIT 1"))
                 connection.execute(text("SELECT id FROM max_approval_grants LIMIT 1"))
@@ -110,6 +110,8 @@ class TaskStore:
                 connection.execute(text("SELECT id FROM max_memory_events LIMIT 1"))
                 connection.execute(text("SELECT id FROM max_device_nodes LIMIT 1"))
                 connection.execute(text("SELECT id FROM max_device_challenges LIMIT 1"))
+                connection.execute(text("SELECT id FROM max_trigger_rules LIMIT 1"))
+                connection.execute(text("SELECT id FROM max_trigger_runs LIMIT 1"))
             return True
         except SQLAlchemyError:
             return False

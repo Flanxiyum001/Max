@@ -139,11 +139,29 @@ def _validate_task_status_args(context: ActorContext, args: dict[str, Any]) -> d
     return {"task_id": context.task_id}
 
 
+def _validate_task_create_args(_context: ActorContext, args: dict[str, Any]) -> dict[str, Any]:
+    """Mirror of the local task.create schema so shared-default grants validate identically."""
+    if set(args) != {"objective"} or not isinstance(args["objective"], str):
+        raise TrustError("invalid_action_parameters")
+    normalized = " ".join(args["objective"].split())
+    if not 1 <= len(normalized) <= 500:
+        raise TrustError("invalid_action_parameters")
+    return {"objective": normalized}
+
+
 _DEFAULT_TASK_STATUS_POLICY = ToolPolicy(
     name=_TOOL,
     risk=RiskTier.R0,
     validate_arguments=_validate_task_status_args,
 )
+
+_DEFAULT_TASK_CREATE_POLICY = ToolPolicy(
+    name="task.create",
+    risk=RiskTier.R1,
+    validate_arguments=_validate_task_create_args,
+)
+
+_DEFAULT_REGISTRY = ToolPolicyRegistry((_DEFAULT_TASK_STATUS_POLICY, _DEFAULT_TASK_CREATE_POLICY))
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,7 +238,7 @@ class TrustService:
         self.sessions = sessionmaker(engine, expire_on_commit=False)
         self._has_explicit_registry = registry is not None
         if registry is None:
-            self._registry = ToolPolicyRegistry((_DEFAULT_TASK_STATUS_POLICY,))
+            self._registry = _DEFAULT_REGISTRY
         elif isinstance(registry, ToolPolicyRegistry):
             self._registry = registry
         else:

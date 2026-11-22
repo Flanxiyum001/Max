@@ -98,12 +98,12 @@ If no API key is configured, MAX still launches cleanly and shows an actionable 
 - Surfaces missing keys, `401`/`403` auth errors, `429` rate limits, `5xx` errors, timeouts, and network errors as sanitized status messages without leaking API keys or raw tracebacks.
 
 ### Bounded Local Tools & MAX Trust (`max_core.local_tools`, `max_core.trust`)
-The trusted local tool registry contains 10 typed allowlisted tools, validated against strict JSON schemas and audited in `max_trust_audit` (metadata only, never plaintext secrets). **Cloud chat does not advertise private local read tools** (workspace, note, task, or system status) because their outputs could disclose non-secret private data to a remote model without separate export consent:
+The trusted local tool registry contains 15 typed allowlisted tools, validated against strict JSON schemas and audited in `max_trust_audit` (metadata only, never plaintext secrets). **Cloud chat does not advertise private local read tools** (workspace, note, task, or system status) because their outputs could disclose non-secret private data to a remote model without separate export consent:
 
 | Risk Tier | Behavior | Tools |
 | --- | --- | --- |
 | **R0** (read-only / deterministic) | Auto-audited and executed immediately | `dev.health`, `dev.add`, `system.status`, `task.status`, `task.list`, `workspace.list_files`, `workspace.read_file`, `notes.list` |
-| **R1 / R2** (state-changing) | Creates a single-use `ApprovalGrant` in **Trust Inbox**; runs only after explicit **Approve** click | `task.create` (`R1`), `notes.save` (`R2`) |
+| **R1 / R2** (state-changing) | Creates a single-use `ApprovalGrant` in **Trust Inbox**; runs only after explicit **Approve** click | `task.create` (`R1`), `task.plan` (`R1`), `git.status` / `git.diff` / `test.run_pytest` (`R1`), `notes.save` (`R2`), `code.execute_python` (`R2`) |
 
 - `workspace.list_files` and `workspace.read_file` are confined to `MAX_WORKSPACE_ROOT` (defaulting to the current working directory) and block `.git`, `.venv`, `.env*`, private keys, and `.sqlite3`/`.db` files.
 - `notes.save` and `notes.list` operate only inside `MAX_NOTES_DIR` (defaulting to `%LOCALAPPDATA%\MAX\notes` on Windows).
@@ -113,6 +113,11 @@ The trusted local tool registry contains 10 typed allowlisted tools, validated a
 ### Remote MCP connections (`max_core.mcp_desktop`)
 - Add trusted HTTPS MCP servers via the System tab; explicitly discover schemas and enable individual tools. Never inherits ChatGPT connector tokens. Credential values remain outside the profile and the repository.
 - Every invocation is Trust-gated with a single-use approval and live schema-drift checks. See [configuration, GitHub setup and limitations](docs/MCP_DESKTOP.md).
+
+### Proactive triggers & multi-step plans (`max_core.triggers`, `max_core.planner`)
+- **Scheduled check-ins, never scheduled actions**: deterministic recurring observations (`briefing.daily` task counts, `notes.digest` newest note titles from `MAX_NOTES_DIR`, `repo.status` bounded `git status`) run on a strict 5-field cron and queue bounded, display-safe runs for review. Promoting a recommendation into the **Trust Inbox** is an explicit owner action with the same single-use R1/R2 approval as any tool call. See [M36](docs/M36_PROACTIVE_TRIGGERS_AND_PLANNER.md).
+- **Multi-step task plans**: objectives with explicit owner structure (numbered steps, bullets, `;`, newlines, ` then `) become a dependency-ordered graph of sub-steps; a step is marked ready only when every earlier step is completed, and R1/R2 boundaries pause in the Trust Inbox until the owner approves. Steps are split from the owner's own text — never model-invented.
+- A `task.plan` R1 chat tool exposes the same planner; scheduling uses a small stdlib cron matcher (APScheduler evaluated and deliberately deferred per [dependency evaluation](docs/DEPENDENCY_EVALUATION.md)).
 
 ### Voice Interaction (`max_core.voice`)
 - **Opt-in Push-to-Talk STT**: Bounded microphone capture (`QtMicrophoneRecorder` + `LocalActivationGate`) starts only on an explicit **Push to Talk** click—never automatically on startup. With an explicitly configured remote provider, **microphone audio is uploaded to the external speech provider** (OpenAI-compatible `/v1/audio/transcriptions`, `whisper-1`). A visible per-recording consent dialog is required before capture; the trusted voice controller blocks remote recording without that consent and clears consent after every turn or cancellation.
@@ -141,8 +146,8 @@ The trusted local tool registry contains 10 typed allowlisted tools, validated a
 
 To keep verified capabilities distinct from future design goals, the following are **not** included in this build:
 
-- **No unrestricted OS/shell/browser control** or unattended background computer automation.
-- **No local stdio MCP subprocesses or interactive OAuth login** yet. Reviewed HTTPS MCP tools can be enabled individually and executed only after owner approval. See [desktop MCP setup](docs/MCP_DESKTOP.md).
+- **No unrestricted OS/shell/browser control, unattended background automation, or self-approving scheduled actions** (triggers observe and queue for review only).
+- **No interactive OAuth login** yet. Reviewed HTTPS MCP tools can be enabled individually and executed only after owner approval. Since M35, local stdio MCP subprocesses are supported when their exact binary is host-allowlisted (`MAX_MCP_STDIO_BINARIES`) with a stripped environment and per-call approval — see [desktop MCP setup](docs/MCP_DESKTOP.md) and [M35](docs/M35_SANDBOXED_CODE_AND_STDIO_MCP.md).
 - **No always-on wake-word daemon, global OS-wide hotkeys, or gaming overlay**.
 - **No Arch Linux / Hyprland real-device verification** or **iPhone mobile web client** in this desktop build.
 - **No signed standalone `.exe` installer** (launch runs from `.venv` via `start-max.cmd`).

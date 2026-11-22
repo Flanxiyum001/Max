@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     ForeignKey,
     Index,
@@ -46,6 +47,8 @@ class Task(Base):
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_checkpoint_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     evidence_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    parent_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    plan_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class TaskCheckpoint(Base):
@@ -277,3 +280,46 @@ class DeviceChallenge(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
+
+
+class TriggerRule(Base):
+    """One owner-authored recurring check; no model of its own, no direct execution."""
+
+    __tablename__ = "max_trigger_rules"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "kind", name="uq_trigger_owner_kind"),
+        Index("ix_trigger_rules_owner_enabled", "owner_id", "enabled"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    schedule: Mapped[str] = mapped_column(String(64), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    last_fired_minute: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+
+class TriggerRun(Base):
+    """One bounded deterministic observation pending owner review, never auto-executed."""
+
+    __tablename__ = "max_trigger_runs"
+    __table_args__ = (Index("ix_trigger_runs_owner_state", "owner_id", "state", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    rule_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    state: Mapped[str] = mapped_column(String(20), nullable=False, default="pending_review")
+    output: Mapped[str] = mapped_column(Text, nullable=False)
+    proposal_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    approval_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
