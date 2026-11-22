@@ -8,10 +8,12 @@ from pathlib import Path
 
 import pytest
 
+from max_core.assistant_session import AssistantSession
 from max_core.mcp_desktop import MCPDesktopManager
 from max_core.mcp_discovery import ObservedTool
 from max_core.mcp_execute import MCPToolExecutor
 from max_core.native_desktop.backend import NativeDesktopCore
+from max_core.tools import ToolError
 
 
 def test_native_core_routes_reviewed_mcp_through_owner_approval(
@@ -72,5 +74,10 @@ def test_native_core_routes_reviewed_mcp_through_owner_approval(
         denied = core.execute_tool("mcp.github.search", {"query": "owner/repo"})
         assert denied.status == "denied"
         assert not calls[1:]
+        with pytest.raises(ToolError, match="mcp_tool_revoked"):
+            AssistantSession._execute_approved_mcp(
+                core, "mcp.github.search", {"query": "owner/repo"}
+            )
+        assert len(calls) == 1
     finally:
         core.close()
