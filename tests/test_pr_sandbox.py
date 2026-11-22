@@ -235,4 +235,6 @@ def test_workflow_is_non_privileged_and_does_not_auto_merge() -> None:
     assert "expected_sha" in text
     assert "pull_request_target" not in text
     assert "secrets." not in text
-    assert "merge" not in text.lower().split("steps:")[0]
+    assert "gh pr merge" not in text.lower()
+    assert "git push " not in text.lower()
+    assert "write-all" not in text.lower()
