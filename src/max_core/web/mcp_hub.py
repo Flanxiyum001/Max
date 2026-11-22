@@ -301,7 +301,9 @@ class WebMCPHub:
         try:
             async with httpx.AsyncClient(
                 transport=self._oauth_transport,
-                timeout=12.0, follow_redirects=False, trust_env=False,
+                timeout=12.0,
+                follow_redirects=False,
+                trust_env=False,
             ) as client:
                 response = await client.post(
                     endpoint,
@@ -411,7 +413,9 @@ class WebMCPHub:
         try:
             async with httpx.AsyncClient(
                 transport=self._oauth_transport,
-                timeout=12.0, follow_redirects=False, trust_env=False,
+                timeout=12.0,
+                follow_redirects=False,
+                trust_env=False,
             ) as client:
                 response = await client.post(
                     endpoint,
