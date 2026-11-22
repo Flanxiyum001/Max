@@ -168,8 +168,10 @@ class WebMCPHub:
         *,
         github_connector: WebGitHubConnector | None = None,
         vault: MCPCredentialVault | None = None,
+        oauth_transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._env = dict(env)
+        self._oauth_transport = oauth_transport
         self._github = github_connector or WebGitHubConnector(env)
         self._base = public_base_url(env)
         self._vault = vault or MCPCredentialVault(env)
@@ -226,7 +228,7 @@ class WebMCPHub:
 
     async def _oauth_metadata(self, provider: MCPProvider) -> tuple[str, dict[str, Any]]:
         async with httpx.AsyncClient(
-            timeout=10.0, follow_redirects=False, trust_env=False
+            transport=self._oauth_transport, timeout=10.0, follow_redirects=False, trust_env=False
         ) as client:
             resource_urls = [
                 _metadata_url(provider.endpoint, "oauth-protected-resource"),
@@ -298,7 +300,8 @@ class WebMCPHub:
         }
         try:
             async with httpx.AsyncClient(
-                timeout=12.0, follow_redirects=False, trust_env=False
+                transport=self._oauth_transport,
+                timeout=12.0, follow_redirects=False, trust_env=False,
             ) as client:
                 response = await client.post(
                     endpoint,
@@ -401,7 +404,8 @@ class WebMCPHub:
             raise MCPHubError("mcp_oauth_token_endpoint_untrusted")
         try:
             async with httpx.AsyncClient(
-                timeout=12.0, follow_redirects=False, trust_env=False
+                transport=self._oauth_transport,
+                timeout=12.0, follow_redirects=False, trust_env=False,
             ) as client:
                 response = await client.post(
                     endpoint,
