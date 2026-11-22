@@ -87,7 +87,7 @@ def _client_ip(request: Request) -> str:
 
 async def synthesize(text: str, voice: str, rate: str, pitch: str) -> bytes:
     """Neural speech via the edge-tts library (Microsoft Edge read-aloud voices)."""
-    import edge_tts  # optional dependency: pip install -e '.[web]'
+    import edge_tts  # type: ignore[import-not-found,unused-ignore]  # optional: .[web]
 
     audio = bytearray()
     communicate = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
