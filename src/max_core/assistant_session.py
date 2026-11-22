@@ -30,8 +30,8 @@ from max_core.tool_loop import LoopResult, ToolLoop, ToolStep
 from max_core.tools import Tool, ToolError, ToolParam, ToolRisk
 
 if TYPE_CHECKING:
-    from max_core.native_desktop.backend import NativeDesktopCore
     from max_core.mcp_execute import MCPToolExecutor
+    from max_core.native_desktop.backend import NativeDesktopCore
 
 ApproveFn = Callable[[str, dict[str, Any]], bool]
 MAX_HISTORY = 30
@@ -144,7 +144,7 @@ class AssistantSession:
         """
         from max_core.mcp_execute import MCPToolExecutor
 
-        core.tool_executor  # populate the snapshot-backed MCP executor, if configured
+        _ = core.tool_executor  # populate the snapshot-backed MCP executor, if configured
         executor = core._mcp_executor
         if not isinstance(executor, MCPToolExecutor):
             return
@@ -193,9 +193,7 @@ class AssistantSession:
                 selected_name: str = name,
                 selected_executor: MCPToolExecutor = executor,
             ) -> str:
-                return self._execute_approved_mcp(
-                    selected_executor, selected_name, dict(arguments)
-                )
+                return self._execute_approved_mcp(selected_executor, selected_name, dict(arguments))
 
             try:
                 self.registry.register(
