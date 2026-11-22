@@ -15,7 +15,13 @@
 </form>
 
 <div id="answer" role="status" aria-live="polite"></div>
-<button id="github-auth" class="hidden" type="button">Authorize GitHub</button>
+<button id="github-auth" class="hidden" type="button">Authorize app</button>
+<button id="connections-toggle" class="hidden" type="button">Apps</button>
+<section id="connections-panel" class="hidden" aria-label="Connected apps">
+  <div class="connections-heading"><strong>MAX connections</strong><button id="connections-close" type="button">×</button></div>
+  <p>Connect once in your browser. MAX handles MCP setup and asks before every tool action.</p>
+  <div id="connections-list"></div>
+</section>
 <div id="choices" class="hidden">
   <button id="allow" type="button">Allow ⏎</button>
   <button id="deny" type="button">Deny esc</button>
