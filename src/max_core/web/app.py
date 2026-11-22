@@ -14,6 +14,7 @@ import asyncio
 import dataclasses
 import hashlib
 import hmac
+import json
 import logging
 import os
 import secrets
@@ -26,8 +27,17 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
+
+from max_core.web.github_connect import GitHubConnectionError, WebGitHubConnector
+from max_core.web.mcp_hub import MCPHubError, WebMCPHub, connection_intent
+from max_core.web.pr_sandbox import (
+    GitHubPRSandbox,
+    SandboxError,
+    SandboxRun,
+    parse_sandbox_request,
+)
 
 STATIC = Path(__file__).parent / "static"
 COOKIE = "max_web"
@@ -63,6 +73,8 @@ class Job:
     error: str | None = None
     detail: str | None = None
     approval: dict[str, Any] | None = None
+    connect: dict[str, str] | None = None
+    sandbox_run: SandboxRun | None = None
     steps: list[str] = field(default_factory=list)
     _event: threading.Event = field(default_factory=threading.Event)
     _allowed: bool = False
@@ -247,6 +259,9 @@ def create_app(
     transcriber: Any = None,
     tts_backup: Any = None,
     piper: Any = None,
+    github_connector: WebGitHubConnector | None = None,
+    mcp_hub: WebMCPHub | None = None,
+    sandbox_runner: GitHubPRSandbox | None = None,
 ) -> FastAPI:
     env = dict(os.environ if env is None else env)
     passcode = env.get("MAX_WEB_PASSCODE", "")
@@ -263,6 +278,9 @@ def create_app(
     stt = stt_config(env)
     stt_vocab = env.get("MAX_STT_VOCAB", "")
     hear = transcriber or transcribe
+    github = github_connector if github_connector is not None else WebGitHubConnector(env)
+    hub = mcp_hub if mcp_hub is not None else WebMCPHub(env, github_connector=github)
+    sandbox = sandbox_runner if sandbox_runner is not None else GitHubPRSandbox(hub.github)
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     login_limit = RateLimiter(8, 600)
@@ -297,7 +315,7 @@ def create_app(
                     if session_factory is not None:
                         state["session"] = session_factory()
                     else:
-                        state["session"] = _default_session(env)
+                        state["session"] = _default_session(env, github_connector=hub)
                 except Exception as exc:
                     state["error"] = "model_not_configured"
                     # TrialConfigurationError messages are fixed codes, never secrets.
@@ -366,18 +384,202 @@ def create_app(
             "error": state["error"],
             "tools": sorted(t.name for t in sess.registry) if sess is not None else [],
             "stt_ready": stt is not None,
+            "github": github.status(),
+            "connections": hub.status(),
         }
+
+    @app.get("/.well-known/oauth-client-metadata/max.json")
+    def mcp_client_metadata() -> dict[str, Any]:
+        try:
+            return hub.client_metadata()
+        except MCPHubError as error:
+            raise HTTPException(503, error.code) from None
+
+    @app.post("/api/connect/mcp/{service}/start")
+    def start_mcp(service: str, request: Request) -> dict[str, str]:
+        require(request)
+        if not ask_limit.allow(_client_ip(request)):
+            raise HTTPException(429, "slow_down")
+        try:
+            return {"url": hub.start(service)}
+        except MCPHubError as error:
+            raise HTTPException(503, error.code) from None
+
+    @app.get("/api/connect/mcp/callback")
+    def mcp_callback(
+        state: str = "", code: str = "", error: str = "", iss: str = ""
+    ) -> RedirectResponse:
+        # State+PKCE are per-connection, single-use. SameSite=Strict cookies
+        # intentionally do not participate in a provider-to-MAX redirect.
+        if error or not state or not code:
+            return RedirectResponse("/?mcp=denied", status_code=303)
+        try:
+            hub.finish(state, code, iss)
+        except MCPHubError:
+            return RedirectResponse("/?mcp=failed", status_code=303)
+        return RedirectResponse("/?mcp=connected", status_code=303)
+
+    @app.post("/api/connect/mcp/{service}/disconnect")
+    def disconnect_mcp(service: str, request: Request) -> dict[str, bool]:
+        require(request)
+        try:
+            hub.disconnect(service)
+        except MCPHubError as error:
+            raise HTTPException(404, error.code) from None
+        return {"ok": True}
+
+    @app.post("/api/connect/github/start")
+    def start_github(request: Request) -> dict[str, str]:
+        require(request)
+        if not ask_limit.allow(_client_ip(request)):
+            raise HTTPException(429, "slow_down")
+        try:
+            return {"url": github.start()}
+        except GitHubConnectionError as exc:
+            raise HTTPException(503, exc.code) from None
+
+    @app.get("/api/connect/github/callback")
+    def github_callback(state: str = "", code: str = "", error: str = "") -> RedirectResponse:
+        # GitHub sends a cross-site browser navigation: SameSite=Strict cookies
+        # are intentionally absent. The short-lived, one-use OAuth state is
+        # the CSRF token, created ONLY by the authenticated owner.
+        if error or not state or not code:
+            return RedirectResponse("/?github=denied", status_code=303)
+        try:
+            github.finish(state, code)
+        except GitHubConnectionError:
+            return RedirectResponse("/?github=failed", status_code=303)
+        return RedirectResponse("/?github=connected", status_code=303)
+
+    @app.post("/api/connect/github/disconnect")
+    def disconnect_github(request: Request) -> dict[str, bool]:
+        require(request)
+        github.disconnect()
+        return {"ok": True}
 
     @app.post("/api/ask")
     def ask(body: AskBody, request: Request) -> dict[str, str]:
         require(request)
         if not ask_limit.allow(_client_ip(request)):
             raise HTTPException(429, "slow_down")
+        sandbox_request = parse_sandbox_request(body.text)
+        if sandbox_request is not None:
+            if any(j.status in {"running", "approval"} for j in jobs.values()):
+                raise HTTPException(409, "busy")
+            repository, pr_number = sandbox_request
+            job = Job(uuid.uuid4().hex, status="done")
+            if not hub.github.status()["connected"]:
+                job.answer = (
+                    "I need an authorized GitHub connection before I can run a PR sandbox. "
+                    "Connect GitHub first; I won't execute untrusted PR code on Render."
+                )
+                job.connect = {
+                    "service": "github",
+                    "action": "authorize" if hub.github.configured else "needs_configuration",
+                }
+                jobs[job.id] = job
+                return {"job": job.id}
+            try:
+                target = sandbox.preview(repository, pr_number)
+            except SandboxError as error:
+                job.answer = {
+                    "sandbox_not_installed_or_pr_not_found": "This repository needs MAX's sandbox workflow installed on its "
+                    "default branch, or that PR does not exist. I haven't run anything.",
+                    "sandbox_repo_owner_not_authorized": "I only run sandbox jobs in repositories owned by the connected account.",
+                    "sandbox_only_open_same_repo_prs": "This sandbox currently supports open PRs from branches in the same repository.",
+                }.get(error.args[0], "I couldn't prepare a safe sandbox for that PR.")
+                jobs[job.id] = job
+                return {"job": job.id}
+            job.status = "approval"
+            job.approval = {
+                "tool": "sandbox.run_pr",
+                "arguments": {
+                    "repository": target.repository,
+                    "pull_request": target.pr_number,
+                    "pinned_sha": target.head_sha,
+                    "action": "Run temporary, read-only GitHub Actions checks; no merge",
+                },
+            }
+            jobs[job.id] = job
+
+            def run_sandbox() -> None:
+                approved = job._event.wait(120) and job._allowed
+                job.approval = None
+                if not approved:
+                    job.answer = "PR sandbox cancelled or approval expired; nothing was run."
+                    job.status = "done"
+                    return
+                job.status = "running"
+                try:
+                    run = sandbox.dispatch(target)
+                    job.sandbox_run = run
+                    job.answer = (
+                        f"Sandbox requested for {run.repository} PR #{run.pr_number} "
+                        f"at commit {run.head_sha[:12]}. "
+                        "The isolated runner will validate that exact commit. "
+                        "This is NOT a merge approval. "
+                        + (
+                            f"Run: {run.run_url}"
+                            if run.run_url
+                            else "Check GitHub Actions for the run."
+                        )
+                    )
+                    job.status = "done"
+                except SandboxError as error:
+                    job.error = "sandbox_failed"
+                    job.detail = error.args[0]
+                    job.status = "failed"
+
+            threading.Thread(target=run_sandbox, daemon=True).start()
+            return {"job": job.id}
+
+        intent = connection_intent(body.text)
+        if intent is not None:
+            # Trusted, authenticated user intent; model output cannot add apps.
+            if any(j.status in {"running", "approval"} for j in jobs.values()):
+                raise HTTPException(409, "busy")
+            action, service = intent
+            label = service.capitalize()
+            job = Job(uuid.uuid4().hex, status="done")
+            if action == "disconnect":
+                hub.disconnect(service)
+                job.answer = f"{label} disconnected. Its MCP tools are no longer available."
+            elif service == "github" and not github.configured:
+                job.answer = (
+                    "I can prepare GitHub for you, but this deployment needs a one-time "
+                    "GitHub OAuth App registration. I won't ask you to paste a token in chat."
+                )
+                job.connect = {"service": service, "action": "needs_configuration"}
+            elif service != "github" and not hub.configured:
+                job.answer = (
+                    "MAX needs its public HTTPS URL to register as an OAuth client. "
+                    "On Render I detect that automatically; the deployment has no public URL yet."
+                )
+                job.connect = {"service": service, "action": "needs_configuration"}
+            elif hub.status()["services"][service]["connected"]:
+                job.answer = f"{label} is already connected to MAX."
+                job.connect = {"service": service, "action": "connected"}
+            else:
+                job.answer = (
+                    "I'll discover the official " + label + " MCP server and handle setup. "
+                    "Approve access on the provider's authorization page. "
+                    "Every remote action will still ask for your approval."
+                )
+                if service == "github":
+                    job.answer = (
+                        "I'll handle the GitHub MCP endpoint and tools. "
+                        "Approve the GitHub authorization in your browser to continue. "
+                        "GitHub OAuth may request broad repository access; "
+                        "every remote tool invocation still requires your approval."
+                    )
+                job.connect = {"service": service, "action": "authorize"}
+            jobs[job.id] = job
+            return {"job": job.id}
+        if any(j.status in {"running", "approval"} for j in jobs.values()):
+            raise HTTPException(409, "busy")
         sess = session()
         if sess is None:
             raise HTTPException(503, state["error"] or "model_not_configured")
-        if any(j.status in {"running", "approval"} for j in jobs.values()):
-            raise HTTPException(409, "busy")
         for old in [k for k, j in jobs.items() if time.time() - j.created > 600]:
             jobs.pop(old, None)
         job = Job(uuid.uuid4().hex)
@@ -385,10 +587,19 @@ def create_app(
 
         def approve(tool: str, arguments: dict[str, Any]) -> bool:
             job._event.clear()
-            job.approval = {
-                "tool": tool,
-                "arguments": {k: str(v)[:300] for k, v in arguments.items()},
-            }
+            # Remote operation approvals must show EXACT arguments. Never silently
+            # truncate the values the owner is asked to authorize.
+            if tool.startswith("mcp."):
+                try:
+                    encoded = json.dumps(arguments, sort_keys=True, ensure_ascii=True)
+                except (TypeError, ValueError):
+                    return False
+                if len(encoded) > 8192:
+                    return False
+                safe_arguments = dict(arguments)
+            else:
+                safe_arguments = {k: str(v)[:300] for k, v in arguments.items()}
+            job.approval = {"tool": tool, "arguments": safe_arguments}
             job.status = "approval"
             answered = job._event.wait(120)
             job.approval = None
@@ -426,8 +637,22 @@ def create_app(
             "error": job.error,
             "detail": job.detail,
             "approval": job.approval,
+            "connect": job.connect,
+            "sandbox": dataclasses.asdict(job.sandbox_run) if job.sandbox_run else None,
             "steps": job.steps[-6:],
         }
+
+    @app.get("/api/sandbox/run/{job_id}")
+    def sandbox_run_status(job_id: str, request: Request) -> dict[str, Any]:
+        require(request)
+        job = jobs.get(job_id)
+        if job is None or job.sandbox_run is None:
+            raise HTTPException(404, "unknown_sandbox_run")
+        try:
+            status = sandbox.status(job.sandbox_run)
+        except SandboxError as error:
+            raise HTTPException(502, error.args[0]) from None
+        return {**dataclasses.asdict(job.sandbox_run), **status}
 
     @app.post("/api/job/{job_id}/approve")
     def approve_job(job_id: str, body: ApproveBody, request: Request) -> dict[str, bool]:
@@ -512,7 +737,9 @@ def create_app(
     return app
 
 
-def _default_session(env: dict[str, str]) -> Any:
+def _default_session(
+    env: dict[str, str], *, github_connector: WebGitHubConnector | WebMCPHub | None = None
+) -> Any:
     from max_core.assistant_session import AssistantSession, SessionOptions
     from max_core.gateway_trial import TrialSettings
 
@@ -525,7 +752,7 @@ def _default_session(env: dict[str, str]) -> Any:
         enable_web=options.enable_web,
         host_tools=False,
     )
-    return AssistantSession(TrialSettings.from_env(env), options)
+    return AssistantSession(TrialSettings.from_env(env), options, github_connector=github_connector)
 
 
 def main() -> int:

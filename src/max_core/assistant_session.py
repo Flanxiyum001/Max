@@ -31,6 +31,8 @@ from max_core.tools import Tool, ToolError, ToolParam, ToolRegistry, ToolRisk
 
 if TYPE_CHECKING:
     from max_core.native_desktop.backend import NativeDesktopCore
+    from max_core.web.github_connect import WebGitHubConnector
+    from max_core.web.mcp_hub import WebMCPHub
 
 ApproveFn = Callable[[str, dict[str, Any]], bool]
 MAX_HISTORY = 30
@@ -94,6 +96,7 @@ class AssistantSession:
         tool_http: Callable[[], httpx.Client] | None = None,
         routes: Mapping[TaskKind, str] | None = None,
         mcp_core: NativeDesktopCore | None = None,
+        github_connector: WebGitHubConnector | WebMCPHub | None = None,
     ) -> None:
         self.settings = settings
         base = settings.spec.model_id
@@ -102,6 +105,7 @@ class AssistantSession:
         self.is_cloud = settings.spec.inference_destination == InferenceDestination.CLOUD
         self.store = AssistantStore(options.data_dir)
         self._mcp_core = mcp_core
+        self._github_connector = github_connector
         self.registry = assistant_registry(
             data_dir=options.data_dir,
             workspace=options.workspace,
@@ -114,6 +118,8 @@ class AssistantSession:
         )
         if mcp_core is not None:
             self._register_mcp_tools(mcp_core)
+        if github_connector is not None:
+            self._refresh_github_tools()
         self.history: list[ChatMessage] = []
         self._make = request_factory(settings)
         self._loop = asyncio.new_event_loop()
@@ -247,6 +253,15 @@ class AssistantSession:
         )
         self._register_mcp_tools(self._mcp_core)
 
+    def _refresh_github_tools(self) -> None:
+        if self._github_connector is None:
+            return
+        self.registry = ToolRegistry(
+            tuple(tool for tool in self.registry if not tool.name.startswith("mcp."))
+        )
+        for tool in self._github_connector.tools_for_session():
+            self.registry.register(tool)
+
     def _system(self) -> list[ChatMessage]:
         now = _dt.datetime.now().astimezone().strftime("%A %d %B %Y, %H:%M %Z")
         intro = (
@@ -282,6 +297,7 @@ class AssistantSession:
         kind = classify(text)
         with self._lock:
             self._refresh_mcp_tools()
+            self._refresh_github_tools()
             self.history.append(ChatMessage("user", text))
             messages = self._system() + self.history[-MAX_HISTORY:]
             base = self.settings.spec.model_id

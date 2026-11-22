@@ -114,6 +114,19 @@ The trusted local tool registry contains 15 typed allowlisted tools, validated a
 - Add trusted HTTPS MCP servers via the System tab; explicitly discover schemas and enable individual tools. Never inherits ChatGPT connector tokens. Credential values remain outside the profile and the repository.
 - Every invocation is Trust-gated with a single-use approval and live schema-drift checks. See [configuration, GitHub setup and limitations](docs/MCP_DESKTOP.md).
 
+### MAX MCP Connections Hub (Render web orb)
+- Say or type “MAX, connect to Cloudflare”, “connect to Railway”, “connect to Figma”, and other supported apps. Or open **Apps** in the orb to manage connections.
+- OAuth server metadata, CIMD/DCR registration (where supported), exact-call approvals and an encrypted server-side credential vault replace per-app token environment variables. Render provides the public HTTPS URL automatically.
+- GitHub currently remains an exception requiring an OAuth App registered once for MAX. See [Connection Hub, storage, supported providers and limitations](docs/MCP_CONNECTION_HUB.md).
+
+### One-command GitHub connection in the Render web orb
+- Say or type "MAX, connect to GitHub". MAX initiates the trusted browser OAuth flow, completes the GitHub MCP connection and discovers compatible tools after owner authorization.
+- Remote tools remain blocked until each exact action is approved. Say "MAX, disconnect GitHub" to revoke the current server-side session.
+- A dedicated GitHub OAuth App must be provisioned once on the host; the hosted token is in process memory only and does not survive a Render instance restart. See [Web GitHub OAuth setup, GitHub scopes and limitations](docs/WEB_GITHUB_OAUTH.md).
+
+### PR validation sandbox (Render web orb)
+- Say **“MAX, review PR #42”** or **“test PR #18 in Flanxiyum001/Ryoko”**. MAX uses the connected GitHub account to request a temporary read-only Actions runner after explicit owner approval, pins the exact PR SHA, and shows its status/link. It cannot merge or push from the sandbox. See [free-first sandbox and limits](docs/MAX_PR_SANDBOX.md).
+
 ### Proactive triggers & multi-step plans (`max_core.triggers`, `max_core.planner`)
 - **Scheduled check-ins, never scheduled actions**: deterministic recurring observations (`briefing.daily` task counts, `notes.digest` newest note titles from `MAX_NOTES_DIR`, `repo.status` bounded `git status`) run on a strict 5-field cron and queue bounded, display-safe runs for review. Promoting a recommendation into the **Trust Inbox** is an explicit owner action with the same single-use R1/R2 approval as any tool call. See [M36](docs/M36_PROACTIVE_TRIGGERS_AND_PLANNER.md).
 - **Multi-step task plans**: objectives with explicit owner structure (numbered steps, bullets, `;`, newlines, ` then `) become a dependency-ordered graph of sub-steps; a step is marked ready only when every earlier step is completed, and R1/R2 boundaries pause in the Trust Inbox until the owner approves. Steps are split from the owner's own text — never model-invented.

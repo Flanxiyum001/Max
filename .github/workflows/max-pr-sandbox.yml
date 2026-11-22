@@ -1,0 +1,190 @@
+name: MAX PR sandbox
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Existing pull request number'
+        required: true
+        type: string
+      expected_sha:
+        description: 'Exact 40-character PR head SHA to validate'
+        required: true
+        type: string
+
+run-name: 'MAX sandbox PR #${{ inputs.pr_number }} @ ${{ inputs.expected_sha }}'
+
+# Run untrusted PR code only with a read-only GitHub token and no production secrets.
+# The workflow lives on the trusted default branch, NOT the PR checkout.
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: max-sandbox-${{ github.repository }}-${{ inputs.pr_number }}
+  cancel-in-progress: false
+
+jobs:
+  sandbox:
+    name: Ephemeral PR validation (no merge)
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      CI: 'true'
+      # Test-only DB credentials. This database exists only inside this job.
+      MAX_DATABASE_URL: postgresql+psycopg://sandbox:ci-only@127.0.0.1:5432/sandbox
+      MAX_TEST_DATABASE_URL: postgresql+psycopg://sandbox:ci-only@127.0.0.1:5432/sandbox
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: sandbox
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: sandbox
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sandbox -d sandbox"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Verify pull request and pin exact SHA (trusted GitHub API)
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import urllib.request
+
+          number = os.environ["PR_NUMBER"]
+          sha = os.environ["EXPECTED_SHA"]
+          repo = os.environ["REPO"]
+          assert re.fullmatch(r"[1-9][0-9]{0,5}", number), "invalid PR number"
+          assert re.fullmatch(r"[0-9a-fA-F]{40}", sha), "invalid pinned commit SHA"
+          assert re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo), "invalid repository"
+          url = f"https://api.github.com/repos/{repo}/pulls/{number}"
+          request = urllib.request.Request(url, headers={
+              "Authorization": "Bearer " + os.environ["GH_TOKEN"],
+              "Accept": "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+          })
+          with urllib.request.urlopen(request, timeout=15) as response:
+              pr = json.load(response)
+          assert pr["state"] == "open", "PR must be open"
+          assert pr["base"]["repo"]["full_name"].lower() == repo.lower(), "unexpected base"
+          # Fork PRs are not enabled in this initial high-trust workflow.
+          assert pr["head"]["repo"]["full_name"].lower() == repo.lower(), "fork PR not supported"
+          assert pr["head"]["sha"].lower() == sha.lower(), "PR head changed; request a new sandbox"
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write("head_sha=" + pr["head"]["sha"] + "\n")
+          print(f"Verified PR #{number}, pinned head {sha[:12]}")
+          PY
+
+      - name: Checkout exact PR commit without persisted credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.source.outputs.head_sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Prepare Python (tooling only)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Prepare Node.js (tooling only)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run bounded project validation (untrusted PR)
+        id: validate
+        timeout-minutes: 14
+        shell: bash
+        env:
+          REPO_NAME: ${{ github.repository }}
+          REVIEW_PR_NUMBER: ${{ inputs.pr_number }}
+          PINNED_SHA: ${{ steps.source.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## MAX PR sandbox"
+            echo ""
+            echo "- Repository: ${REPO_NAME}"
+            echo "- PR: #${REVIEW_PR_NUMBER}"
+            echo "- Pinned SHA: ${PINNED_SHA}"
+            echo "- Runner: temporary GitHub-hosted Linux VM"
+            echo "- GitHub permissions: contents/pull-requests READ ONLY"
+            echo "- No production credentials, deploy, git push, or merge"
+            echo ""
+          } > sandbox-report.md
+
+          if [[ -f pyproject.toml ]]; then
+            echo "- Profile: Python" >> sandbox-report.md
+            python -m pip install --disable-pip-version-check 'setuptools>=84.1.0,<85'
+            python -m pip install --disable-pip-version-check -e '.[dev]'
+            if [[ -d src ]]; then
+              python -m ruff check src tests
+              python -m ruff format --check src tests
+            else
+              python -m ruff check .
+              python -m ruff format --check .
+            fi
+            python -m mypy src/max_core 2>/dev/null || {
+              if [[ -d src/max_core ]]; then
+                echo "MAX strict typing failed." >&2
+                exit 1
+              fi
+              echo "Non-MAX Python project: no MAX-specific mypy target."
+            }
+            if [[ -f alembic.ini ]]; then python -m alembic upgrade head; fi
+            python -m pytest -q
+          elif [[ -f Cargo.toml ]]; then
+            echo "- Profile: Rust" >> sandbox-report.md
+            cargo fmt --all -- --check
+            cargo check --workspace --locked --all-targets
+            cargo clippy --workspace --locked --all-targets -- -D warnings
+            cargo test --workspace --locked
+          elif [[ -f package-lock.json && -f package.json ]]; then
+            echo "- Profile: Node.js" >> sandbox-report.md
+            npm ci --no-audit --no-fund
+            node -e "const p=require('./package.json'); if(!p.scripts || (!p.scripts.test && !p.scripts.build && !p.scripts.lint)){ process.exit(2) }"
+            npm run lint --if-present
+            npm run build --if-present
+            npm test --if-present
+          else
+            echo "- Profile: unsupported (needs a reviewed validation recipe)" >> sandbox-report.md
+            exit 2
+          fi
+
+      - name: Publish result (even when tests fail)
+        if: always()
+        shell: bash
+        env:
+          VALIDATE_RESULT: ${{ steps.validate.outcome }}
+          HEAD_SHA: ${{ steps.source.outputs.head_sha }}
+        run: |
+          {
+            echo ""
+            echo "- Validation: ${VALIDATE_RESULT}"
+            echo "- Tested SHA: ${HEAD_SHA}"
+            echo "- No automatic merge performed"
+          } >> sandbox-report.md
+          cat sandbox-report.md >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload tiny audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: max-pr-sandbox-report
+          path: sandbox-report.md
+          if-no-files-found: warn
+          retention-days: 2

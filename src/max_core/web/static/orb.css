@@ -15,6 +15,27 @@ canvas { position: fixed; inset: 0; width: 100%; height: 100%; }
 #choices button { background: #031a22; color: #9feaff; border: 1px solid #0f3a48;
   border-radius: 18px; padding: 9px 18px; font-size: 15px; cursor: pointer; }
 #choices button:hover { background: #0f3a48; }
+#connections-toggle { position: fixed; top: 18px; left: 18px; background: transparent;
+  color: #7fdfff; border: 1px solid #1f6c80; border-radius: 14px;
+  padding: 7px 13px; font-size: 13px; cursor: pointer; z-index: 5; }
+#connections-panel { position: fixed; left: 18px; top: 58px; z-index: 6;
+  width: min(360px, calc(100vw - 36px)); max-height: 76vh; overflow: auto;
+  background: rgba(2, 16, 23, .97); border: 1px solid #175367;
+  border-radius: 16px; padding: 17px; box-sizing: border-box; box-shadow: 0 9px 38px #000; }
+#connections-panel p { font-size: 12px; color: #78a8b7; line-height: 1.5; }
+.connections-heading, .connection-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.connections-heading button, .connection-row button { border: 1px solid #1d5263; background: #06202a;
+  color: #b6efff; cursor: pointer; border-radius: 9px; padding: 6px 10px; }
+.connection-row { border-top: 1px solid #153642; padding: 10px 0; font-size: 13px; }
+.connection-row small { display: block; color: #719cac; padding-top: 3px; font-size: 11px; }
+#github-auth { position: fixed; left: 50%; bottom: 9%; transform: translateX(-50%);
+  background: #031a22; color: #a8f3ff; border: 1px solid #1d7189; border-radius: 20px;
+  padding: 10px 20px; cursor: pointer; font-size: 15px; z-index: 3; }
+#github-auth:hover { background: #103440; }
+#sandbox-link { position: fixed; left: 50%; bottom: 13%; transform: translateX(-50%);
+  color: #9cecff; border: 1px solid #1b5968; background: #051c24;
+  border-radius: 16px; padding: 8px 15px; text-decoration: none; font-size: 13px; z-index: 3; }
+#sandbox-link:hover { background: #174052; }
 #hint { position: fixed; bottom: 3%; width: 100%; text-align: center; font-size: 12px;
   color: #2f5966; letter-spacing: 1px; }
 #wake { position: fixed; top: 18px; right: 18px; background: transparent; color: #2f5966;

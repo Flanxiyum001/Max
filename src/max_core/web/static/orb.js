@@ -4,6 +4,20 @@ const $ = (id) => document.getElementById(id);
 const canvas = $("orb"), ctx = canvas.getContext("2d");
 const answerEl = $("answer"), input = $("input"), hint = $("hint");
 const loginForm = $("login"), passcode = $("passcode"), choices = $("choices");
+const githubAuth = $("github-auth");
+const sandboxLink = $("sandbox-link");
+const appsToggle = $("connections-toggle"), appsPanel = $("connections-panel");
+const appsList = $("connections-list");
+const MCP_APPS = Object.freeze({
+  github: ["GitHub", ["github.com"]],
+  cloudflare: ["Cloudflare", ["cloudflare.com"]],
+  railway: ["Railway", ["railway.com"]],
+  notion: ["Notion", ["notion.com", "makenotion.com"]],
+  linear: ["Linear", ["linear.app"]],
+  sentry: ["Sentry", ["sentry.dev", "sentry.io"]],
+  figma: ["Figma", ["figma.com"]],
+});
+let pendingConnectService = null;
 
 let state = "idle";            // idle | thinking | speaking | listening | error
 let energy = 0, t = 0;
@@ -132,6 +146,7 @@ const ERRORS = {
   model_not_configured: "No model connected yet. Set the MAX_TRIAL_* settings on the server.",
   model_unavailable: "I couldn't reach my model just now.",
   busy: "One moment, I'm still on the last one.",
+  sandbox_failed: "The PR sandbox could not be started. Check the PR and Actions permissions.",
   slow_down: "Too many requests, give me a second.",
 };
 // Why the model call failed (sanitized gateway codes from the server).
@@ -149,6 +164,9 @@ const DETAILS = {
 // ---------------------------------------------------------------- login
 function showLogin() {
   authed = false; loginForm.classList.remove("hidden"); input.classList.add("hidden");
+  githubAuth.classList.add("hidden");
+  sandboxLink.classList.add("hidden");
+  appsToggle.classList.add("hidden"); appsPanel.classList.add("hidden");
   hint.textContent = "enter passcode"; passcode.focus();
 }
 loginForm.addEventListener("submit", async (e) => {
@@ -165,15 +183,40 @@ async function boot() {
   const s = await (await fetch("/api/state", { credentials: "same-origin" })).json();
   if (!s.authed) return showLogin();
   authed = true; sttReady = !!s.stt_ready;
+  appsToggle.classList.remove("hidden");
   hint.textContent = "type to talk · space or tap the orb to speak";
   if (!s.model_ready) { setState("error", 3000); show(ERRORS.model_not_configured); }
   else show("Hello. I'm here.", 4000);
+  const outcome = new URLSearchParams(location.search).get("github");
+  if (outcome === "connected") show(
+    "GitHub authorized. MAX discovered available MCP tools. Each tool call still needs your approval.",
+    11000
+  );
+  if (outcome === "failed") show(
+    "GitHub authorization returned, but MCP discovery failed. Ask MAX to connect again.",
+    10000
+  );
+  if (outcome === "denied") show("GitHub authorization cancelled.", 6000);
+  const mcp = new URLSearchParams(location.search).get("mcp");
+  if (mcp === "connected") show(
+    "App connected to MAX. Compatible MCP tools are ready. I will ask before every action.",
+    11500
+  );
+  if (mcp === "failed") show(
+    "App authorization or tool discovery failed. You can retry from Apps.",
+    9000
+  );
+  if (mcp === "denied") show("App authorization cancelled.", 6000);
+  if (outcome || mcp) history.replaceState({}, "", "/");
   saveWake();
 }
 
 // ---------------------------------------------------------------- conversation
 async function ask(text, spoken) {
   if (busy || !text.trim()) return;
+  githubAuth.classList.add("hidden");
+  sandboxLink.classList.add("hidden");
+  pendingConnectService = null;
   busy = true; setState("thinking"); show("");
   try {
     const { job } = await (await api("/api/ask", { text, voice: spoken })).json();
@@ -190,6 +233,22 @@ async function ask(text, spoken) {
       }
       busy = false; pendingJob = null;
       if (j.status === "done") {
+        if (j.sandbox?.run_url) {
+          try {
+            const link = new URL(j.sandbox.run_url);
+            if (link.protocol === "https:" && link.hostname === "github.com" &&
+                /^\/[A-Za-z0-9-]{1,39}\/[A-Za-z0-9_.-]{1,100}\/actions\/runs\/[0-9]+$/.test(link.pathname)) {
+              sandboxLink.href = link.href;
+              sandboxLink.classList.remove("hidden");
+            }
+          } catch {}
+        }
+        if (j.connect?.action === "authorize" && MCP_APPS[j.connect.service]) {
+          pendingConnectService = j.connect.service;
+          githubAuth.textContent = "Authorize " + MCP_APPS[pendingConnectService][0];
+          githubAuth.classList.remove("hidden");
+          stopWake();
+        }
         setState("speaking"); show(j.answer);
         if (spoken) { followUp = true; await say(j.answer); } else setState("speaking", 2500);
         if (!followUp) resumeWake();
@@ -216,6 +275,84 @@ async function answerApproval(allow) {
   setState("thinking"); show(allow ? "⋯ allowed" : "⋯ denied", 0);
   try { await api(`/api/job/${pendingJob}/approve`, { allow }); } catch {}
 }
+function appAuthorizationURL(service, url) {
+  const item = MCP_APPS[service];
+  if (!item) throw new Error("unknown_mcp_service");
+  const destination = new URL(url);
+  const host = destination.hostname.toLowerCase();
+  if (destination.protocol !== "https:" || destination.username || destination.password ||
+      !item[1].some(domain => host === domain || host.endsWith("." + domain))) {
+    throw new Error("invalid_mcp_authorization_url");
+  }
+  return destination.href;
+}
+
+async function authorizeApp(service) {
+  if (!MCP_APPS[service]) return;
+  githubAuth.disabled = true;
+  try {
+    const { url } = await (await api("/api/connect/mcp/" + service + "/start", {})).json();
+    window.location.assign(appAuthorizationURL(service, url));
+  } catch (err) {
+    githubAuth.disabled = false;
+    const message = err.message === "github_oauth_not_configured"
+      ? "GitHub requires a one-time OAuth App registration for MAX."
+      : err.message === "mcp_public_url_missing"
+      ? "MAX needs a stable HTTPS URL for OAuth."
+      : err.message === "mcp_oauth_registration_not_supported"
+      ? "This provider requires its own OAuth App registration. MAX can't register automatically."
+      : "Connection setup failed. Check the provider or try again.";
+    show(message, 8500);
+  }
+}
+
+githubAuth.addEventListener("click", () => {
+  if (pendingConnectService) authorizeApp(pendingConnectService);
+});
+
+async function renderApps() {
+  if (!authed) return;
+  let info;
+  try { info = (await (await api("/api/state")).json()).connections; }
+  catch { return; }
+  appsList.replaceChildren();
+  for (const [service, config] of Object.entries(MCP_APPS)) {
+    const current = info?.services?.[service] || {};
+    const row = document.createElement("div");
+    row.className = "connection-row";
+    const label = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = config[0];
+    const description = document.createElement("small");
+    description.textContent = current.connected
+      ? "Connected · " + (current.tools || 0) + " tools"
+      : current.configured ? "Not connected" : "Needs one-time app setup";
+    label.append(title, description);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = current.connected ? "Disconnect" : "Connect";
+    button.onclick = async () => {
+      if (current.connected) {
+        if (!confirm("Disconnect " + config[0] + " from MAX?")) return;
+        try {
+          await api("/api/connect/mcp/" + service + "/disconnect", {});
+          await renderApps(); show(config[0] + " disconnected.", 4500);
+        } catch { show("Couldn't disconnect " + config[0] + ".", 5000); }
+      } else {
+        pendingConnectService = service;
+        await authorizeApp(service);
+      }
+    };
+    row.append(label, button);
+    appsList.append(row);
+  }
+}
+
+appsToggle.addEventListener("click", async () => {
+  appsPanel.classList.toggle("hidden");
+  if (!appsPanel.classList.contains("hidden")) await renderApps();
+});
+$("connections-close").addEventListener("click", () => appsPanel.classList.add("hidden"));
 $("allow").onclick = () => answerApproval(true);
 $("deny").onclick = () => answerApproval(false);
 
