@@ -33,17 +33,14 @@ def test_native_core_routes_reviewed_mcp_through_owner_approval(
     async def fake_discover(_connection: object) -> tuple[ObservedTool, ...]:
         return (
             ObservedTool(
-                "github", "search", schema,
-                hashlib.sha256(schema.encode()).hexdigest(), True
+                "github", "search", schema, hashlib.sha256(schema.encode()).hexdigest(), True
             ),
         )
 
     monkeypatch.setattr("max_core.mcp_desktop.discover_tools", fake_discover)
     calls: list[dict[str, object]] = []
 
-    def fake_remote(
-        _self: MCPToolExecutor, _entry: object, arguments: dict[str, object]
-    ) -> str:
+    def fake_remote(_self: MCPToolExecutor, _entry: object, arguments: dict[str, object]) -> str:
         calls.append(arguments)
         return "GitHub fixture result"
 
