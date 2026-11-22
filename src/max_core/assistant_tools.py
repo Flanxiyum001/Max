@@ -447,13 +447,16 @@ def assistant_registry(
     enable_web: bool = True,
     http: HttpFactory | None = None,
     resolve_hosts: bool = True,
+    host_tools: bool = True,
 ) -> ToolRegistry:
     """Built-ins + assistant tools.
 
     Cloud sessions never get workspace file tools, and get personal tools
     (memory, reminders, PC status, shell) only with ``cloud_personal_tools``.
     """
-    registry = builtin_registry(None if cloud else workspace)
+    # host_tools=False (hosted web server): nothing that acts on or reports about
+    # the machine MAX runs on — no workspace, PC status, shell or app launching.
+    registry = builtin_registry(None if cloud or not host_tools else workspace)
     store = AssistantStore(data_dir)
     personal = not cloud or cloud_personal_tools
     tools: list[Tool] = []
@@ -518,15 +521,18 @@ def assistant_registry(
                 (ToolParam("id", str, "reminder id", max_length=16),),
                 lambda a: store.complete(a["id"]),
             ),
-            Tool(
-                "system.status",
-                "This PC's OS, CPU, memory, disk and battery status.",
-                ToolRisk.READ_ONLY,
-                (),
-                system_status,
-            ),
         ]
-        if enable_shell:
+        if host_tools:
+            tools.append(
+                Tool(
+                    "system.status",
+                    "This PC's OS, CPU, memory, disk and battery status.",
+                    ToolRisk.READ_ONLY,
+                    (),
+                    system_status,
+                )
+            )
+        if enable_shell and host_tools:
             tools.append(
                 Tool(
                     "shell.run",
@@ -537,15 +543,16 @@ def assistant_registry(
                     lambda a: run_shell(a, workspace),
                 )
             )
-    tools.append(
-        Tool(
-            "apps.open",
-            "Open a website (http/https URL) or launch an installed app by name.",
-            ToolRisk.EFFECTFUL,
-            (ToolParam("target", str, "URL or app name", max_length=500),),
-            open_target,
+    if host_tools:
+        tools.append(
+            Tool(
+                "apps.open",
+                "Open a website (http/https URL) or launch an installed app by name.",
+                ToolRisk.EFFECTFUL,
+                (ToolParam("target", str, "URL or app name", max_length=500),),
+                open_target,
+            )
         )
-    )
     if enable_web:
         web = WebTools(
             http or (lambda: httpx.Client(follow_redirects=False)), resolve_hosts=resolve_hosts

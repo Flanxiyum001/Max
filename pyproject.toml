@@ -25,6 +25,9 @@ dev = [
     "mypy>=1.15,<2",
     "pip-audit>=2.8,<4",
 ]
+web = [
+    "edge-tts>=7,<8",
+]
 desktop = [
     "PySide6>=6.8,<7",
 ]
@@ -37,6 +40,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "max_core.desktop" = ["*.html", "*.css", "*.js"]
+"max_core.web" = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

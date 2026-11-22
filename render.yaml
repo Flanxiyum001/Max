@@ -1,0 +1,42 @@
+# MAX web orb on Render — see docs/M30_WEB_ORB.md
+services:
+  - type: web
+    name: max-orb
+    runtime: python
+    plan: free
+    buildCommand: pip install -e '.[web]'
+    startCommand: python -m max_core.web
+    healthCheckPath: /healthz
+    autoDeploy: false
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.5
+      - key: MAX_DATA_DIR
+        value: /tmp/max-data
+      - key: MAX_WEB_VOICE
+        value: en-IE-EmilyNeural
+      # Secrets: set these in the Render dashboard, never in git.
+      - key: MAX_WEB_PASSCODE
+        sync: false
+      - key: MAX_WEB_SECRET
+        generateValue: true
+      - key: MAX_TRIAL_DESTINATION
+        value: cloud
+      - key: MAX_TRIAL_CLOUD_ALLOWED
+        value: "yes"
+      - key: MAX_TRIAL_ENDPOINT
+        sync: false
+      - key: MAX_TRIAL_MODEL
+        sync: false
+      - key: MAX_TRIAL_API_KEY
+        sync: false
+      - key: MAX_TRIAL_CONTEXT_TOKENS
+        value: "8192"
+      - key: MAX_TRIAL_MAX_COST_USD
+        value: "0"
+      - key: MAX_TRIAL_INPUT_USD_PER_MILLION
+        value: "0"
+      - key: MAX_TRIAL_OUTPUT_USD_PER_MILLION
+        value: "0"
+      - key: MAX_TRIAL_PERSONA
+        value: "yes"
