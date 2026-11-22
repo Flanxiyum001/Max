@@ -367,7 +367,13 @@ class WebMCPHub:
         # Never request all declared scopes automatically.
         if isinstance(scopes, list) and "openid" in scopes:
             params["scope"] = "openid"
-        return metadata["authorization_endpoint"] + "?" + urlencode(params)
+        authorization_endpoint = metadata.get("authorization_endpoint")
+        if (
+            not isinstance(authorization_endpoint, str)
+            or not _trusted_url(authorization_endpoint, provider)
+        ):
+            raise MCPHubError("mcp_oauth_authorization_endpoint_invalid")
+        return authorization_endpoint + "?" + urlencode(params)
 
     def start(self, service: str) -> str:
         if service == "github":
