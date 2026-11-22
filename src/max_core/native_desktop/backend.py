@@ -419,16 +419,24 @@ class NativeDesktopCore:
 
             # No network on startup or tool registration. Only approved snapshots
             # can be advertised, and every execution still requires Trust approval.
-            connections, reviewed = self._mcp_manager.runtime()
-            if not reviewed or self._task_store is None:
+            from max_core.mcp_desktop import MCPSettingsError
+            from max_core.mcp_execute import McpExecuteError
+
+            try:
+                connections, reviewed = self._mcp_manager.runtime()
+                if not reviewed or self._task_store is None:
+                    return primary
+                self._mcp_executor = MCPToolExecutor(
+                    task_store=self._task_store,
+                    connections=connections,
+                    reviewed=reviewed,
+                )
+                self._combined_executor = CompositeToolExecutor(primary, self._mcp_executor)
+                return self._combined_executor
+            except (MCPSettingsError, McpExecuteError, ValueError):
+                # Malformed or unauthenticated external configuration never
+                # takes the owner's existing local assistant offline.
                 return primary
-            self._mcp_executor = MCPToolExecutor(
-                task_store=self._task_store,
-                connections=connections,
-                reviewed=reviewed,
-            )
-            self._combined_executor = CompositeToolExecutor(primary, self._mcp_executor)
-            return self._combined_executor
 
     def _get_chat_service(self) -> AssistantChatService:
         with self._bridge_lock:
