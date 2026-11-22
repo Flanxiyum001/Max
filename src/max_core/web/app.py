@@ -32,6 +32,12 @@ from pydantic import BaseModel, Field
 
 from max_core.web.github_connect import GitHubConnectionError, WebGitHubConnector
 from max_core.web.mcp_hub import MCPHubError, WebMCPHub, connection_intent
+from max_core.web.pr_sandbox import (
+    GitHubPRSandbox,
+    SandboxError,
+    SandboxRun,
+    parse_sandbox_request,
+)
 
 STATIC = Path(__file__).parent / "static"
 COOKIE = "max_web"
@@ -68,6 +74,7 @@ class Job:
     detail: str | None = None
     approval: dict[str, Any] | None = None
     connect: dict[str, str] | None = None
+    sandbox_run: SandboxRun | None = None
     steps: list[str] = field(default_factory=list)
     _event: threading.Event = field(default_factory=threading.Event)
     _allowed: bool = False
@@ -254,6 +261,7 @@ def create_app(
     piper: Any = None,
     github_connector: WebGitHubConnector | None = None,
     mcp_hub: WebMCPHub | None = None,
+    sandbox_runner: GitHubPRSandbox | None = None,
 ) -> FastAPI:
     env = dict(os.environ if env is None else env)
     passcode = env.get("MAX_WEB_PASSCODE", "")
@@ -272,6 +280,7 @@ def create_app(
     hear = transcriber or transcribe
     github = github_connector if github_connector is not None else WebGitHubConnector(env)
     hub = mcp_hub if mcp_hub is not None else WebMCPHub(env, github_connector=github)
+    sandbox = sandbox_runner if sandbox_runner is not None else GitHubPRSandbox(hub.github)
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     login_limit = RateLimiter(8, 600)
@@ -453,6 +462,76 @@ def create_app(
         require(request)
         if not ask_limit.allow(_client_ip(request)):
             raise HTTPException(429, "slow_down")
+        sandbox_request = parse_sandbox_request(body.text)
+        if sandbox_request is not None:
+            if any(j.status in {"running", "approval"} for j in jobs.values()):
+                raise HTTPException(409, "busy")
+            repository, pr_number = sandbox_request
+            job = Job(uuid.uuid4().hex, status="done")
+            if not hub.github.status()["connected"]:
+                job.answer = (
+                    "I need an authorized GitHub connection before I can run a PR sandbox. "
+                    "Connect GitHub first; I won't execute untrusted PR code on Render."
+                )
+                job.connect = {
+                    "service": "github",
+                    "action": "authorize" if hub.github.configured else "needs_configuration",
+                }
+                jobs[job.id] = job
+                return {"job": job.id}
+            try:
+                target = sandbox.preview(repository, pr_number)
+            except SandboxError as error:
+                job.answer = {
+                    "sandbox_not_installed_or_pr_not_found":
+                        "This repository needs MAX's sandbox workflow installed on its "
+                        "default branch, or that PR does not exist. I haven't run anything.",
+                    "sandbox_repo_owner_not_authorized":
+                        "I only run sandbox jobs in repositories owned by the connected account.",
+                    "sandbox_only_open_same_repo_prs":
+                        "This sandbox currently supports open PRs from branches in the same repository.",
+                }.get(error.args[0], "I couldn't prepare a safe sandbox for that PR.")
+                jobs[job.id] = job
+                return {"job": job.id}
+            job.status = "approval"
+            job.approval = {
+                "tool": "sandbox.run_pr",
+                "arguments": {
+                    "repository": target.repository,
+                    "pull_request": target.pr_number,
+                    "pinned_sha": target.head_sha,
+                    "action": "Run temporary, read-only GitHub Actions checks; no merge",
+                },
+            }
+            jobs[job.id] = job
+
+            def run_sandbox() -> None:
+                approved = job._event.wait(120) and job._allowed
+                job.approval = None
+                if not approved:
+                    job.answer = "PR sandbox cancelled or approval expired; nothing was run."
+                    job.status = "done"
+                    return
+                job.status = "running"
+                try:
+                    run = sandbox.dispatch(target)
+                    job.sandbox_run = run
+                    job.answer = (
+                        f"Sandbox requested for {run.repository} PR #{run.pr_number} "
+                        f"at commit {run.head_sha[:12]}. "
+                        "The isolated runner will validate that exact commit. "
+                        "This is NOT a merge approval. "
+                        + (f"Run: {run.run_url}" if run.run_url else "Check GitHub Actions for the run.")
+                    )
+                    job.status = "done"
+                except SandboxError as error:
+                    job.error = "sandbox_failed"
+                    job.detail = error.args[0]
+                    job.status = "failed"
+
+            threading.Thread(target=run_sandbox, daemon=True).start()
+            return {"job": job.id}
+
         intent = connection_intent(body.text)
         if intent is not None:
             # Trusted, authenticated user intent; model output cannot add apps.
@@ -558,8 +637,21 @@ def create_app(
             "detail": job.detail,
             "approval": job.approval,
             "connect": job.connect,
+            "sandbox": dataclasses.asdict(job.sandbox_run) if job.sandbox_run else None,
             "steps": job.steps[-6:],
         }
+
+    @app.get("/api/sandbox/run/{job_id}")
+    def sandbox_run_status(job_id: str, request: Request) -> dict[str, Any]:
+        require(request)
+        job = jobs.get(job_id)
+        if job is None or job.sandbox_run is None:
+            raise HTTPException(404, "unknown_sandbox_run")
+        try:
+            status = sandbox.status(job.sandbox_run)
+        except SandboxError as error:
+            raise HTTPException(502, error.args[0]) from None
+        return {**dataclasses.asdict(job.sandbox_run), **status}
 
     @app.post("/api/job/{job_id}/approve")
     def approve_job(job_id: str, body: ApproveBody, request: Request) -> dict[str, bool]:
