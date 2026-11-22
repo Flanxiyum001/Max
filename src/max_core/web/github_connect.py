@@ -189,9 +189,11 @@ class WebGitHubConnector:
             raise GitHubConnectionError("github_oauth_not_configured")
         state = secrets.token_urlsafe(36)
         verifier = secrets.token_urlsafe(64)
-        challenge = base64.urlsafe_b64encode(
-            hashlib.sha256(verifier.encode("ascii")).digest()
-        ).decode("ascii").rstrip("=")
+        challenge = (
+            base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest())
+            .decode("ascii")
+            .rstrip("=")
+        )
         with self._lock:
             self._pending = {
                 key: item
@@ -320,7 +322,8 @@ class WebGitHubConnector:
             result.append(
                 Tool(
                     name=name,
-                    description="GitHub MCP: " + entry.observation.name
+                    description="GitHub MCP: "
+                    + entry.observation.name
                     + " (REMOTE operation; requires approval for each call)",
                     risk=ToolRisk.EFFECTFUL,
                     params=entry.params,
@@ -329,9 +332,7 @@ class WebGitHubConnector:
             )
         return tuple(result)
 
-    def _call(
-        self, entry: _RemoteTool, arguments: dict[str, Any], generation: int
-    ) -> str:
+    def _call(self, entry: _RemoteTool, arguments: dict[str, Any], generation: int) -> str:
         with self._lock:
             if self._token is None or generation != self._generation or entry not in self._tools:
                 raise ToolError("github_mcp_revoked")
@@ -358,9 +359,11 @@ class WebGitHubConnector:
                     timeout=10,
                     trust_env=False,
                 ) as client:
-                    async with streamable_http_client(
-                        _REMOTE_ENDPOINT, http_client=client
-                    ) as (reader, writer, _):
+                    async with streamable_http_client(_REMOTE_ENDPOINT, http_client=client) as (
+                        reader,
+                        writer,
+                        _,
+                    ):
                         async with ClientSession(
                             reader, writer, read_timeout_seconds=timedelta(seconds=10)
                         ) as mcp:
@@ -381,7 +384,9 @@ class WebGitHubConnector:
                                         )
                                         if (
                                             encoded != entry.observation.schema_json
-                                            or bool(getattr(tool.annotations, "readOnlyHint", False))
+                                            or bool(
+                                                getattr(tool.annotations, "readOnlyHint", False)
+                                            )
                                             != entry.observation.read_only_hint
                                         ):
                                             raise ToolError("github_mcp_schema_changed")
