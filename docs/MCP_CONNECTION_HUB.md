@@ -37,6 +37,7 @@ needs to be typed into MAX's conversation or added to Render for
 | Notion | `https://mcp.notion.com/mcp` | Discovered CIMD or DCR, if offered |
 | Linear | `https://mcp.linear.app/mcp` | Discovered CIMD or DCR, if offered |
 | Sentry | `https://mcp.sentry.dev/mcp` | Discovered CIMD or DCR, if offered |
+| Figma | `https://mcp.figma.com/mcp` | Discovered CIMD or DCR, if offered |
 | GitHub | `https://api.githubcopilot.com/mcp/` | **Exception**: separate OAuth App registration |
 
 The provider catalog is intentionally small at first. Supporting arbitrary
