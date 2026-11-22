@@ -102,9 +102,9 @@ def _callback_ok(value: str) -> bool:
     )
 
 
-def _reviewable(observation: ObservedTool) -> _RemoteTool | None:
+def _reviewable(observation: ObservedTool, *, service: str = "github") -> _RemoteTool | None:
     """Only expose bounded flat-scalar tools to the legacy orb tool protocol."""
-    if observation.connection_id != "github" or not _TOOL_NAME.fullmatch(observation.name):
+    if observation.connection_id != service or not _TOOL_NAME.fullmatch(observation.name):
         return None
     try:
         schema = json.loads(observation.schema_json)
@@ -132,14 +132,14 @@ def _reviewable(observation: ObservedTool) -> _RemoteTool | None:
                 ToolParam(
                     name=name,
                     kind=param_type,
-                    description=f"GitHub MCP parameter {name}",
+                    description=f"MCP parameter {name}",
                     required=name in required,
                     max_length=1024,
                 )
             )
         policy = ReviewedToolPolicy(
             "owner",
-            "github",
+            service,
             observation.name,
             observation.schema_sha256,
             RiskTier.R1 if observation.read_only_hint else RiskTier.R2,
