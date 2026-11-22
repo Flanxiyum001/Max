@@ -47,6 +47,8 @@ class LoopResult:
     answer: str
     steps: list[ToolStep] = field(default_factory=list)
     stopped_reason: Literal["answered", "step_limit", "model_failed"] = "answered"
+    error_code: str | None = None
+    model: str | None = None
 
 
 def tool_system_prompt(registry: ToolRegistry) -> str:
@@ -213,8 +215,10 @@ class ToolLoop:
             request = make_request(tuple(system + window))
             try:
                 response = await self._gateway.complete(request)
-            except Exception:
+            except Exception as exc:
                 result.stopped_reason = "model_failed"
+                # GatewayError codes are sanitized; anything else reports its type only.
+                result.error_code = str(getattr(exc, "code", "") or type(exc).__name__)[:64]
                 result.answer = "I could not reach my model just now."
                 return result
             calls = parse_tool_calls(response)

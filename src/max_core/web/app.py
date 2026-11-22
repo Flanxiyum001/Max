@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 import os
 import secrets
 import threading
@@ -49,12 +50,16 @@ class SpeakBody(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
 
 
+log = logging.getLogger("max_core.web")
+
+
 @dataclass
 class Job:
     id: str
     status: str = "running"  # running | approval | done | failed
     answer: str = ""
     error: str | None = None
+    detail: str | None = None
     approval: dict[str, Any] | None = None
     steps: list[str] = field(default_factory=list)
     _event: threading.Event = field(default_factory=threading.Event)
@@ -210,8 +215,10 @@ def create_app(
                         state["session"] = session_factory()
                     else:
                         state["session"] = _default_session(env)
-                except Exception:
+                except Exception as exc:
                     state["error"] = "model_not_configured"
+                    # TrialConfigurationError messages are fixed codes, never secrets.
+                    log.warning("model not configured: %s", str(exc)[:80] or type(exc).__name__)
             return state["session"]
 
     @app.middleware("http")
@@ -314,9 +321,11 @@ def create_app(
                 )
                 if result.stopped_reason == "model_failed":
                     job.error, job.status = "model_unavailable", "failed"
+                    job.detail = getattr(result, "error_code", None)
                 else:
                     job.answer, job.status = result.answer.strip() or "…", "done"
-            except Exception:
+            except Exception as exc:
+                log.warning("turn failed: %s", type(exc).__name__)
                 job.error, job.status = "model_unavailable", "failed"
 
         threading.Thread(target=run, daemon=True).start()
@@ -332,6 +341,7 @@ def create_app(
             "status": job.status,
             "answer": job.answer,
             "error": job.error,
+            "detail": job.detail,
             "approval": job.approval,
             "steps": job.steps[-6:],
         }
@@ -417,6 +427,7 @@ def _default_session(env: dict[str, str]) -> Any:
 def main() -> int:
     import uvicorn
 
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(name)s: %(message)s")
     try:
         app = create_app()
     except RuntimeError as exc:

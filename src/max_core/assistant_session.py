@@ -7,7 +7,9 @@ asyncio loop thread, so a GUI can call ``ask()`` from a worker thread.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import datetime as _dt
+import logging
 import os
 import threading
 from collections.abc import Callable, Mapping
@@ -23,10 +25,12 @@ from max_core.gateway import ChatMessage, Gateway, HTTPAdapter, InferenceDestina
 from max_core.gateway_trial import TrialSettings
 from max_core.local_config import load_dotenv_into_mapping
 from max_core.persona import persona_message
+from max_core.task_routing import TaskKind, classify, route_table
 from max_core.tool_loop import LoopResult, ToolLoop, ToolStep
 
 ApproveFn = Callable[[str, dict[str, Any]], bool]
 MAX_HISTORY = 30
+log = logging.getLogger("max_core.session")
 
 
 def merged_environment(
@@ -84,8 +88,11 @@ class AssistantSession:
         *,
         transport: httpx.AsyncBaseTransport | None = None,
         tool_http: Callable[[], httpx.Client] | None = None,
+        routes: Mapping[TaskKind, str] | None = None,
     ) -> None:
         self.settings = settings
+        base = settings.spec.model_id
+        self.routes: dict[TaskKind, str] = dict(routes or route_table(base, {}))
         self.options = options
         self.is_cloud = settings.spec.inference_destination == InferenceDestination.CLOUD
         self.store = AssistantStore(options.data_dir)
@@ -110,7 +117,12 @@ class AssistantSession:
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> AssistantSession:
         merged = merged_environment(env)
-        return cls(TrialSettings.from_env(merged), SessionOptions.from_env(merged))
+        settings = TrialSettings.from_env(merged)
+        return cls(
+            settings,
+            SessionOptions.from_env(merged),
+            routes=route_table(settings.spec.model_id, merged),
+        )
 
     def _system(self) -> list[ChatMessage]:
         now = _dt.datetime.now().astimezone().strftime("%A %d %B %Y, %H:%M %Z")
@@ -144,23 +156,50 @@ class AssistantSession:
         text = text.strip()[:20_000]
         if not text:
             raise ValueError("empty_prompt")
+        kind = classify(text)
         with self._lock:
-            loop = ToolLoop(
-                Gateway((self.settings.spec,), HTTPAdapter(self._client)),
-                self.registry,
-                approve=approve,
-                on_step=on_step,
-            )
             self.history.append(ChatMessage("user", text))
             messages = self._system() + self.history[-MAX_HISTORY:]
-            future = asyncio.run_coroutine_threadsafe(loop.run(messages, self._make), self._loop)
+            base = self.settings.spec.model_id
+            candidates = [self.routes.get(kind, base)]
+            if candidates[0] != base:
+                candidates.append(base)  # e.g. unknown auto profile -> plain base model
             try:
-                result = future.result(timeout=120)
+                for model in candidates:
+                    result = self._run(model, messages, approve, on_step)
+                    result.model = model
+                    if result.stopped_reason != "model_failed":
+                        break
+                    log.warning(
+                        "model call failed: task=%s model=%s code=%s",
+                        kind,
+                        model,
+                        result.error_code,
+                    )
+                    if result.steps:
+                        break  # tools already ran; do not repeat side effects
             except Exception:
                 self.history.pop()
                 raise
             self.history.append(ChatMessage("assistant", result.answer[:20_000]))
             return result
+
+    def _run(
+        self,
+        model: str,
+        messages: list[ChatMessage],
+        approve: ApproveFn | None,
+        on_step: Callable[[ToolStep], None] | None,
+    ) -> LoopResult:
+        spec = dataclasses.replace(self.settings.spec, model_id=model)
+        loop = ToolLoop(
+            Gateway((spec,), HTTPAdapter(self._client)),
+            self.registry,
+            approve=approve,
+            on_step=on_step,
+        )
+        future = asyncio.run_coroutine_threadsafe(loop.run(messages, self._make), self._loop)
+        return future.result(timeout=120)
 
     def reset(self) -> None:
         with self._lock:
