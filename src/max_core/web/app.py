@@ -575,11 +575,11 @@ def create_app(
                 job.connect = {"service": service, "action": "authorize"}
             jobs[job.id] = job
             return {"job": job.id}
+        if any(j.status in {"running", "approval"} for j in jobs.values()):
+            raise HTTPException(409, "busy")
         sess = session()
         if sess is None:
             raise HTTPException(503, state["error"] or "model_not_configured")
-        if any(j.status in {"running", "approval"} for j in jobs.values()):
-            raise HTTPException(409, "busy")
         for old in [k for k, j in jobs.items() if time.time() - j.created > 600]:
             jobs.pop(old, None)
         job = Job(uuid.uuid4().hex)
