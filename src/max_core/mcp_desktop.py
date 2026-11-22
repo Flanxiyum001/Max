@@ -19,7 +19,8 @@ from pathlib import Path
 from typing import Any
 
 from max_core.mcp_discovery import MCPConnection, ObservedTool, discover_tools
-from max_core.mcp_policy import ReviewedToolPolicy, RiskTier as ReviewedRiskTier
+from max_core.mcp_policy import ReviewedToolPolicy
+from max_core.mcp_policy import RiskTier as ReviewedRiskTier
 
 _NAME = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
 _ENV = re.compile(r"[A-Z][A-Z0-9_]{0,127}\Z")
@@ -52,9 +53,7 @@ def default_profile_path(env: Mapping[str, str] | None = None) -> Path:
 class MCPDesktopManager:
     """Host-only configuration API. Never register these operations as model tools."""
 
-    def __init__(
-        self, path: Path | None = None, *, env: Mapping[str, str] | None = None
-    ) -> None:
+    def __init__(self, path: Path | None = None, *, env: Mapping[str, str] | None = None) -> None:
         self._env = dict(os.environ if env is None else env)
         self.path = path if path is not None else default_profile_path(self._env)
         self._lock = threading.RLock()
@@ -279,9 +278,7 @@ class MCPDesktopManager:
                         item["id"],
                         tool["name"],
                         tool["sha256"],
-                        ReviewedRiskTier.R1
-                        if tool["read_only_hint"]
-                        else ReviewedRiskTier.R2,
+                        ReviewedRiskTier.R1 if tool["read_only_hint"] else ReviewedRiskTier.R2,
                         frozenset(tool["allowed_arguments"]),
                         True,
                     )
