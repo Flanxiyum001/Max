@@ -396,7 +396,7 @@ class OrbWindow(QWidget):
                     else:
                         from max_core.assistant_session import AssistantSession
 
-                        self._session = AssistantSession.from_env()
+                        self._session = AssistantSession.from_env(mcp_core=self.core)
                 except Exception:
                     self.session_error = "local_model_not_configured"
             return self._session
