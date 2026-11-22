@@ -1,8 +1,7 @@
 # MAX MCP Connections — one hub, no per-app token variables
 
 MAX's hosted web orb now includes a built-in **Connections** drawer and
-natural-language commands for GitHub, Cloudflare, Railway, Notion, Linear and
-Sentry. These are *curated official remote MCP endpoints*, not services that
+natural-language commands for GitHub, Cloudflare, Railway, Notion, Linear, Sentry and Figma. These are *curated official remote MCP endpoints*, not services that
 a language model is allowed to invent or auto-install.
 
 ## How to connect
