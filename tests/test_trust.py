@@ -236,3 +236,36 @@ def test_cannot_use_approved_grant_for_unknown_tool(store: TaskStore) -> None:
             scope, grant.id, ToolProposal("call-001", "shell.run", {"task_id": task.id})
         )
     assert service.execute(scope, grant.id, proposal(task.id)).task_id == task.id
+
+
+def test_duplicate_pending_proposal_rejected(store: TaskStore) -> None:
+    task, _ = store.create("owner", "Duplicate", "trust-duplicate-001")
+    service = TrustService(store.engine)
+    scope = context(task.id)
+    grant = service.request(scope, proposal(task.id))
+    with pytest.raises(TrustError, match="duplicate_proposal"):
+        service.request(scope, proposal(task.id))
+    assert [item.id for item in service.list_pending("owner")] == [grant.id]
+
+
+def test_validation_error_not_masked_by_denial_audit(store: TaskStore) -> None:
+    task, _ = store.create("owner", "Unmasked", "trust-unmasked-001")
+    service = TrustService(store.engine)
+    scope = context(task.id)
+    with pytest.raises(TrustError, match="invalid_action_parameters"):
+        service.request(scope, ToolProposal("call-001", "task.status", {"task_id": str(uuid4())}))
+    with pytest.raises(TrustError, match="invalid_action_parameters"):
+        service.request(context(str(uuid4()), owner_id="attacker"), proposal(task.id))
+
+
+def test_re_request_allowed_after_first_grant_expires(store: TaskStore) -> None:
+    task, _ = store.create("owner", "Expiry retry", "trust-retry-001")
+    service = TrustService(store.engine)
+    scope = context(task.id)
+    grant = service.request(scope, proposal(task.id), ttl_seconds=15)
+    with Session(store.engine) as session, session.begin():
+        row = session.get(ApprovalGrant, grant.id)
+        assert row
+        row.expires_at = utc_now() - timedelta(seconds=1)
+    second = service.request(scope, proposal(task.id))
+    assert second.id != grant.id

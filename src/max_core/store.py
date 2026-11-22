@@ -8,7 +8,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from uuid import uuid4
 
 from sqlalchemy import Engine, create_engine, or_, select, text
@@ -16,18 +16,12 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from max_core.models import OutboxEvent, Task, TaskCheckpoint, utc_now
+from max_core.persistence import StoreError as StoreError
+from max_core.persistence import _is_expired as _is_expired
+from max_core.persistence import _locked as _locked
 
 _KEY = re.compile(r"^[A-Za-z0-9._:-]{8,100}$")
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
-
-
-class StoreError(Exception):
-    """Client-visible reason without private SQL or credential material."""
-
-    def __init__(self, reason: str, status_code: int = 409) -> None:
-        self.reason = reason
-        self.status_code = status_code
-        super().__init__(reason)
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,15 +71,6 @@ def _digest(objective: str) -> str:
     return hashlib.sha256(objective.encode("utf-8")).hexdigest()
 
 
-def _locked(session: Session, task_id: str, owner_id: str) -> Task:
-    task = session.scalar(
-        select(Task).where(Task.id == task_id, Task.owner_id == owner_id).with_for_update()
-    )
-    if task is None:
-        raise StoreError("Task not found", 404)
-    return task
-
-
 def _event(session: Session, task: Task, kind: str) -> None:
     session.add(
         OutboxEvent(
@@ -104,13 +89,6 @@ def _advance(task: Task, state: str) -> None:
     task.updated_at = utc_now()
 
 
-def _is_expired(lease_until: datetime | None) -> bool:
-    if lease_until is None:
-        return True
-    instant = lease_until if lease_until.tzinfo is not None else lease_until.replace(tzinfo=UTC)
-    return instant.astimezone(UTC) <= utc_now()
-
-
 class TaskStore:
     def __init__(self, engine: Engine) -> None:
         self.engine = engine
@@ -121,7 +99,7 @@ class TaskStore:
         try:
             with self.engine.connect() as connection:
                 version = connection.scalar(text("SELECT version_num FROM alembic_version LIMIT 1"))
-                if version != "0006_device_nodes":
+                if version != "0007_grant_proposal_uniqueness":
                     return False
                 connection.execute(text("SELECT id FROM max_tasks LIMIT 1"))
                 connection.execute(text("SELECT id FROM max_approval_grants LIMIT 1"))

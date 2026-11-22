@@ -23,7 +23,8 @@ from max_core.bounded_worker import WorkerError, execute_operation, parse_operat
 from max_core.gateway.contracts import ToolDefinition, ToolProposal
 from max_core.local_config import DesktopConfig
 from max_core.native_desktop.backend import NativeDesktopCore, NativeDesktopError
-from max_core.store import StoreError, TaskStore, _is_expired
+from max_core.persistence import _is_expired
+from max_core.store import StoreError, TaskStore
 from max_core.trust import (
     ActorContext,
     RiskTier,

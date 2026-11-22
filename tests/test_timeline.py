@@ -98,7 +98,7 @@ def test_cursor_survives_restart_but_not_token_rotation(store: TaskStore) -> Non
     first = api(store).get(path, headers=authorized(), params={"limit": 1}).json()
     cursor = first["next_cursor"]
     assert api(store).get(path, headers=authorized(), params={"cursor": cursor}).status_code == 200
-    different_token = "another-test-token-" + "abcdef1234567890" * 3
+    different_token = "fedcba9876543210" * 4
     rotated = api(store, different_token)
     changed_auth = {"Authorization": f"Bearer {different_token}"}
     res = rotated.get(path, headers=changed_auth, params={"cursor": cursor})

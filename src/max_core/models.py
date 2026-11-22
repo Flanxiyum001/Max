@@ -4,7 +4,16 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -76,7 +85,18 @@ class ApprovalGrant(Base):
     """Owner decision for one bounded, non-effectful tool invocation."""
 
     __tablename__ = "max_approval_grants"
-    __table_args__ = (Index("ix_max_approval_owner_state", "owner_id", "state"),)
+    __table_args__ = (
+        Index("ix_max_approval_owner_state_expiry", "owner_id", "state", "expires_at"),
+        Index(
+            "uq_grant_owner_task_pending_proposal",
+            "owner_id",
+            "task_id",
+            "proposal_id",
+            unique=True,
+            sqlite_where=text("state = 'pending'"),
+            postgresql_where=text("state = 'pending'"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     owner_id: Mapped[str] = mapped_column(String(64), nullable=False)
