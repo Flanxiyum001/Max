@@ -291,7 +291,7 @@ class NativeDesktopCore:
         self._chat_service: AssistantChatService | None = chat_service
         self._chat_service_injected = chat_service is not None
         self._tool_registry: LocalToolRegistry | None = None
-        self._tool_executor: LocalToolExecutor | None = tool_executor
+        self._tool_executor: ToolExecutor | None = tool_executor
         self._tool_executor_injected = tool_executor is not None
         from max_core.mcp_desktop import MCPDesktopManager
 
@@ -876,12 +876,12 @@ class NativeDesktopCore:
                 name=name,
                 arguments=resolved_args,
             )
-            from max_core.mcp_execute import CompositeToolExecutor
+            from max_core.local_tools import LocalToolExecutor
 
-            if isinstance(executor, CompositeToolExecutor):
-                summary = executor.execute(proposal, approval_id=approval_id)
-            else:
+            if isinstance(executor, LocalToolExecutor):
                 summary = executor.execute(proposal, approval_id=approval_id, task_id=task_id)
+            else:
+                summary = executor.execute(proposal, approval_id=approval_id)
             if summary.status == "awaiting_approval" and summary.approval_id:
                 with self._continuation_lock:
                     if len(self._pending_direct_tools) >= _MAX_CONTINUATION_CACHE:
@@ -970,14 +970,14 @@ class NativeDesktopCore:
                     proposal, pending_task_id = pending_direct
                     executor = self._get_tool_executor()
                     if executor is not None:
-                        from max_core.mcp_execute import CompositeToolExecutor
+                        from max_core.local_tools import LocalToolExecutor
 
-                        if isinstance(executor, CompositeToolExecutor):
-                            summary = executor.execute(proposal, approval_id=approval_id)
-                        else:
+                        if isinstance(executor, LocalToolExecutor):
                             summary = executor.execute(
                                 proposal, approval_id=approval_id, task_id=pending_task_id
                             )
+                        else:
+                            summary = executor.execute(proposal, approval_id=approval_id)
                         self._store_direct_continuation(approval_id, summary)
 
             return result
