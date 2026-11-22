@@ -242,8 +242,14 @@ class GitHubPRSandbox:
         if state not in {"queued", "in_progress", "completed", "waiting", "requested", "pending"}:
             raise SandboxError("sandbox_invalid_run_status")
         if conclusion not in (
-            None, "success", "failure", "cancelled", "skipped", "timed_out",
-            "action_required", "neutral",
+            None,
+            "success",
+            "failure",
+            "cancelled",
+            "skipped",
+            "timed_out",
+            "action_required",
+            "neutral",
         ):
             raise SandboxError("sandbox_invalid_run_status")
         return {"state": state, "conclusion": conclusion or "pending"}
