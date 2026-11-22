@@ -271,22 +271,66 @@ function chime(up) {
 
 // ---------------------------------------------------------------- voice out
 let followUp = false;
+// Browsers keep page audio locked until the first tap/keypress. Unlock once, on
+// that gesture, and reuse ONE player element so later replies may play by themselves.
+let player = null, playerSrc = null;
+function silentWav() {
+  const b = new Uint8Array(44 + 800), v = new DataView(b.buffer);
+  const w = (o, t) => [...t].forEach((c, i) => b[o + i] = c.charCodeAt(0));
+  w(0, "RIFF"); v.setUint32(4, 36 + 800, true); w(8, "WAVEfmt "); v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, 8000, true);
+  v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+  w(36, "data"); v.setUint32(40, 800, true); b.fill(128, 44);
+  return URL.createObjectURL(new Blob([b], { type: "audio/wav" }));
+}
+function unlockAudio() {
+  try { ensureAudio(); } catch {}
+  if (!player) {
+    player = new Audio(); player.preload = "auto";
+    player.src = silentWav(); player.play().catch(() => {});
+  }
+  if (window.speechSynthesis && !unlockAudio.tts) {   // also prime the browser voice
+    unlockAudio.tts = true;
+    try { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; speechSynthesis.speak(u); } catch {}
+  }
+}
+["pointerdown", "keydown", "touchend"].forEach((ev) =>
+  document.addEventListener(ev, unlockAudio, { capture: true, passive: true }));
+async function audioRunning() {
+  if (!audioCtx) return false;
+  if (audioCtx.state !== "running") {
+    try { await Promise.race([audioCtx.resume(), new Promise((r) => setTimeout(r, 400))]); } catch {}
+  }
+  return audioCtx.state === "running";
+}
 function say(text) {
   return new Promise(async (done) => {
     try {
       const res = await api("/api/speak", { text: text.slice(0, 2000) });
       const url = URL.createObjectURL(await res.blob());
       const wantFollowUp = followUp;
-      stopSpeaking(); followUp = wantFollowUp; audio = new Audio(url); setState("speaking");
-      try { ensureAudio(); const src = audioCtx.createMediaElementSource(audio);
-            src.connect(audioCtx.destination); connectLevel(src); } catch {}
-      audio.onended = () => {
-        URL.revokeObjectURL(url); audio = null;
+      stopSpeaking(); followUp = wantFollowUp;
+      // Route through the visualiser only while it is running; a suspended
+      // AudioContext would otherwise swallow the sound without any error.
+      const running = await audioRunning();
+      let el;
+      if (player && (playerSrc || running)) {
+        el = player;
+        if (!playerSrc && running) {
+          try { playerSrc = audioCtx.createMediaElementSource(player); playerSrc.connect(audioCtx.destination); } catch {}
+        }
+        if (playerSrc && !running) el = new Audio();   // routed but muted: play directly instead
+      } else el = new Audio();
+      if (el === player && playerSrc) connectLevel(playerSrc);
+      el.src = url; audio = el; setState("speaking");
+      el.onended = () => {
+        URL.revokeObjectURL(url); el.onended = null; audio = null;
         if (!busy) setState("idle");
         done();
         if (followUp) { followUp = false; setTimeout(() => startListening({ followUp: true }), 250); }
+        else resumeWake();
       };
-      await audio.play();
+      await el.play();
     } catch {
       // Server voices failed: speak with the browser's built-in voice instead.
       const wantFollowUp = followUp;
