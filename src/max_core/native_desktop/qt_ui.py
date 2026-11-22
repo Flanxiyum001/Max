@@ -553,6 +553,9 @@ class MaxWindow(QMainWindow):
         self._quiet = False
         self._in_flight_chats = 0
         self._pending_approval_count = 0
+        # Pending MCP arguments are kept in memory for exact-action approval.
+        # The Trust journal intentionally does NOT persist sensitive arguments.
+        self._pending_mcp_requests: dict[str, tuple[str, dict[str, object]]] = {}
         self._task_ids: list[str] = []
         self._history: list[int] = [0]
         self._history_index = 0
@@ -1272,6 +1275,15 @@ class MaxWindow(QMainWindow):
         ):
             self.tool_outcomes_list.clear()
         for summary in summaries:
+            if (
+                summary.tool_name.startswith("mcp.")
+                and summary.status == "awaiting_approval"
+                and summary.approval_id
+            ):
+                self._pending_mcp_requests[summary.approval_id] = (
+                    summary.tool_name,
+                    dict(summary.arguments),
+                )
             preview = _format_tool_output_preview(summary.output)
             text = f"[{summary.status.upper()}] {summary.tool_name} — {preview}"
             self.tool_outcomes_list.addItem(text)
@@ -1456,6 +1468,36 @@ class MaxWindow(QMainWindow):
         if not isinstance(approval_id, str):
             self.notice.setText("Select a pending Trust request first.")
             return
+        tool_name = current.data(Qt.ItemDataRole.UserRole + 1)
+        if approve and isinstance(tool_name, str) and tool_name.startswith("mcp."):
+            recorded = self._pending_mcp_requests.get(approval_id)
+            if recorded is None or recorded[0] != tool_name:
+                self.notice.setText(
+                    "This MCP request has no active argument record. "
+                    "Deny it and ask MAX to propose the operation again."
+                )
+                return
+            arguments_text = json.dumps(recorded[1], indent=2, ensure_ascii=True)
+            if len(arguments_text) > 8_192:
+                self.notice.setText(
+                    "MCP arguments exceed the review limit. Deny and retry safely."
+                )
+                return
+            dialog = QMessageBox(self)
+            dialog.setWindowTitle("MAX MCP: approve exact remote action?")
+            dialog.setIcon(QMessageBox.Icon.Warning)
+            dialog.setText(f"Approve one remote invocation of {tool_name}?")
+            dialog.setInformativeText(
+                "Exact arguments to send to the MCP server:\n"
+                + arguments_text
+                + "\n\nResults can be shared with your selected AI provider."
+            )
+            dialog.setStandardButtons(
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            dialog.setDefaultButton(QMessageBox.StandardButton.No)
+            if dialog.exec() != QMessageBox.StandardButton.Yes:
+                return
         self.approve_button.setEnabled(False)
         self.deny_button.setEnabled(False)
         self.notice.setText("Recording Trust decision…")
@@ -1499,6 +1541,9 @@ class MaxWindow(QMainWindow):
                 else ApprovalResolution(approval=value)
             )
             state = str(resolution.approval.get("state", "updated"))
+            decided_id = resolution.approval.get("id")
+            if isinstance(decided_id, str):
+                self._pending_mcp_requests.pop(decided_id, None)
             self.notice.setText(f"Trust request {state}.")
             if resolution.chat_result is not None:
                 self._handle_chat_result(resolution.chat_result)
@@ -1619,6 +1664,7 @@ class MaxWindow(QMainWindow):
             state = str(approval.get("state", "pending"))[:30]
             item = QListWidgetItem(f"{tool}    •    {state.upper()}")
             item.setData(Qt.ItemDataRole.UserRole, approval.get("id"))
+            item.setData(Qt.ItemDataRole.UserRole + 1, tool)
             self.trust_list.addItem(item)
         has_approvals = bool(snapshot.approvals)
         if has_approvals:
