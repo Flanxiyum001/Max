@@ -272,3 +272,126 @@ def test_router_auto_model_accepts_routed_model() -> None:
     assert model_matches("auto:fast", "gemini-2.5-flash")
     assert not model_matches("gpt-4o", "gpt-4o-mini")
     assert not model_matches("auto", "")
+
+
+# --- backup voice (M33) ---------------------------------------------------------
+
+BACKUP_ENV = {
+    "MAX_WEB_PASSCODE": PASS,
+    "MAX_WEB_INSECURE_COOKIE": "yes",
+    "MAX_TRIAL_ENDPOINT": "https://llm.example.test/v1/chat/completions",
+    "MAX_TRIAL_API_KEY": "freellmapi-test-not-real",
+}
+
+
+async def broken_tts(text: str, voice: str, rate: str, pitch: str) -> bytes:
+    raise OSError("blocked")
+
+
+def test_tts_config_derives_from_chat_endpoint() -> None:
+    from max_core.web.app import tts_config
+
+    cfg = tts_config(BACKUP_ENV)
+    assert cfg is not None and cfg.url == "https://llm.example.test/v1/audio/speech"
+    assert cfg.api_key == "freellmapi-test-not-real" and cfg.voice == "nova"
+    assert tts_config({**BACKUP_ENV, "MAX_TTS_FALLBACK": "off"}) is None
+    assert tts_config({"MAX_TRIAL_ENDPOINT": "http://evil.test/v1/chat/completions"}) is None
+
+
+def test_speak_falls_back_to_backup_voice() -> None:
+    used: list[str] = []
+
+    async def backup(text, cfg):  # type: ignore[no-untyped-def]
+        used.append(cfg.url)
+        return b"ID3backup"
+
+    app = create_app(BACKUP_ENV, session_factory=FakeSession, tts=broken_tts, tts_backup=backup)
+    client = TestClient(app)
+    login(client)
+    res = client.post("/api/speak", json={"text": "Hello"})
+    assert res.status_code == 200 and res.content == b"ID3backup"
+    assert used == ["https://llm.example.test/v1/audio/speech"]
+
+
+def test_speak_503_when_all_server_voices_fail() -> None:
+    async def backup(text, cfg):  # type: ignore[no-untyped-def]
+        raise OSError("down")
+
+    app = create_app(BACKUP_ENV, session_factory=FakeSession, tts=broken_tts, tts_backup=backup)
+    client = TestClient(app)
+    login(client)
+    assert client.post("/api/speak", json={"text": "Hello"}).status_code == 503
+
+
+def test_synthesize_api_request_shape() -> None:
+    import asyncio
+    import json
+
+    import httpx
+
+    from max_core.web import app as web_app
+
+    seen: dict = {}  # type: ignore[type-arg]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(json.loads(request.content), auth=request.headers["authorization"])
+        return httpx.Response(200, content=b"ID3", headers={"content-type": "audio/mpeg"})
+
+    real = httpx.AsyncClient
+    cfg = web_app.TtsConfig("https://llm.example.test/v1/audio/speech", "k", "tts-1", "nova")
+    try:
+        httpx.AsyncClient = lambda **kw: real(transport=httpx.MockTransport(handler))  # type: ignore[assignment,misc]
+        assert asyncio.run(web_app.synthesize_api("hi", cfg)) == b"ID3"
+    finally:
+        httpx.AsyncClient = real  # type: ignore[misc]
+    assert seen == {"model": "tts-1", "voice": "nova", "input": "hi", "response_format": "mp3",
+                    "auth": "Bearer k"}  # fmt: skip
+
+
+# --- Piper voice ------------------------------------------------------------------
+
+
+class FakePiper:
+    ready = True
+
+    def synthesize(self, text: str) -> bytes:
+        return b"RIFF" + text.encode()
+
+
+def test_piper_is_first_choice_and_served_as_wav() -> None:
+    app = create_app(BACKUP_ENV, session_factory=FakeSession, tts=broken_tts, piper=FakePiper())
+    client = TestClient(app)
+    login(client)
+    res = client.post("/api/speak", json={"text": "Hi"})
+    assert res.status_code == 200 and res.content == b"RIFFHi"
+    assert res.headers["content-type"] == "audio/wav"
+
+
+def test_piper_not_ready_falls_back_to_neural_voice(web) -> None:  # type: ignore[no-untyped-def]
+    class Loading(FakePiper):
+        ready = False
+
+    app = create_app(
+        {"MAX_WEB_PASSCODE": PASS, "MAX_WEB_INSECURE_COOKIE": "yes"},
+        session_factory=FakeSession, tts=fake_tts, piper=Loading(),
+    )  # fmt: skip
+    client = TestClient(app)
+    login(client)
+    res = client.post("/api/speak", json={"text": "Hi"})
+    assert res.status_code == 200 and res.headers["content-type"] == "audio/mpeg"
+
+
+def test_piper_voice_urls_and_validation() -> None:
+    from max_core.web.piper_voice import PiperSpeaker, voice_urls
+
+    model, config = voice_urls("en_US-hfc_female-medium")
+    assert model == (
+        "https://huggingface.co/rhasspy/piper-voices/resolve/main/"
+        "en/en_US/hfc_female/medium/en_US-hfc_female-medium.onnx"
+    )
+    assert config == model + ".json"
+    with pytest.raises(ValueError):
+        voice_urls("../../etc/passwd")
+    off = PiperSpeaker({"MAX_PIPER": "off"}, Path("/nonexistent"))
+    off.start()
+    assert not off.wait(1) and not off.ready

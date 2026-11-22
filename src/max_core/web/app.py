@@ -10,6 +10,7 @@ on the web server.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import logging
@@ -105,6 +106,47 @@ async def synthesize(text: str, voice: str, rate: str, pitch: str) -> bytes:
 
 
 @dataclass(frozen=True)
+class TtsConfig:
+    url: str
+    api_key: str | None
+    model: str
+    voice: str
+
+
+def tts_config(env: dict[str, str]) -> TtsConfig | None:
+    """Backup voice: an OpenAI-compatible /v1/audio/speech endpoint (FreeLLMAPI has one)."""
+    if env.get("MAX_TTS_FALLBACK", "").lower() in {"off", "no", "0"}:
+        return None
+    url = env.get("MAX_TTS_ENDPOINT", "").strip()
+    if not url:
+        chat = env.get("MAX_TRIAL_ENDPOINT", "").strip()
+        if not chat.endswith("/chat/completions"):
+            return None
+        url = chat[: -len("/chat/completions")] + "/audio/speech"
+    if not url.startswith("https://") and not url.startswith("http://127.0.0.1"):
+        return None
+    return TtsConfig(
+        url=url,
+        api_key=env.get("MAX_TTS_API_KEY") or env.get("MAX_TRIAL_API_KEY") or None,
+        model=env.get("MAX_TTS_MODEL", "tts-1"),
+        voice=env.get("MAX_TTS_VOICE", "nova"),
+    )
+
+
+async def synthesize_api(text: str, cfg: TtsConfig) -> bytes:
+    import httpx
+
+    headers = {"Authorization": f"Bearer {cfg.api_key}"} if cfg.api_key else {}
+    payload = {"model": cfg.model, "voice": cfg.voice, "input": text, "response_format": "mp3"}
+    async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
+        response = await client.post(cfg.url, json=payload, headers=headers)
+    response.raise_for_status()
+    if not response.headers.get("content-type", "").startswith("audio/"):
+        raise ValueError("not_audio")
+    return response.content[:8_000_000]
+
+
+@dataclass(frozen=True)
 class SttConfig:
     url: str
     api_key: str | None
@@ -167,6 +209,8 @@ def create_app(
     session_factory: Any = None,
     tts: Any = None,
     transcriber: Any = None,
+    tts_backup: Any = None,
+    piper: Any = None,
 ) -> FastAPI:
     env = dict(os.environ if env is None else env)
     passcode = env.get("MAX_WEB_PASSCODE", "")
@@ -178,6 +222,8 @@ def create_app(
     rate = env.get("MAX_WEB_VOICE_RATE", "+6%")
     pitch = env.get("MAX_WEB_VOICE_PITCH", "+2Hz")
     speak = tts or synthesize
+    backup_cfg = tts_config(env)
+    backup = tts_backup or synthesize_api
     stt = stt_config(env)
     hear = transcriber or transcribe
 
@@ -397,13 +443,27 @@ def create_app(
         require(request)
         if not tts_limit.allow(_client_ip(request)):
             raise HTTPException(429, "slow_down")
-        try:
-            audio = await speak(body.text, voice, rate, pitch)
-        except Exception:
-            raise HTTPException(503, "tts_unavailable") from None
+        audio = b""
+        if piper is not None and piper.ready:
+            try:
+                audio = await asyncio.to_thread(piper.synthesize, body.text)
+            except Exception as exc:
+                log.warning("piper voice failed: %s", type(exc).__name__)
         if not audio:
+            try:
+                audio = await speak(body.text, voice, rate, pitch)
+            except Exception as exc:
+                log.warning("neural voice failed: %s", type(exc).__name__)
+        if not audio and backup_cfg is not None:
+            try:
+                audio = await backup(body.text, backup_cfg)
+            except Exception as exc:
+                log.warning("backup voice failed: %s", type(exc).__name__)
+        if not audio:
+            # The browser then falls back to its own built-in voice.
             raise HTTPException(503, "tts_unavailable")
-        return Response(audio, media_type="audio/mpeg")
+        kind = "audio/wav" if audio[:4] == b"RIFF" else "audio/mpeg"
+        return Response(audio, media_type=kind)
 
     return app
 
@@ -428,11 +488,16 @@ def main() -> int:
     import uvicorn
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(name)s: %(message)s")
+    from max_core.web.piper_voice import PiperSpeaker
+
+    cache = Path(os.environ.get("MAX_DATA_DIR", "/tmp/max-data")) / "voices"  # noqa: S108
+    speaker = PiperSpeaker(dict(os.environ), cache)
     try:
-        app = create_app()
+        app = create_app(piper=speaker)
     except RuntimeError as exc:
         print(f"MAX web: {exc}")
         return 2
+    speaker.start()
     uvicorn.run(
         app,
         host=os.environ.get("HOST", "0.0.0.0"),  # noqa: S104 - hosted service
