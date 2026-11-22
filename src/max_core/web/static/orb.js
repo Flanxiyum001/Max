@@ -134,6 +134,17 @@ const ERRORS = {
   busy: "One moment, I'm still on the last one.",
   slow_down: "Too many requests, give me a second.",
 };
+// Why the model call failed (sanitized gateway codes from the server).
+const DETAILS = {
+  auth_failure: "My model key was rejected. Check MAX_TRIAL_API_KEY.",
+  provider_unavailable: "I can't reach the model server. Is FreeLLMAPI online at a public address?",
+  timeout: "The model took too long to answer. Try again.",
+  rate_limited: "All my free models are rate-limited right now. Try again in a minute.",
+  invalid_request: "The model server rejected the request. Check MAX_TRIAL_MODEL.",
+  model_mismatch: "The model server answered with an unexpected model.",
+  malformed_provider_response: "The model server sent a reply I couldn't read.",
+  cloud_sensitive_content_blocked: "I held that back: it looked like private data for a cloud model.",
+};
 
 // ---------------------------------------------------------------- login
 function showLogin() {
@@ -182,7 +193,7 @@ async function ask(text, spoken) {
         setState("speaking"); show(j.answer);
         if (spoken) { followUp = true; await say(j.answer); } else setState("speaking", 2500);
         if (!followUp) resumeWake();
-      } else { setState("error", 2500); show(ERRORS[j.error] || ERRORS.model_unavailable); resumeWake(); }
+      } else { setState("error", 2500); show(DETAILS[j.detail] || ERRORS[j.error] || ERRORS.model_unavailable); resumeWake(); }
       return;
     }
   } catch (err) {
