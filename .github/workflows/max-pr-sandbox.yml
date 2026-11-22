@@ -109,14 +109,18 @@ jobs:
         id: validate
         timeout-minutes: 14
         shell: bash
+        env:
+          REPO_NAME: ${{ github.repository }}
+          REVIEW_PR_NUMBER: ${{ inputs.pr_number }}
+          PINNED_SHA: ${{ steps.source.outputs.head_sha }}
         run: |
           set -euo pipefail
           {
             echo "## MAX PR sandbox"
             echo ""
-            echo "- Repository: ${{ github.repository }}"
-            echo "- PR: #${{ inputs.pr_number }}"
-            echo "- Pinned SHA: ${{ steps.source.outputs.head_sha }}"
+            echo "- Repository: ${REPO_NAME}"
+            echo "- PR: #${REVIEW_PR_NUMBER}"
+            echo "- Pinned SHA: ${PINNED_SHA}"
             echo "- Runner: temporary GitHub-hosted Linux VM"
             echo "- GitHub permissions: contents/pull-requests READ ONLY"
             echo "- No production credentials, deploy, git push, or merge"
