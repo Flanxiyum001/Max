@@ -11,14 +11,12 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import Column, MetaData, String, Table, create_engine, delete, select
-from sqlalchemy.dialects import sqlite
 from sqlalchemy.engine import Engine
 
 _ALLOWED = frozenset({"github", "cloudflare", "railway", "notion", "linear", "sentry"})
@@ -40,6 +38,7 @@ class MCPCredentialVault:
         secret = env.get("MAX_WEB_SECRET", "")
         self._fernet: Fernet | None = None
         self._engine: Engine | None = None
+        self._durable = False
         # Application-wide secret provisioned ONCE by Render, not per MCP app.
         if len(secret) < 32:
             return
@@ -48,22 +47,31 @@ class MCPCredentialVault:
         try:
             if engine is not None:
                 self._engine = engine
+                self._durable = True
             else:
                 url = env.get("MAX_MCP_VAULT_DATABASE_URL") or env.get("MAX_DATABASE_URL")
-                if not url:
+                if url:
+                    self._durable = True
+                else:
                     path = Path(env.get("MAX_DATA_DIR") or "~/.max").expanduser()
                     path.mkdir(parents=True, exist_ok=True, mode=0o700)
                     url = "sqlite:///" + str(path / "mcp-vault.sqlite3")
+                    self._durable = "RENDER_EXTERNAL_URL" not in env
                 # This is a trusted HOST configuration, never read from model output.
                 self._engine = create_engine(url, pool_pre_ping=True)
             _METADATA.create_all(self._engine, tables=[_CREDENTIALS])
         except Exception:
             # Fail closed to memory-only rather than losing existing chat access.
             self._engine = None
+            self._durable = False
 
     @property
     def available(self) -> bool:
         return self._fernet is not None and self._engine is not None
+
+    @property
+    def durable(self) -> bool:
+        return self.available and self._durable
 
     def save(self, service: str, data: dict[str, Any]) -> None:
         if service not in _ALLOWED or not self.available:
