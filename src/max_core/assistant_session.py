@@ -148,6 +148,7 @@ class AssistantSession:
         executor = core._mcp_executor
         if not isinstance(executor, MCPToolExecutor):
             return
+        bound_executor: MCPToolExecutor = executor
         types = {
             "string": str,
             "integer": int,
@@ -191,7 +192,7 @@ class AssistantSession:
                 arguments: Mapping[str, Any],
                 *,
                 selected_name: str = name,
-                selected_executor: MCPToolExecutor = executor,
+                selected_executor: MCPToolExecutor = bound_executor,
             ) -> str:
                 return self._execute_approved_mcp(selected_executor, selected_name, dict(arguments))
 
