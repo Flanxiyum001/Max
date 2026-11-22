@@ -1093,10 +1093,17 @@ class MaxWindow(QMainWindow):
                 f"Arguments: {', '.join(details['allowed_arguments']) or '(discover first)'}\n"
                 "Remote tools are untrusted and every invocation requires a fresh owner approval."
             )
-            if (
-                QMessageBox.question(self, "Review MCP tool", question)
-                != QMessageBox.StandardButton.Yes
-            ):
+            dialog = QMessageBox(self)
+            dialog.setWindowTitle("Review MCP tool")
+            dialog.setIcon(QMessageBox.Icon.Warning)
+            dialog.setText(question)
+            dialog.setInformativeText("Open Details to inspect the pinned input schema.")
+            dialog.setDetailedText(details["schema_json"])
+            dialog.setStandardButtons(
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            dialog.setDefaultButton(QMessageBox.StandardButton.No)
+            if dialog.exec() != QMessageBox.StandardButton.Yes:
                 return
         self._run(
             "mcp_review",
