@@ -98,12 +98,12 @@ If no API key is configured, MAX still launches cleanly and shows an actionable 
 - Surfaces missing keys, `401`/`403` auth errors, `429` rate limits, `5xx` errors, timeouts, and network errors as sanitized status messages without leaking API keys or raw tracebacks.
 
 ### Bounded Local Tools & MAX Trust (`max_core.local_tools`, `max_core.trust`)
-The trusted local tool registry contains 15 typed allowlisted tools, validated against strict JSON schemas and audited in `max_trust_audit` (metadata only, never plaintext secrets). **Cloud chat does not advertise private local read tools** (workspace, note, task, or system status) because their outputs could disclose non-secret private data to a remote model without separate export consent:
+The trusted local tool registry contains 17 typed allowlisted tools, validated against strict JSON schemas and audited in `max_trust_audit` (metadata only, never plaintext secrets). **Cloud chat does not advertise private local read tools** (workspace, note, task, or system status) because their outputs could disclose non-secret private data to a remote model without separate export consent:
 
 | Risk Tier | Behavior | Tools |
 | --- | --- | --- |
-| **R0** (read-only / deterministic) | Auto-audited and executed immediately | `dev.health`, `dev.add`, `system.status`, `task.status`, `task.list`, `workspace.list_files`, `workspace.read_file`, `notes.list` |
-| **R1 / R2** (state-changing) | Creates a single-use `ApprovalGrant` in **Trust Inbox**; runs only after explicit **Approve** click | `task.create` (`R1`), `task.plan` (`R1`), `git.status` / `git.diff` / `test.run_pytest` (`R1`), `notes.save` (`R2`), `code.execute_python` (`R2`) |
+| **R0** (read-only / deterministic) | Auto-audited and executed immediately | `dev.health`, `dev.add`, `system.status`, `task.status`, `task.list`, `workspace.list_files`, `workspace.read_file`, `notes.list`, `memory.search` |
+| **R1 / R2** (state-changing) | Creates a single-use `ApprovalGrant` in **Trust Inbox**; runs only after explicit **Approve** click | `task.create` (`R1`), `task.plan` (`R1`), `git.status` / `git.diff` / `test.run_pytest` (`R1`), `notes.save` (`R2`), `code.execute_python` (`R2`), `memory.propose_update` (`R1`) |
 
 - `workspace.list_files` and `workspace.read_file` are confined to `MAX_WORKSPACE_ROOT` (defaulting to the current working directory) and block `.git`, `.venv`, `.env*`, private keys, and `.sqlite3`/`.db` files.
 - `notes.save` and `notes.list` operate only inside `MAX_NOTES_DIR` (defaulting to `%LOCALAPPDATA%\MAX\notes` on Windows).
@@ -118,6 +118,11 @@ The trusted local tool registry contains 15 typed allowlisted tools, validated a
 - **Scheduled check-ins, never scheduled actions**: deterministic recurring observations (`briefing.daily` task counts, `notes.digest` newest note titles from `MAX_NOTES_DIR`, `repo.status` bounded `git status`) run on a strict 5-field cron and queue bounded, display-safe runs for review. Promoting a recommendation into the **Trust Inbox** is an explicit owner action with the same single-use R1/R2 approval as any tool call. See [M36](docs/M36_PROACTIVE_TRIGGERS_AND_PLANNER.md).
 - **Multi-step task plans**: objectives with explicit owner structure (numbered steps, bullets, `;`, newlines, ` then `) become a dependency-ordered graph of sub-steps; a step is marked ready only when every earlier step is completed, and R1/R2 boundaries pause in the Trust Inbox until the owner approves. Steps are split from the owner's own text — never model-invented.
 - A `task.plan` R1 chat tool exposes the same planner; scheduling uses a small stdlib cron matcher (APScheduler evaluated and deliberately deferred per [dependency evaluation](docs/DEPENDENCY_EVALUATION.md)).
+
+### Persistent semantic memory (`max_core.memory_recall`)
+- **Recall across sessions**: `memory.search` (`R0`) reads a derived, rebuildable SQLite index over `MAX_NOTES_DIR` notes, completed task journals, and `MEMORY.md` entries — hybrid SQLite FTS5 (bm25) + `sqlite-vec` kNN fused with Reciprocal Rank Fusion. Embeddings are deterministic local feature hashing (256-dim signed blake2b slot hashing) — no model download, no API key, no cloud round-trip. When the optional `sqlite-vec` extension (`[semantic]` extra) is absent, recall degrades to FTS-only and the result reports `"vector": false`. See [M37](docs/M37_SEMANTIC_MEMORY_RECALL.md).
+- **Owner-gated memory writes**: `MEMORY.md` (bounded to 512 entries × 280 chars) is written only through `memory.propose_update` (`R1`) — a single-use Trust Inbox approval whose execution is an atomic, deterministic file edit with case-insensitive dedupe. After a long chat or completed plan, MAX proposes concrete memory facts through this exact path; nothing enters long-term memory without the owner's click.
+- The index file is derived and rebuildable at any time (default `max-memory-index.sqlite3` beside `MEMORY.md`; `MAX_MEMORY_MD_PATH` / `MAX_MEMORY_INDEX_PATH` override both).
 
 ### Voice Interaction (`max_core.voice`)
 - **Opt-in Push-to-Talk STT**: Bounded microphone capture (`QtMicrophoneRecorder` + `LocalActivationGate`) starts only on an explicit **Push to Talk** click—never automatically on startup. With an explicitly configured remote provider, **microphone audio is uploaded to the external speech provider** (OpenAI-compatible `/v1/audio/transcriptions`, `whisper-1`). A visible per-recording consent dialog is required before capture; the trusted voice controller blocks remote recording without that consent and clears consent after every turn or cancellation.
@@ -134,6 +139,7 @@ The trusted local tool registry contains 15 typed allowlisted tools, validated a
 | --- | --- | --- | --- |
 | **FastAPI / Starlette / Uvicorn** | In-process Core API & local schemas | MIT / BSD-3-Clause | Local open-source dependencies; desktop binds no TCP socket |
 | **SQLAlchemy / Alembic / psycopg** | Task Journal, Trust & audit persistence | MIT / LGPL-3.0 | Local SQLite (default) or user-configured loopback PostgreSQL |
+| **sqlite-vec** (`[semantic]` extra) | Optional vector kNN inside the derived memory recall index | MIT | Local loadable extension touching only the rebuildable index file; recall degrades to SQLite FTS5 when absent; embeddings are deterministic local hashing (no network) |
 | **httpx** | Cloud LLM & OpenAI STT HTTP client | BSD-3-Clause | Outbound HTTPS only on explicit chat or STT turn; `trust_env=False` |
 | **PySide6** (`[desktop]` extra) | Native desktop UI, `QTextToSpeech`, `QAudioSource` | LGPLv3 / Commercial Qt | Local UI & OS speech/audio bindings |
 | **OpenAI API** | Chat Completions + Whisper STT (`/v1/audio/transcriptions`) | Proprietary cloud API | User-billed API key; bounded by `MAX_COST_USD` and `privacy_guard`; responses treated as untrusted |
