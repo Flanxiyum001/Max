@@ -6,8 +6,9 @@ import hashlib
 import json
 import os
 import re
+import sys
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
@@ -19,6 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from max_core.assistant_chat import ToolExecutionSummary, ToolStatus
+from max_core.bounded_commands import BoundedCommandError, run_bounded_command
 from max_core.bounded_worker import WorkerError, execute_operation, parse_operation
 from max_core.gateway.contracts import ToolDefinition, ToolProposal
 from max_core.local_config import DesktopConfig
@@ -54,6 +56,8 @@ _MAX_NOTE_CONTENT_BYTES = 32_768
 _MAX_NOTE_CONTENT_LINES = 1_000
 _MAX_DEV_ADD_ABS = 1_000_000
 _ANCHOR_OBJECTIVE = "MAX Assistant local tool session"
+_GIT_TIMEOUT_SECONDS = 30
+_PYTEST_TIMEOUT_SECONDS = 300
 
 _EXCLUDED_DIR_NAMES = frozenset({".git", ".venv", "__pycache__", "secrets", "private"})
 _EXCLUDED_FILE_NAMES = frozenset(
@@ -412,8 +416,17 @@ def _validate_notes_save(arguments: dict[str, Any]) -> dict[str, Any]:
     return {"title": canonical_title, "content": content, "overwrite": overwrite}
 
 
+def _run_bounded(
+    workspace_root: Path, argv: Sequence[str], timeout_seconds: int
+) -> dict[str, object]:
+    try:
+        return run_bounded_command(workspace_root, argv, timeout_seconds)
+    except BoundedCommandError as error:
+        raise LocalToolError(error.code, status="failed") from None
+
+
 class LocalToolRegistry:
-    """Fixed host registry of 10 bounded, deterministic local tools."""
+    """Fixed host registry of 13 bounded, deterministic local tools."""
 
     def __init__(
         self,
@@ -637,6 +650,45 @@ class LocalToolRegistry:
                 requires_approval=True,
                 validate=_validate_notes_save,
                 handler=self._handle_notes_save,
+            ),
+            LocalToolSpec(
+                name="git.status",
+                description="Show bounded working-tree status of the MAX workspace (requires Trust approval).",
+                parameters={"type": "object", "properties": {}, "additionalProperties": False},
+                risk_tier=RiskTier.R1,
+                requires_approval=True,
+                validate=_validate_no_args,
+                handler=self._handle_git_status,
+            ),
+            LocalToolSpec(
+                name="git.diff",
+                description="Show a bounded unified diff of uncommitted workspace changes (requires Trust approval).",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "minLength": 1, "maxLength": _MAX_PATH_ARG_CHARS}
+                    },
+                    "additionalProperties": False,
+                },
+                risk_tier=RiskTier.R1,
+                requires_approval=True,
+                validate=self._validate_git_diff,
+                handler=self._handle_git_diff,
+            ),
+            LocalToolSpec(
+                name="test.run_pytest",
+                description="Run bounded pytest inside the MAX workspace (executes owner-authored tests; requires Trust approval).",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "minLength": 1, "maxLength": _MAX_PATH_ARG_CHARS}
+                    },
+                    "additionalProperties": False,
+                },
+                risk_tier=RiskTier.R1,
+                requires_approval=True,
+                validate=self._validate_run_pytest,
+                handler=self._handle_test_run_pytest,
             ),
         )
         self._specs: MappingProxyType[str, LocalToolSpec] = MappingProxyType(
@@ -1179,6 +1231,83 @@ class LocalToolRegistry:
             "bytes_written": len(encoded),
             "overwritten": existed,
         }
+
+    def _resolve_dev_path_argument(self, raw_path: object) -> str | None:
+        if raw_path is None:
+            return None
+        if not isinstance(raw_path, str):
+            raise LocalToolError("invalid_action_parameters", status="denied")
+        normalized = raw_path.replace("\\", "/")
+        if normalized.split("/", 1)[0].startswith("-"):
+            raise LocalToolError("invalid_action_parameters", status="denied")
+        _root, resolved, rel_posix = _resolve_workspace_path(
+            self._workspace_root, raw_path, allow_root=True
+        )
+        if rel_posix.split("/", 1)[0].startswith("-"):
+            raise LocalToolError("invalid_action_parameters", status="denied")
+        return rel_posix
+
+    def _validate_git_diff(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(arguments, dict) or not set(arguments) <= {"path"}:
+            raise LocalToolError("invalid_action_parameters", status="denied")
+        rel_posix = self._resolve_dev_path_argument(arguments.get("path"))
+        return {} if rel_posix is None else {"path": rel_posix}
+
+    def _validate_run_pytest(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(arguments, dict) or not set(arguments) <= {"path"}:
+            raise LocalToolError("invalid_action_parameters", status="denied")
+        rel_posix = self._resolve_dev_path_argument(arguments.get("path"))
+        return {} if rel_posix is None else {"path": rel_posix}
+
+    def _handle_git_status(
+        self,
+        _args: dict[str, Any],
+        _call_id: str | None,
+        _approval_id: str | None,
+    ) -> dict[str, object]:
+        result = _run_bounded(
+            self._workspace_root,
+            ("git", "status", "--porcelain=v1"),
+            _GIT_TIMEOUT_SECONDS,
+        )
+        result["tool"] = "git.status"
+        return result
+
+    def _handle_git_diff(
+        self,
+        args: dict[str, Any],
+        _call_id: str | None,
+        _approval_id: str | None,
+    ) -> dict[str, object]:
+        argv: tuple[str, ...] = ("git", "--no-pager", "diff", "--no-color", "--unified=3")
+        rel_path = args.get("path")
+        if isinstance(rel_path, str):
+            argv = argv + ("--", rel_path)
+        result = _run_bounded(self._workspace_root, argv, _GIT_TIMEOUT_SECONDS)
+        result["tool"] = "git.diff"
+        return result
+
+    def _handle_test_run_pytest(
+        self,
+        args: dict[str, Any],
+        _call_id: str | None,
+        _approval_id: str | None,
+    ) -> dict[str, object]:
+        argv: tuple[str, ...] = (
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "--no-header",
+            "-p",
+            "no:cacheprovider",
+        )
+        rel_path = args.get("path")
+        if isinstance(rel_path, str):
+            argv = argv + ("--", rel_path)
+        result = _run_bounded(self._workspace_root, argv, _PYTEST_TIMEOUT_SECONDS)
+        result["tool"] = "test.run_pytest"
+        return result
 
 
 class LocalToolExecutor:

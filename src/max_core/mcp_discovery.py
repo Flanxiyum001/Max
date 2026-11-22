@@ -9,7 +9,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import timedelta
 from urllib.parse import urlsplit
@@ -19,8 +18,18 @@ import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
+from max_core.mcp_transport import MAX_BYTES, EndpointTransport
+
+__all__ = [
+    "MAX_BYTES",
+    "DiscoveryError",
+    "MCPConnection",
+    "MCPRegistry",
+    "ObservedTool",
+    "discover_tools",
+]
+
 _NAME = re.compile(r"[A-Za-z0-9_.-]{1,128}\Z")
-MAX_BYTES = 1_000_000
 MAX_TOOLS = 512
 MAX_PAGES = 16
 
@@ -92,51 +101,11 @@ class ObservedTool:
     name: str
     schema_json: str
     schema_sha256: str
-    # There is intentionally no executable/approved/read-only flag. A server's
-    # readOnlyHint is untrusted and cannot establish a MAX permission.
-
-
-class _BoundedStream(httpx.AsyncByteStream):
-    def __init__(self, stream: httpx.AsyncByteStream) -> None:
-        self.stream = stream
-
-    async def __aiter__(self) -> AsyncIterator[bytes]:
-        total = 0
-        async for chunk in self.stream:
-            total += len(chunk)
-            if total > MAX_BYTES:
-                raise DiscoveryError("mcp_response_too_large")
-            yield chunk
-
-    async def aclose(self) -> None:
-        await self.stream.aclose()
-
-
-class _EndpointTransport(httpx.AsyncBaseTransport):
-    def __init__(self, endpoint: str, transport: httpx.AsyncBaseTransport) -> None:
-        self.endpoint = httpx.URL(endpoint)
-        self.transport = transport
-
-    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        if request.url != self.endpoint or request.method not in {"POST", "GET", "DELETE"}:
-            raise DiscoveryError("mcp_egress_denied")
-        response = await self.transport.handle_async_request(request)
-        if 300 <= response.status_code < 400:
-            await response.aclose()
-            raise DiscoveryError("mcp_redirect_denied")
-        # Bound bytes before HTTPX decoding: a server can ignore identity and
-        # otherwise expand a small compressed body beyond the response budget.
-        if response.headers.get("content-encoding", "identity").lower() != "identity":
-            await response.aclose()
-            raise DiscoveryError("mcp_compressed_response_denied")
-        if not isinstance(response.stream, httpx.AsyncByteStream):
-            await response.aclose()
-            raise DiscoveryError("invalid_mcp_stream")
-        response.stream = _BoundedStream(response.stream)
-        return response
-
-    async def aclose(self) -> None:
-        await self.transport.aclose()
+    read_only_hint: bool = False
+    # There is intentionally no executable/approved flag. A server's
+    # readOnlyHint is untrusted and cannot establish a MAX permission on its
+    # own; it only labels a snapshot R1 instead of R2, and both tiers still
+    # require a single-use owner approval before live dispatch.
 
 
 async def discover_tools(
@@ -163,7 +132,7 @@ async def discover_tools(
         # A whole-operation deadline also bounds SSE streams and pagination.
         with anyio.fail_after(30):
             async with httpx.AsyncClient(
-                transport=_EndpointTransport(
+                transport=EndpointTransport(
                     connection.endpoint, transport or httpx.AsyncHTTPTransport(retries=0)
                 ),
                 headers=headers,
@@ -205,6 +174,7 @@ async def discover_tools(
                                         tool.name,
                                         schema,
                                         hashlib.sha256(schema.encode()).hexdigest(),
+                                        bool(getattr(tool.annotations, "readOnlyHint", False)),
                                     )
                                 )
                                 if len(observed) > MAX_TOOLS:
