@@ -30,11 +30,8 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
-from max_core.web.github_connect import (
-    GitHubConnectionError,
-    WebGitHubConnector,
-    github_connect_intent,
-)
+from max_core.web.github_connect import GitHubConnectionError, WebGitHubConnector
+from max_core.web.mcp_hub import MCPHubError, WebMCPHub, connection_intent
 
 STATIC = Path(__file__).parent / "static"
 COOKIE = "max_web"
@@ -256,6 +253,7 @@ def create_app(
     tts_backup: Any = None,
     piper: Any = None,
     github_connector: WebGitHubConnector | None = None,
+    mcp_hub: WebMCPHub | None = None,
 ) -> FastAPI:
     env = dict(os.environ if env is None else env)
     passcode = env.get("MAX_WEB_PASSCODE", "")
@@ -273,6 +271,7 @@ def create_app(
     stt_vocab = env.get("MAX_STT_VOCAB", "")
     hear = transcriber or transcribe
     github = github_connector if github_connector is not None else WebGitHubConnector(env)
+    hub = mcp_hub if mcp_hub is not None else WebMCPHub(env, github_connector=github)
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     login_limit = RateLimiter(8, 600)
@@ -307,7 +306,7 @@ def create_app(
                     if session_factory is not None:
                         state["session"] = session_factory()
                     else:
-                        state["session"] = _default_session(env, github_connector=github)
+                        state["session"] = _default_session(env, github_connector=hub)
                 except Exception as exc:
                     state["error"] = "model_not_configured"
                     # TrialConfigurationError messages are fixed codes, never secrets.
@@ -377,7 +376,48 @@ def create_app(
             "tools": sorted(t.name for t in sess.registry) if sess is not None else [],
             "stt_ready": stt is not None,
             "github": github.status(),
+            "connections": hub.status(),
         }
+
+    @app.get("/.well-known/oauth-client-metadata/max.json")
+    def mcp_client_metadata() -> dict[str, Any]:
+        try:
+            return hub.client_metadata()
+        except MCPHubError as error:
+            raise HTTPException(503, error.code) from None
+
+    @app.post("/api/connect/mcp/{service}/start")
+    def start_mcp(service: str, request: Request) -> dict[str, str]:
+        require(request)
+        if not ask_limit.allow(_client_ip(request)):
+            raise HTTPException(429, "slow_down")
+        try:
+            return {"url": hub.start(service)}
+        except MCPHubError as error:
+            raise HTTPException(503, error.code) from None
+
+    @app.get("/api/connect/mcp/callback")
+    def mcp_callback(
+        state: str = "", code: str = "", error: str = "", iss: str = ""
+    ) -> RedirectResponse:
+        # State+PKCE are per-connection, single-use. SameSite=Strict cookies
+        # intentionally do not participate in a provider-to-MAX redirect.
+        if error or not state or not code:
+            return RedirectResponse("/?mcp=denied", status_code=303)
+        try:
+            hub.finish(state, code, iss)
+        except MCPHubError:
+            return RedirectResponse("/?mcp=failed", status_code=303)
+        return RedirectResponse("/?mcp=connected", status_code=303)
+
+    @app.post("/api/connect/mcp/{service}/disconnect")
+    def disconnect_mcp(service: str, request: Request) -> dict[str, bool]:
+        require(request)
+        try:
+            hub.disconnect(service)
+        except MCPHubError as error:
+            raise HTTPException(404, error.code) from None
+        return {"ok": True}
 
     @app.post("/api/connect/github/start")
     def start_github(request: Request) -> dict[str, str]:
@@ -413,34 +453,46 @@ def create_app(
         require(request)
         if not ask_limit.allow(_client_ip(request)):
             raise HTTPException(429, "slow_down")
-        intent = github_connect_intent(body.text)
+        intent = connection_intent(body.text)
         if intent is not None:
-            # Host-routed intent: the model cannot fabricate OAuth links or
-            # authorize external accounts by including instructions in text.
+            # Trusted, authenticated user intent; model output cannot add apps.
             if any(j.status in {"running", "approval"} for j in jobs.values()):
                 raise HTTPException(409, "busy")
+            action, service = intent
+            label = service.capitalize()
             job = Job(uuid.uuid4().hex, status="done")
-            if intent == "disconnect":
-                github.disconnect()
-                job.answer = "GitHub disconnected. Its MCP tools are no longer available."
-            elif not github.configured:
+            if action == "disconnect":
+                hub.disconnect(service)
+                job.answer = f"{label} disconnected. Its MCP tools are no longer available."
+            elif service == "github" and not github.configured:
                 job.answer = (
-                    "I can set up GitHub for you, but this MAX server still needs "
-                    "its GitHub OAuth application configured by the operator. "
-                    "I will not ask you to paste tokens into chat."
+                    "I can prepare GitHub for you, but this deployment needs a one-time "
+                    "GitHub OAuth App registration. I won't ask you to paste a token in chat."
                 )
-                job.connect = {"service": "github", "action": "needs_configuration"}
-            elif github.status()["connected"]:
-                job.answer = "GitHub is already connected to MAX."
-                job.connect = {"service": "github", "action": "connected"}
+                job.connect = {"service": service, "action": "needs_configuration"}
+            elif service != "github" and not hub.configured:
+                job.answer = (
+                    "MAX needs its public HTTPS URL to register as an OAuth client. "
+                    "On Render I detect that automatically; the deployment has no public URL yet."
+                )
+                job.connect = {"service": service, "action": "needs_configuration"}
+            elif hub.status()["services"][service]["connected"]:
+                job.answer = f"{label} is already connected to MAX."
+                job.connect = {"service": service, "action": "connected"}
             else:
                 job.answer = (
-                    "I'll handle the GitHub MCP endpoint and tools. "
-                    "Approve the GitHub authorization in your browser to continue. "
-                    "GitHub OAuth may request broad repository access; "
-                    "every remote tool invocation still requires your approval."
+                    "I'll discover the official " + label + " MCP server and handle setup. "
+                    "Approve access on the provider's authorization page. "
+                    "Every remote action will still ask for your approval."
                 )
-                job.connect = {"service": "github", "action": "authorize"}
+                if service == "github":
+                    job.answer = (
+                        "I'll handle the GitHub MCP endpoint and tools. "
+                        "Approve the GitHub authorization in your browser to continue. "
+                        "GitHub OAuth may request broad repository access; "
+                        "every remote tool invocation still requires your approval."
+                    )
+                job.connect = {"service": service, "action": "authorize"}
             jobs[job.id] = job
             return {"job": job.id}
         sess = session()
@@ -457,7 +509,7 @@ def create_app(
             job._event.clear()
             # Remote operation approvals must show EXACT arguments. Never silently
             # truncate the values the owner is asked to authorize.
-            if tool.startswith("mcp.github."):
+            if tool.startswith("mcp."):
                 try:
                     encoded = json.dumps(arguments, sort_keys=True, ensure_ascii=True)
                 except (TypeError, ValueError):
@@ -593,7 +645,7 @@ def create_app(
 
 
 def _default_session(
-    env: dict[str, str], *, github_connector: WebGitHubConnector | None = None
+    env: dict[str, str], *, github_connector: WebGitHubConnector | WebMCPHub | None = None
 ) -> Any:
     from max_core.assistant_session import AssistantSession, SessionOptions
     from max_core.gateway_trial import TrialSettings
