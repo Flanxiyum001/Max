@@ -8,7 +8,7 @@ const loginForm = $("login"), passcode = $("passcode"), choices = $("choices");
 let state = "idle";            // idle | thinking | speaking | listening | error
 let energy = 0, t = 0;
 let busy = false, authed = false, pendingJob = null, hideTimer = null;
-let audio = null, recognition = null, listening = false;
+let audio = null, recognition = null, listening = false, sttReady = false;
 
 // ---------------------------------------------------------------- drawing
 function resize() {
@@ -153,7 +153,7 @@ loginForm.addEventListener("submit", async (e) => {
 async function boot() {
   const s = await (await fetch("/api/state", { credentials: "same-origin" })).json();
   if (!s.authed) return showLogin();
-  authed = true;
+  authed = true; sttReady = !!s.stt_ready;
   hint.textContent = "type to talk · space or tap the orb to speak";
   if (!s.model_ready) { setState("error", 3000); show(ERRORS.model_not_configured); }
   else show("Hello. I'm here.", 4000);
@@ -292,8 +292,55 @@ const WAKE = /\b(?:hey|hi|ok|okay)[\s,]+max\b[\s,.!?]*/i;
 let wakeOn = localStorage.getItem("max_wake") === "on";
 let wakeRec = null, wakeWanted = false;
 
+// High-accuracy path: record → server Whisper-class transcription. Ends by itself
+// when you stop talking (voice-activity detection on the mic level).
+let recorder = null;
+async function startRecording(opts = {}) {
+  stopSpeaking(); stopWake();
+  listening = true; setState("listening"); chime(true);
+  show(opts.followUp ? "…" : "Listening…", 0);
+  await startMicLevel();
+  if (!micStream) { listening = false; setState("error", 2500); show("Microphone permission was denied.", 3500); return; }
+  const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"]
+    .find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || "";
+  const chunks = [];
+  recorder = new MediaRecorder(micStream, mime ? { mimeType: mime } : undefined);
+  recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  const started = Date.now(); let spoke = false, quietSince = null, cancelled = false;
+  const vad = setInterval(() => {
+    const now = Date.now();
+    if (level > 0.12) { spoke = true; quietSince = null; }
+    else if (spoke && level < 0.07) quietSince = quietSince || now;
+    const waitedTooLong = !spoke && now - started > (opts.followUp ? 6000 : 8000);
+    if (waitedTooLong) cancelled = true;
+    if (waitedTooLong || (spoke && quietSince && now - quietSince > 1100) || now - started > 25000) {
+      clearInterval(vad); if (recorder.state !== "inactive") recorder.stop();
+    }
+  }, 100);
+  recorder.onstop = async () => {
+    clearInterval(vad); listening = false; recorder = null;
+    const blob = new Blob(chunks, { type: (mime || "audio/webm").split(";")[0] });
+    stopMicLevel();
+    if (cancelled || blob.size < 1500) {
+      setState("idle"); if (!opts.followUp) show("I didn't hear anything.", 2500); else show("");
+      resumeWake(); return;
+    }
+    chime(false); setState("thinking"); show("⋯", 0);
+    try {
+      const res = await fetch("/api/transcribe", { method: "POST", body: blob,
+        headers: { "Content-Type": blob.type }, credentials: "same-origin" });
+      if (!res.ok) throw new Error("stt");
+      const { text } = await res.json();
+      if (text && text.trim()) { show(`“${text.trim()}”`, 0); ask(text.trim(), true); }
+      else { setState("idle"); show("I didn't catch that.", 2500); resumeWake(); }
+    } catch { setState("error", 2500); show("I couldn't transcribe that. Try again?", 3000); resumeWake(); }
+  };
+  recorder.start(250);
+}
+
 function startListening(opts = {}) {
   if (!authed || busy || listening) return;
+  if (sttReady && window.MediaRecorder && navigator.mediaDevices) { startRecording(opts); return; }
   if (!SR) { setState("error", 2500); show("This browser can't listen. Try Chrome or Edge.", 4000); return; }
   stopSpeaking(); stopWake();
   recognition = new SR(); recognition.lang = navigator.language || "en-US";
@@ -321,7 +368,11 @@ function startListening(opts = {}) {
   try { recognition.start(); } catch { listening = false; setState("idle"); }
 }
 function toggleListening() {
-  if (listening) { recognition && recognition.stop(); return; }
+  if (listening) {
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+    else recognition && recognition.stop();
+    return;
+  }
   startListening();
 }
 canvas.addEventListener("click", toggleListening);
