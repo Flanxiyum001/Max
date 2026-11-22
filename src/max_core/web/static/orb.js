@@ -285,14 +285,39 @@ function say(text) {
       };
       await audio.play();
     } catch {
-      // Speech failed (no audio, autoplay blocked…): still offer the follow-up turn.
-      setState("speaking", 2500); done();
-      if (followUp) { followUp = false; setTimeout(() => startListening({ followUp: true }), 600); }
-      else resumeWake();
+      // Server voices failed: speak with the browser's built-in voice instead.
+      const wantFollowUp = followUp;
+      const after = () => {
+        if (!busy) setState("idle");
+        done();
+        if (wantFollowUp) { followUp = false; setTimeout(() => startListening({ followUp: true }), 400); }
+        else resumeWake();
+      };
+      if (!browserSay(text, after)) { setState("speaking", 2500); after(); }
     }
   });
 }
-function stopSpeaking() { followUp = false; if (audio) { audio.pause(); audio = null; if (!busy) setState("idle"); } }
+function pickVoice() {
+  const vs = window.speechSynthesis ? speechSynthesis.getVoices() : [];
+  const en = vs.filter((v) => /^en/i.test(v.lang));
+  const prefer = /(natural|neural|online).*(female|emily|aria|jenny|sonia|libby|natasha)|emily|aria|jenny|sonia|libby|samantha|karen|moira|tessa|serena|google uk english female|google us english|zira/i;
+  return en.find((v) => prefer.test(v.name)) || en[0] || vs[0] || null;
+}
+function browserSay(text, after) {
+  if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) return false;
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text.slice(0, 2000));
+    const v = pickVoice(); if (v) { u.voice = v; u.lang = v.lang; }
+    u.rate = 1.02; u.pitch = 1.05;
+    u.onstart = () => setState("speaking");
+    u.onend = after; u.onerror = after;
+    speechSynthesis.speak(u);
+    return true;
+  } catch { return false; }
+}
+if (window.speechSynthesis) { speechSynthesis.getVoices(); speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices(); }
+function stopSpeaking() { if (window.speechSynthesis) speechSynthesis.cancel(); followUp = false; if (audio) { audio.pause(); audio = null; if (!busy) setState("idle"); } }
 
 // ---------------------------------------------------------------- voice in (Siri-style)
 // • tap / Space: listen once; sends by itself when you stop talking
