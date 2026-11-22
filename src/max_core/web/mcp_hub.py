@@ -42,6 +42,7 @@ from max_core.web.github_connect import (
 )
 from max_core.web.mcp_vault import MCPCredentialVault
 
+
 # Official vendor endpoints, not supplied by a prompt or remote MCP response.
 @dataclass(frozen=True)
 class MCPProvider:
@@ -51,21 +52,11 @@ class MCPProvider:
 
 
 CATALOG: dict[str, MCPProvider] = {
-    "cloudflare": MCPProvider(
-        "Cloudflare", "https://mcp.cloudflare.com/mcp", ("cloudflare.com",)
-    ),
-    "railway": MCPProvider(
-        "Railway", "https://mcp.railway.com", ("railway.com",)
-    ),
-    "notion": MCPProvider(
-        "Notion", "https://mcp.notion.com/mcp", ("notion.com", "makenotion.com")
-    ),
-    "linear": MCPProvider(
-        "Linear", "https://mcp.linear.app/mcp", ("linear.app",)
-    ),
-    "sentry": MCPProvider(
-        "Sentry", "https://mcp.sentry.dev/mcp", ("sentry.dev", "sentry.io")
-    ),
+    "cloudflare": MCPProvider("Cloudflare", "https://mcp.cloudflare.com/mcp", ("cloudflare.com",)),
+    "railway": MCPProvider("Railway", "https://mcp.railway.com", ("railway.com",)),
+    "notion": MCPProvider("Notion", "https://mcp.notion.com/mcp", ("notion.com", "makenotion.com")),
+    "linear": MCPProvider("Linear", "https://mcp.linear.app/mcp", ("linear.app",)),
+    "sentry": MCPProvider("Sentry", "https://mcp.sentry.dev/mcp", ("sentry.dev", "sentry.io")),
 }
 _SERVICE = re.compile(r"\b(github|cloudflare|railway|notion|linear|sentry)\b", re.I)
 _CONNECT = re.compile(r"\b(connect|link|integrate|set\s*up|setup|sign\s*in|log\s*in)\b", re.I)
@@ -129,7 +120,9 @@ def _trusted_url(url: str, provider: MCPProvider) -> bool:
             and parsed.port in (None, 443)
             and not parsed.fragment
             and len(url) <= 2048
-            and any(host == domain or host.endswith("." + domain) for domain in provider.trusted_domains)
+            and any(
+                host == domain or host.endswith("." + domain) for domain in provider.trusted_domains
+            )
         )
     except ValueError:
         return False
@@ -230,17 +223,21 @@ class WebMCPHub:
         except (httpx.HTTPError, ValueError, TypeError):
             return None
 
-    async def _oauth_metadata(
-        self, provider: MCPProvider
-    ) -> tuple[str, dict[str, Any]]:
+    async def _oauth_metadata(self, provider: MCPProvider) -> tuple[str, dict[str, Any]]:
         async with httpx.AsyncClient(
             timeout=10.0, follow_redirects=False, trust_env=False
         ) as client:
             resource_urls = [
                 _metadata_url(provider.endpoint, "oauth-protected-resource"),
-                urlunsplit((urlsplit(provider.endpoint).scheme,
-                            urlsplit(provider.endpoint).netloc,
-                            "/.well-known/oauth-protected-resource", "", "")),
+                urlunsplit(
+                    (
+                        urlsplit(provider.endpoint).scheme,
+                        urlsplit(provider.endpoint).netloc,
+                        "/.well-known/oauth-protected-resource",
+                        "",
+                        "",
+                    )
+                ),
             ]
             resource = None
             for uri in resource_urls:
@@ -279,9 +276,7 @@ class WebMCPHub:
                         return issuer, data
         raise MCPHubError("mcp_oauth_authorization_metadata_missing")
 
-    async def _register_client(
-        self, service: str, issuer: str, meta: dict[str, Any]
-    ) -> str:
+    async def _register_client(self, service: str, issuer: str, meta: dict[str, Any]) -> str:
         assert self._base is not None
         callback = self._base + "/api/connect/mcp/callback"
         metadata_id = self._base + "/.well-known/oauth-client-metadata/max.json"
@@ -304,7 +299,8 @@ class WebMCPHub:
                 timeout=12.0, follow_redirects=False, trust_env=False
             ) as client:
                 response = await client.post(
-                    endpoint, json=body,
+                    endpoint,
+                    json=body,
                     headers={"Accept": "application/json", "Accept-Encoding": "identity"},
                 )
                 if response.status_code not in (200, 201) or len(response.content) > _TOKEN_BYTES:
@@ -333,9 +329,11 @@ class WebMCPHub:
         client_id = await self._register_client(service, issuer, metadata)
         state = secrets.token_urlsafe(36)
         verifier = secrets.token_urlsafe(64)
-        challenge = base64.urlsafe_b64encode(
-            hashlib.sha256(verifier.encode("ascii")).digest()
-        ).decode("ascii").rstrip("=")
+        challenge = (
+            base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest())
+            .decode("ascii")
+            .rstrip("=")
+        )
         with self._lock:
             self._pending = {
                 key: item
@@ -343,7 +341,11 @@ class WebMCPHub:
                 if time.monotonic() - item.created < _PENDING_SECONDS
             }
             self._pending[state] = _Pending(
-                service, verifier, time.monotonic(), issuer, client_id,
+                service,
+                verifier,
+                time.monotonic(),
+                issuer,
+                client_id,
                 metadata["token_endpoint"],
                 metadata.get("authorization_response_iss_parameter_supported") is True,
             )
@@ -400,7 +402,8 @@ class WebMCPHub:
                 timeout=12.0, follow_redirects=False, trust_env=False
             ) as client:
                 response = await client.post(
-                    endpoint, data=payload,
+                    endpoint,
+                    data=payload,
                     headers={"Accept": "application/json", "Accept-Encoding": "identity"},
                 )
                 if response.status_code != 200 or len(response.content) > _TOKEN_BYTES:
@@ -438,65 +441,83 @@ class WebMCPHub:
             pending = self._pending.pop(state, None)
         if pending is None or time.monotonic() - pending.created > _PENDING_SECONDS:
             raise MCPHubError("mcp_oauth_state_invalid")
-        if (iss and iss != pending.issuer) or (pending.auth_issuer_parameter and iss != pending.issuer):
+        if (iss and iss != pending.issuer) or (
+            pending.auth_issuer_parameter and iss != pending.issuer
+        ):
             raise MCPHubError("mcp_oauth_issuer_mismatch")
         service = pending.service
         provider = CATALOG[service]
         assert self._base is not None
-        data = asyncio.run(self._token_request(provider, pending.token_endpoint, {
-            "grant_type": "authorization_code",
-            "code": code,
-            "code_verifier": pending.verifier,
-            "redirect_uri": self._base + "/api/connect/mcp/callback",
-            "client_id": pending.client_id,
-            "resource": provider.endpoint,
-        }))
+        data = asyncio.run(
+            self._token_request(
+                provider,
+                pending.token_endpoint,
+                {
+                    "grant_type": "authorization_code",
+                    "code": code,
+                    "code_verifier": pending.verifier,
+                    "redirect_uri": self._base + "/api/connect/mcp/callback",
+                    "client_id": pending.client_id,
+                    "resource": provider.endpoint,
+                },
+            )
+        )
         token, refresh, expires = self._parse_token(data)
         try:
-            observed = asyncio.run(discover_tools(
-                MCPConnection(service, provider.endpoint, True, token)
-            ))
+            observed = asyncio.run(
+                discover_tools(MCPConnection(service, provider.endpoint, True, token))
+            )
         except Exception:
             raise MCPHubError("mcp_discovery_failed") from None
         reviewed = tuple(
-            entry for tool in observed
-            if (entry := _reviewable(tool, service=service)) is not None
+            entry for tool in observed if (entry := _reviewable(tool, service=service)) is not None
         )
-        reviewed = tuple(sorted(
-            reviewed,
-            key=lambda entry: (not entry.observation.read_only_hint, entry.observation.name),
-        ))[:_MAX_TOOLS]
+        reviewed = tuple(
+            sorted(
+                reviewed,
+                key=lambda entry: (not entry.observation.read_only_hint, entry.observation.name),
+            )
+        )[:_MAX_TOOLS]
         if not reviewed:
             raise MCPHubError("mcp_no_compatible_tools")
         with self._lock:
             generation = self._generations.get(service, 0) + 1
             self._generations[service] = generation
             record = _Connection(
-                token, refresh, expires, pending.issuer, pending.client_id,
-                pending.token_endpoint, reviewed, generation,
+                token,
+                refresh,
+                expires,
+                pending.issuer,
+                pending.client_id,
+                pending.token_endpoint,
+                reviewed,
+                generation,
             )
             self._connections[service] = record
             self._save(service, record)
         return service
 
     def _save(self, service: str, record: _Connection) -> None:
-        self._vault.save(service, {
-            "token": record.token,
-            "refresh_token": record.refresh_token,
-            "expires_at": record.expires_at,
-            "issuer": record.issuer,
-            "client_id": record.client_id,
-            "token_endpoint": record.token_endpoint,
-            "tools": [
-                {
-                    "name": x.observation.name,
-                    "schema": x.observation.schema_json,
-                    "hash": x.observation.schema_sha256,
-                    "read_only": x.observation.read_only_hint,
-                }
-                for x in record.tools
-            ],
-        })
+        self._vault.save(
+            service,
+            {
+                "token": record.token,
+                "refresh_token": record.refresh_token,
+                "expires_at": record.expires_at,
+                "issuer": record.issuer,
+                "client_id": record.client_id,
+                "token_endpoint": record.token_endpoint,
+                "tools": [
+                    {
+                        "name": x.observation.name,
+                        "schema": x.observation.schema_json,
+                        "hash": x.observation.schema_sha256,
+                        "read_only": x.observation.read_only_hint,
+                    }
+                    for x in record.tools
+                ],
+            },
+        )
 
     def _load_connections(self) -> None:
         # A loaded, authenticated schema is still revalidated against the live
@@ -537,8 +558,14 @@ class WebMCPHub:
                 if tools:
                     self._generations[service] = 1
                     self._connections[service] = _Connection(
-                        token, item.get("refresh_token"), item.get("expires_at"),
-                        issuer, client_id, token_endpoint, tuple(tools), 1
+                        token,
+                        item.get("refresh_token"),
+                        item.get("expires_at"),
+                        issuer,
+                        client_id,
+                        token_endpoint,
+                        tuple(tools),
+                        1,
                     )
             except (ValueError, KeyError, TypeError, IndexError):
                 continue
@@ -575,14 +602,16 @@ class WebMCPHub:
                 ) -> str:
                     return self._call(selected_service, selected_entry, dict(arguments), generation)
 
-                all_tools.append(Tool(
-                    name=name,
-                    description=f"{CATALOG[service].name} MCP {entry.observation.name} "
-                    "(remote; owner approval required for EVERY operation)",
-                    risk=ToolRisk.EFFECTFUL,
-                    params=entry.params,
-                    handler=handler,
-                ))
+                all_tools.append(
+                    Tool(
+                        name=name,
+                        description=f"{CATALOG[service].name} MCP {entry.observation.name} "
+                        "(remote; owner approval required for EVERY operation)",
+                        risk=ToolRisk.EFFECTFUL,
+                        params=entry.params,
+                        handler=handler,
+                    )
+                )
         return tuple(all_tools[:_MAX_TOOLS])
 
     def _refresh(self, service: str, record: _Connection) -> _Connection:
@@ -590,16 +619,28 @@ class WebMCPHub:
             return record
         if not record.refresh_token:
             raise ToolError("mcp_oauth_expired")
-        data = asyncio.run(self._token_request(CATALOG[service], record.token_endpoint, {
-            "grant_type": "refresh_token",
-            "refresh_token": record.refresh_token,
-            "client_id": record.client_id,
-            "resource": CATALOG[service].endpoint,
-        }))
+        data = asyncio.run(
+            self._token_request(
+                CATALOG[service],
+                record.token_endpoint,
+                {
+                    "grant_type": "refresh_token",
+                    "refresh_token": record.refresh_token,
+                    "client_id": record.client_id,
+                    "resource": CATALOG[service].endpoint,
+                },
+            )
+        )
         token, refreshed, deadline = self._parse_token(data)
         next_record = _Connection(
-            token, refreshed or record.refresh_token, deadline, record.issuer,
-            record.client_id, record.token_endpoint, record.tools, record.generation,
+            token,
+            refreshed or record.refresh_token,
+            deadline,
+            record.issuer,
+            record.client_id,
+            record.token_endpoint,
+            record.tools,
+            record.generation,
         )
         with self._lock:
             if self._connections.get(service) != record:
@@ -613,11 +654,7 @@ class WebMCPHub:
     ) -> str:
         with self._lock:
             record = self._connections.get(service)
-            if (
-                record is None
-                or record.generation != generation
-                or entry not in record.tools
-            ):
+            if record is None or record.generation != generation or entry not in record.tools:
                 raise ToolError("mcp_connection_revoked")
         try:
             validated = validated_arguments(entry.observation, entry.policy, arguments)
@@ -632,7 +669,11 @@ class WebMCPHub:
             raise ToolError("mcp_remote_call_failed") from None
 
     async def _dispatch(
-        self, service: str, token: str, entry: _RemoteTool, args: dict[str, Any],
+        self,
+        service: str,
+        token: str,
+        entry: _RemoteTool,
+        args: dict[str, Any],
         generation: int,
     ) -> str:
         endpoint = CATALOG[service].endpoint
@@ -641,10 +682,14 @@ class WebMCPHub:
                 async with httpx.AsyncClient(
                     transport=EndpointTransport(endpoint, httpx.AsyncHTTPTransport(retries=0)),
                     headers={"Authorization": "Bearer " + token, "Accept-Encoding": "identity"},
-                    timeout=10, trust_env=False, follow_redirects=False,
+                    timeout=10,
+                    trust_env=False,
+                    follow_redirects=False,
                 ) as client:
                     async with streamable_http_client(endpoint, http_client=client) as (
-                        reader, writer, _
+                        reader,
+                        writer,
+                        _,
                     ):
                         async with ClientSession(
                             reader, writer, read_timeout_seconds=timedelta(seconds=10)
@@ -659,12 +704,16 @@ class WebMCPHub:
                                 for tool in page.tools:
                                     if tool.name == entry.observation.name:
                                         schema = json.dumps(
-                                            tool.inputSchema, sort_keys=True,
-                                            separators=(",", ":"), allow_nan=False,
+                                            tool.inputSchema,
+                                            sort_keys=True,
+                                            separators=(",", ":"),
+                                            allow_nan=False,
                                         )
                                         if (
                                             schema != entry.observation.schema_json
-                                            or bool(getattr(tool.annotations, "readOnlyHint", False))
+                                            or bool(
+                                                getattr(tool.annotations, "readOnlyHint", False)
+                                            )
                                             != entry.observation.read_only_hint
                                         ):
                                             raise ToolError("mcp_schema_drifted")
