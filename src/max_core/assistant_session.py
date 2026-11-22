@@ -30,7 +30,6 @@ from max_core.tool_loop import LoopResult, ToolLoop, ToolStep
 from max_core.tools import Tool, ToolError, ToolParam, ToolRegistry, ToolRisk
 
 if TYPE_CHECKING:
-    from max_core.mcp_execute import MCPToolExecutor
     from max_core.native_desktop.backend import NativeDesktopCore
 
 ApproveFn = Callable[[str, dict[str, Any]], bool]
@@ -212,9 +211,7 @@ class AssistantSession:
                 continue
 
     @staticmethod
-    def _execute_approved_mcp(
-        core: NativeDesktopCore, name: str, arguments: dict[str, Any]
-    ) -> str:
+    def _execute_approved_mcp(core: NativeDesktopCore, name: str, arguments: dict[str, Any]) -> str:
         from uuid import uuid4
 
         from max_core.gateway.contracts import ToolProposal
