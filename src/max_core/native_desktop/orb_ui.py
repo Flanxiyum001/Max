@@ -13,6 +13,7 @@ The orb only animates "thinking" while a real model request is running.
 
 from __future__ import annotations
 
+import json
 import math
 import sys
 import threading
@@ -43,6 +44,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMenu,
+    QMessageBox,
     QVBoxLayout,
     QWidget,
 )
@@ -427,6 +429,28 @@ class OrbWindow(QWidget):
             request.event.set()
             return
         self._pending_approval = request
+        if tool.startswith("mcp."):
+            # Never approve a remote operation based on a truncated orb label.
+            # Show the exact proposed arguments in a dedicated modal dialog.
+            details = json.dumps(arguments, indent=2, ensure_ascii=True)
+            if len(details) > 2_000:
+                self._answer_approval(False)
+                return
+            dialog = QMessageBox(self)
+            dialog.setWindowTitle("MAX MCP: approve remote call?")
+            dialog.setIcon(QMessageBox.Icon.Warning)
+            dialog.setText(f"Allow one remote tool invocation of {tool}?")
+            dialog.setInformativeText(
+                "The following arguments will be sent to the server. "
+                "The result may be shared with the selected AI model.\n\n" + details
+            )
+            dialog.setStandardButtons(
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            dialog.setDefaultButton(QMessageBox.StandardButton.No)
+            allowed = dialog.exec() == QMessageBox.StandardButton.Yes
+            self._answer_approval(allowed)
+            return
         detail = ", ".join(f"{k}: {str(v)[:160]}" for k, v in arguments.items())
         self.orb.set_state(SPEAKING)
         self._hide_timer.stop()
