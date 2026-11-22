@@ -1040,9 +1040,7 @@ class MaxWindow(QMainWindow):
         ident, ok = QInputDialog.getText(self, "MCP connection", "Connection ID (e.g. github):")
         if not ok:
             return
-        endpoint, ok = QInputDialog.getText(
-            self, "MCP connection", "Trusted HTTPS endpoint:"
-        )
+        endpoint, ok = QInputDialog.getText(self, "MCP connection", "Trusted HTTPS endpoint:")
         if not ok:
             return
         env_name, ok = QInputDialog.getText(
@@ -1052,9 +1050,7 @@ class MaxWindow(QMainWindow):
             return
         self._run(
             "mcp_add",
-            lambda: self.core.mcp_add_connection(
-                ident.strip(), endpoint.strip(), env_name.strip()
-            ),
+            lambda: self.core.mcp_add_connection(ident.strip(), endpoint.strip(), env_name.strip()),
         )
 
     def mcp_discover_selected(self) -> None:
@@ -1097,7 +1093,10 @@ class MaxWindow(QMainWindow):
                 f"Arguments: {', '.join(details['allowed_arguments']) or '(discover first)'}\n"
                 "Remote tools are untrusted and every invocation requires a fresh owner approval."
             )
-            if QMessageBox.question(self, "Review MCP tool", question) != QMessageBox.StandardButton.Yes:
+            if (
+                QMessageBox.question(self, "Review MCP tool", question)
+                != QMessageBox.StandardButton.Yes
+            ):
                 return
         self._run(
             "mcp_review",
@@ -1529,7 +1528,9 @@ class MaxWindow(QMainWindow):
         }
         message = messages.get(code, "Local Core operation unavailable.")
         if action.startswith("mcp_"):
-            message = f"MCP action failed ({code}). Check endpoint, credentials and reviewed schema."
+            message = (
+                f"MCP action failed ({code}). Check endpoint, credentials and reviewed schema."
+            )
             self._refresh_mcp_list()
         self.notice.setText(message)
         if action == "snapshot":
