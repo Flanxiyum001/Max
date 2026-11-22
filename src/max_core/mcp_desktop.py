@@ -9,6 +9,7 @@ that exact observed schema. Remote calls still need MAX Trust approval.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -144,6 +145,7 @@ class MCPDesktopManager:
                             {
                                 "name": tool["name"],
                                 "sha256": tool["sha256"],
+                                "schema_json": tool["schema_json"],
                                 "read_only_hint": tool["read_only_hint"],
                                 "allowed_arguments": tuple(tool["allowed_arguments"]),
                                 "enabled": tool["enabled"],
@@ -233,7 +235,21 @@ class MCPDesktopManager:
             tool = next((r for r in item["tools"] if r["name"] == name), None)
             if tool is None:
                 raise MCPSettingsError("unknown_mcp_tool")
-            schema = json.loads(tool["schema_json"])
+            try:
+                schema = json.loads(tool["schema_json"])
+                canonical = json.dumps(
+                    schema, sort_keys=True, separators=(",", ":"), allow_nan=False
+                )
+                if (
+                    canonical != tool["schema_json"]
+                    or hashlib.sha256(canonical.encode()).hexdigest() != tool["sha256"]
+                    or type(tool["read_only_hint"]) is not bool
+                ):
+                    raise MCPSettingsError("schema_not_reviewed")
+            except (ValueError, TypeError, OverflowError, RecursionError):
+                raise MCPSettingsError("schema_not_reviewed") from None
+            if not isinstance(schema, dict):
+                raise MCPSettingsError("schema_not_reviewed")
             props = schema.get("properties", {})
             required = schema.get("required", [])
             if (
