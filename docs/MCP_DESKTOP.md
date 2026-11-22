@@ -12,7 +12,9 @@ MAX must authenticate to its own MCP servers. GitHub or other ChatGPT integratio
 - Only scalar schema arguments are allowed: string, integer, number, boolean. Nested array/object schemas are not auto-executable.
 - Approved tool results are untrusted data. When a cloud model is used, approved remote tool output may be forwarded to that model as context.
 
-Not in this release: arbitrary local stdio child-process MCP servers, OAuth browser/PKCE login or refresh, resources/prompts, nested argument schemas, unattended calls, and the ability to share ChatGPT's MCP credentials.
+Local stdio child-process MCP servers are supported since M35, but only through the host-pinned binary allowlist (`MAX_MCP_STDIO_BINARIES`), a stripped child environment, and the same per-call Trust approval gate; see [M35](M35_SANDBOXED_CODE_AND_STDIO_MCP.md).
+
+Not in this release: OAuth browser/PKCE login or refresh, resources/prompts, nested argument schemas, unattended calls, and the ability to share ChatGPT's MCP credentials.
 
 ## GitHub setup
 

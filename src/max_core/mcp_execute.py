@@ -24,6 +24,7 @@ from typing import Any, Literal
 import anyio
 import httpx
 from mcp import ClientSession
+from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamable_http_client
 from mcp.types import CallToolResult, TextContent
 
@@ -32,6 +33,7 @@ from max_core.assistant_chat import ToolExecutor as ChatToolExecutor
 from max_core.gateway.contracts import ToolDefinition, ToolProposal
 from max_core.mcp_discovery import MCPConnection, ObservedTool
 from max_core.mcp_policy import MCPPolicyError, ReviewedToolPolicy, validated_arguments
+from max_core.mcp_stdio import StdioMCPConnection, stdio_parameters
 from max_core.mcp_transport import EndpointTransport
 from max_core.persistence import _is_expired
 from max_core.store import StoreError, TaskStore
@@ -93,7 +95,7 @@ def _parse_dotted(name: object) -> tuple[str, str] | None:
 
 @dataclass(frozen=True, slots=True)
 class _LiveEntry:
-    connection: MCPConnection
+    connection: MCPConnection | StdioMCPConnection
     observation: ObservedTool
     policy: ReviewedToolPolicy
     dotted_name: str
@@ -102,14 +104,14 @@ class _LiveEntry:
 def _build_live_entries(
     reviewed: Sequence[tuple[ObservedTool, ReviewedToolPolicy]],
     *,
-    connections: Sequence[MCPConnection],
+    connections: Sequence[MCPConnection | StdioMCPConnection],
     owner_id: str,
 ) -> dict[str, _LiveEntry]:
-    resolved: dict[str, MCPConnection] = {}
+    resolved: dict[str, MCPConnection | StdioMCPConnection] = {}
     for item in connections:
-        if not isinstance(item, MCPConnection) or (
-            _LIVE_CONNECTION.fullmatch(item.connection_id) is None
-        ):
+        if (
+            not isinstance(item, MCPConnection) and not isinstance(item, StdioMCPConnection)
+        ) or _LIVE_CONNECTION.fullmatch(item.connection_id) is None:
             raise McpExecuteError("invalid_mcp_connection")
         resolved[item.connection_id] = item
     entries: dict[str, _LiveEntry] = {}
@@ -125,7 +127,7 @@ def _build_live_entries(
             or policy.tool_name != observation.name
         ):
             raise McpExecuteError("invalid_mcp_live_policy")
-        connection: MCPConnection | None = resolved.get(policy.connection_id)
+        connection: MCPConnection | StdioMCPConnection | None = resolved.get(policy.connection_id)
         if connection is None:
             raise McpExecuteError("invalid_mcp_live_policy")
         dotted = dotted_tool_name(observation.connection_id, observation.name)
@@ -155,7 +157,7 @@ def _live_policy(entry: _LiveEntry) -> ToolPolicy:
 def build_mcp_policy_registry(
     reviewed: Sequence[tuple[ObservedTool, ReviewedToolPolicy]],
     *,
-    connections: Sequence[MCPConnection],
+    connections: Sequence[MCPConnection | StdioMCPConnection],
     owner_id: str,
 ) -> ToolPolicyRegistry:
     """Dotted allowlist of enabled, digest-pinned remote tools for TrustService."""
@@ -227,7 +229,7 @@ class MCPToolExecutor:
         *,
         trust: TrustService | None = None,
         task_store: TaskStore | None = None,
-        connections: Sequence[MCPConnection],
+        connections: Sequence[MCPConnection | StdioMCPConnection],
         reviewed: Sequence[tuple[ObservedTool, ReviewedToolPolicy]],
         owner_id: str = "owner",
         actor_id: str = "desktop_owner",
@@ -602,12 +604,25 @@ class MCPToolExecutor:
             return await self._dispatch_with_deadline(entry, arguments)
 
     async def _dispatch_with_deadline(self, entry: _LiveEntry, arguments: dict[str, object]) -> str:
+        if isinstance(entry.connection, StdioMCPConnection):
+            async with stdio_client(stdio_parameters(entry.connection)) as (reader, writer):
+                async with ClientSession(
+                    reader, writer, read_timeout_seconds=timedelta(seconds=10)
+                ) as session:
+                    return await self._dispatch_over_session(session, entry, arguments)
+        if not isinstance(entry.connection, MCPConnection):
+            raise McpExecuteError("invalid_mcp_connection", status="denied")
+        return await self._dispatch_https(entry.connection, entry, arguments)
+
+    async def _dispatch_https(
+        self, connection: MCPConnection, entry: _LiveEntry, arguments: dict[str, object]
+    ) -> str:
         headers = {"Accept-Encoding": "identity"}
-        if entry.connection.bearer_token is not None:
-            headers["Authorization"] = "Bearer " + entry.connection.bearer_token
+        if connection.bearer_token is not None:
+            headers["Authorization"] = "Bearer " + connection.bearer_token
         async with httpx.AsyncClient(
             transport=EndpointTransport(
-                entry.connection.endpoint,
+                connection.endpoint,
                 self._transport or httpx.AsyncHTTPTransport(retries=0),
             ),
             headers=headers,
@@ -615,7 +630,7 @@ class MCPToolExecutor:
             follow_redirects=False,
             trust_env=False,
         ) as client:
-            async with streamable_http_client(entry.connection.endpoint, http_client=client) as (
+            async with streamable_http_client(connection.endpoint, http_client=client) as (
                 reader,
                 writer,
                 _,
@@ -623,11 +638,19 @@ class MCPToolExecutor:
                 async with ClientSession(
                     reader, writer, read_timeout_seconds=timedelta(seconds=10)
                 ) as session:
-                    initialized = await session.initialize()
-                    if initialized.capabilities.tools is None:
-                        raise McpExecuteError("schema_drifted", status="denied")
-                    await self._assert_no_schema_drift(session, entry)
-                    result = await session.call_tool(entry.observation.name, arguments=arguments)
+                    return await self._dispatch_over_session(session, entry, arguments)
+
+    async def _dispatch_over_session(
+        self,
+        session: ClientSession,
+        entry: _LiveEntry,
+        arguments: dict[str, object],
+    ) -> str:
+        initialized = await session.initialize()
+        if initialized.capabilities.tools is None:
+            raise McpExecuteError("schema_drifted", status="denied")
+        await self._assert_no_schema_drift(session, entry)
+        result = await session.call_tool(entry.observation.name, arguments=arguments)
         return _extract_tool_output(result)
 
     async def _assert_no_schema_drift(self, session: ClientSession, entry: _LiveEntry) -> None:

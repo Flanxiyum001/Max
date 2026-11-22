@@ -1,9 +1,10 @@
 """Owner-managed desktop MCP profile, discovery and explicit per-tool review.
 
-Configuration contains endpoint metadata and pinned schemas only. Tokens are
-resolved from environment variables at runtime, never persisted here.
-Nothing discovered from a remote server is executable until the owner enables
-that exact observed schema. Remote calls still need MAX Trust approval.
+Configuration contains endpoint or command metadata and pinned schemas only.
+Tokens are resolved from environment variables at runtime, never persisted
+here. Nothing discovered from a server, remote or local stdio, is executable
+until the owner enables that exact observed schema. Remote calls and stdio
+calls still need MAX Trust approval.
 """
 
 from __future__ import annotations
@@ -15,13 +16,19 @@ import os
 import re
 import stat
 import threading
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from max_core.mcp_discovery import MCPConnection, ObservedTool, discover_tools
 from max_core.mcp_policy import ReviewedToolPolicy
 from max_core.mcp_policy import RiskTier as ReviewedRiskTier
+from max_core.mcp_stdio import (
+    StdioBridgeError,
+    StdioMCPConnection,
+    allowlisted_stdio_connection,
+    discover_stdio_tools,
+)
 
 _NAME = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
 _ENV = re.compile(r"[A-Z][A-Z0-9_]{0,127}\Z")
@@ -29,6 +36,7 @@ _MAX_PROFILE_BYTES = 512_000
 _MAX_CONNECTIONS = 16
 _MAX_ENABLED_TOOLS = 20
 _TYPES = {"string", "integer", "number", "boolean", "null"}
+_STDIO_ALLOWLIST_ENV = "MAX_MCP_STDIO_BINARIES"
 
 
 class MCPSettingsError(ValueError):
@@ -84,7 +92,9 @@ class MCPDesktopManager:
                 if not isinstance(item, dict):
                     raise MCPSettingsError("invalid_mcp_profile")
                 ident = item.get("id")
+                kind = item.get("kind", "endpoint")
                 token_env = item.get("token_env", "")
+                args = item.get("args", [])
                 if (
                     not isinstance(ident, str)
                     or _NAME.fullmatch(ident) is None
@@ -94,8 +104,20 @@ class MCPDesktopManager:
                     or not isinstance(item.get("tools", []), list)
                 ):
                     raise MCPSettingsError("invalid_mcp_profile")
+                if kind == "stdio":
+                    if not isinstance(args, list) or any(not isinstance(arg, str) for arg in args):
+                        raise MCPSettingsError("invalid_mcp_profile")
+                    try:
+                        StdioMCPConnection(ident, item.get("command", ""), tuple(args), True)
+                    except ValueError:
+                        raise MCPSettingsError("invalid_mcp_profile") from None
+                elif kind == "endpoint":
+                    if "args" in item:
+                        raise MCPSettingsError("invalid_mcp_profile")
+                    MCPConnection(ident, item.get("endpoint", ""), True)
+                else:
+                    raise MCPSettingsError("invalid_mcp_profile")
                 ids.add(ident)
-                MCPConnection(ident, item.get("endpoint", ""), True)
             return data
         except MCPSettingsError:
             raise
@@ -128,18 +150,22 @@ class MCPDesktopManager:
             raise MCPSettingsError("mcp_profile_write_failed") from None
 
     def connections(self) -> tuple[dict[str, Any], ...]:
-        """Display-safe list; no URL query strings or bearer tokens."""
+        """Display-safe list; no URL query strings, bearer tokens, or raw args."""
         with self._lock:
             rows: list[dict[str, Any]] = []
             for item in self._read()["connections"]:
                 tools = item.get("tools", [])
+                is_stdio = item.get("kind", "endpoint") == "stdio"
                 rows.append(
                     {
                         "id": item["id"],
-                        "endpoint": item["endpoint"],
-                        "token_env": item["token_env"],
+                        "kind": "stdio" if is_stdio else "endpoint",
+                        "endpoint": "" if is_stdio else item["endpoint"],
+                        "command": item["command"] if is_stdio else "",
+                        "token_env": item.get("token_env", ""),
                         "authenticated": bool(
-                            not item["token_env"] or self._env.get(item["token_env"])
+                            is_stdio
+                            or (not item.get("token_env", "") or self._env.get(item["token_env"]))
                         ),
                         "tools": tuple(
                             {
@@ -155,6 +181,61 @@ class MCPDesktopManager:
                     }
                 )
             return tuple(rows)
+
+    def _stdio_allowlist(self) -> tuple[str, ...]:
+        raw = self._env.get(_STDIO_ALLOWLIST_ENV)
+        if not raw:
+            raise MCPSettingsError("stdio_not_allowed")
+        entries = [entry for entry in raw.split(os.pathsep) if entry]
+        if not entries or not all(os.path.isabs(entry) for entry in entries):
+            raise MCPSettingsError("stdio_not_allowed")
+        return tuple(entries)
+
+    def add_stdio(
+        self,
+        ident: str,
+        command: str,
+        args: Sequence[str] = (),
+        *,
+        discovery_approved: bool = False,
+    ) -> None:
+        """Owner explicitly adds a local stdio server pinned to one allowlisted binary."""
+        if (
+            not isinstance(ident, str)
+            or _NAME.fullmatch(ident) is None
+            or not isinstance(discovery_approved, bool)
+        ):
+            raise MCPSettingsError("invalid_mcp_connection")
+        allowed = self._stdio_allowlist()
+        try:
+            connection = allowlisted_stdio_connection(
+                ident,
+                command,
+                args,
+                allowed_commands=allowed,
+                discovery_approved=discovery_approved,
+            )
+        except StdioBridgeError as error:
+            raise MCPSettingsError(error.code) from None
+        except ValueError:
+            raise MCPSettingsError("invalid_mcp_connection") from None
+        with self._lock:
+            data = self._read()
+            if len(data["connections"]) >= _MAX_CONNECTIONS:
+                raise MCPSettingsError("too_many_mcp_connections")
+            if any(row["id"] == ident for row in data["connections"]):
+                raise MCPSettingsError("duplicate_mcp_connection")
+            data["connections"].append(
+                {
+                    "id": ident,
+                    "kind": "stdio",
+                    "command": connection.command,
+                    "args": list(connection.args),
+                    "discovery_approved": connection.discovery_approved,
+                    "tools": [],
+                }
+            )
+            self._write(data)
 
     def add(self, ident: str, endpoint: str, token_env: str = "") -> None:
         """Owner explicitly adds an HTTPS server; no discovery on add."""
@@ -190,6 +271,21 @@ class MCPDesktopManager:
         except ValueError:
             raise MCPSettingsError("invalid_mcp_connection") from None
 
+    def _stdio_connection(self, item: dict[str, Any]) -> StdioMCPConnection:
+        allowed = self._stdio_allowlist()
+        try:
+            return allowlisted_stdio_connection(
+                item["id"],
+                item["command"],
+                item.get("args", []),
+                allowed_commands=allowed,
+                discovery_approved=bool(item.get("discovery_approved", False)),
+            )
+        except StdioBridgeError as error:
+            raise MCPSettingsError(error.code) from None
+        except ValueError:
+            raise MCPSettingsError("invalid_mcp_connection") from None
+
     def discover(self, ident: str) -> int:
         """Re-discovery invalidates ALL prior approvals, even if schemas match."""
         with self._lock:
@@ -197,17 +293,38 @@ class MCPDesktopManager:
             item = next((r for r in data["connections"] if r["id"] == ident), None)
             if item is None:
                 raise MCPSettingsError("unknown_mcp_connection")
-            connection = self._connection(item)
-        try:
-            observed = asyncio.run(discover_tools(connection))
-        except Exception:
-            raise MCPSettingsError("mcp_discovery_failed") from None
+            is_stdio = item.get("kind", "endpoint") == "stdio"
+            if is_stdio:
+                stdio_connection = self._stdio_connection(item)
+            else:
+                endpoint_connection = self._connection(item)
+        if is_stdio:
+            try:
+                observed = asyncio.run(discover_stdio_tools(stdio_connection, env_source=self._env))
+            except Exception:
+                raise MCPSettingsError("mcp_discovery_failed") from None
+        else:
+            try:
+                observed = asyncio.run(discover_tools(endpoint_connection))
+            except Exception:
+                raise MCPSettingsError("mcp_discovery_failed") from None
         if len(observed) > 128:
             raise MCPSettingsError("too_many_mcp_tools")
         with self._lock:
             data = self._read()
             item = next((r for r in data["connections"] if r["id"] == ident), None)
-            if item is None or item["endpoint"] != connection.endpoint:
+            if item is None:
+                raise MCPSettingsError("mcp_connection_changed")
+            if is_stdio:
+                if (
+                    item.get("kind", "endpoint") != "stdio"
+                    or item["command"] != stdio_connection.command
+                ):
+                    raise MCPSettingsError("mcp_connection_changed")
+            elif (
+                item.get("kind", "endpoint") == "stdio"
+                or item["endpoint"] != endpoint_connection.endpoint
+            ):
                 raise MCPSettingsError("mcp_connection_changed")
             item["tools"] = [
                 {
@@ -270,16 +387,22 @@ class MCPDesktopManager:
 
     def runtime(
         self,
-    ) -> tuple[tuple[MCPConnection, ...], tuple[tuple[ObservedTool, ReviewedToolPolicy], ...]]:
+    ) -> tuple[
+        tuple[MCPConnection | StdioMCPConnection, ...],
+        tuple[tuple[ObservedTool, ReviewedToolPolicy], ...],
+    ]:
         """Return only explicitly enabled, credentialed, digest-pinned entries."""
         with self._lock:
-            connections: list[MCPConnection] = []
+            connections: list[MCPConnection | StdioMCPConnection] = []
             reviewed: list[tuple[ObservedTool, ReviewedToolPolicy]] = []
             for item in self._read()["connections"]:
                 approved = [r for r in item["tools"] if r["enabled"]]
                 if not approved:
                     continue
-                connection = self._connection(item)
+                if item.get("kind", "endpoint") == "stdio":
+                    connection: MCPConnection | StdioMCPConnection = self._stdio_connection(item)
+                else:
+                    connection = self._connection(item)
                 connections.append(connection)
                 for tool in approved:
                     observed = ObservedTool(

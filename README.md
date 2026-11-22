@@ -142,7 +142,7 @@ The trusted local tool registry contains 10 typed allowlisted tools, validated a
 To keep verified capabilities distinct from future design goals, the following are **not** included in this build:
 
 - **No unrestricted OS/shell/browser control** or unattended background computer automation.
-- **No local stdio MCP subprocesses or interactive OAuth login** yet. Reviewed HTTPS MCP tools can be enabled individually and executed only after owner approval. See [desktop MCP setup](docs/MCP_DESKTOP.md).
+- **No interactive OAuth login** yet. Reviewed HTTPS MCP tools can be enabled individually and executed only after owner approval. Since M35, local stdio MCP subprocesses are supported when their exact binary is host-allowlisted (`MAX_MCP_STDIO_BINARIES`) with a stripped environment and per-call approval — see [desktop MCP setup](docs/MCP_DESKTOP.md) and [M35](docs/M35_SANDBOXED_CODE_AND_STDIO_MCP.md).
 - **No always-on wake-word daemon, global OS-wide hotkeys, or gaming overlay**.
 - **No Arch Linux / Hyprland real-device verification** or **iPhone mobile web client** in this desktop build.
 - **No signed standalone `.exe` installer** (launch runs from `.venv` via `start-max.cmd`).

@@ -10,6 +10,7 @@ import pytest
 
 from max_core.mcp_desktop import MCPDesktopManager, MCPSettingsError
 from max_core.mcp_discovery import ObservedTool
+from max_core.mcp_policy import RiskTier as ReviewedRiskTier
 
 
 def _tool(name: str = "search") -> ObservedTool:
@@ -116,3 +117,74 @@ def test_unsupported_nested_schema_cannot_be_enabled(
     with pytest.raises(MCPSettingsError, match="unsupported_mcp_schema"):
         manager.review("github", "write", enable=True)
     assert manager.runtime() == ((), ())
+
+
+def test_stdio_add_requires_host_allowlist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MAX_MCP_STDIO_BINARIES", raising=False)
+    manager = MCPDesktopManager(tmp_path / "profile.json", env={})
+    with pytest.raises(MCPSettingsError, match="stdio_not_allowed"):
+        manager.add_stdio("gitlocal", "/usr/bin/git", ())
+
+
+def test_stdio_add_rejects_unallowlisted_binary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    allowlist = "/usr/bin/git"
+    manager = MCPDesktopManager(
+        tmp_path / "profile.json", env={"MAX_MCP_STDIO_BINARIES": allowlist}
+    )
+    with pytest.raises(MCPSettingsError, match="stdio_command_not_allowed"):
+        manager.add_stdio("evil", "/bin/sh", ())
+    relative = MCPDesktopManager(
+        tmp_path / "other.json", env={"MAX_MCP_STDIO_BINARIES": "relative/path"}
+    )
+    with pytest.raises(MCPSettingsError, match="stdio_not_allowed"):
+        relative.add_stdio("gitlocal", "/usr/bin/git", ())
+
+
+def test_stdio_profile_roundtrip_and_fail_closed_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sys
+
+    from tests.stdio_fixture import write_stdio_fixture_server
+
+    server = write_stdio_fixture_server(tmp_path)
+    executable = str(Path(sys.executable).resolve())
+    profile = tmp_path / "profile.json"
+    manager = MCPDesktopManager(
+        profile, env={"MAX_MCP_STDIO_BINARIES": executable, "MAX_MCP_CONFIG_PATH": str(profile)}
+    )
+    manager.add_stdio("fixture", executable, (str(server),), discovery_approved=True)
+    rows = manager.connections()
+    assert rows[0]["kind"] == "stdio"
+    assert rows[0]["endpoint"] == ""
+    assert rows[0]["command"] == executable
+
+    schema = json.dumps(
+        {"type": "object", "properties": {}, "additionalProperties": False},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+    async def fake_discover(
+        connection: object, *, env_source: object = None
+    ) -> tuple[ObservedTool, ...]:
+        return (
+            ObservedTool(
+                "fixture", "probe", schema, hashlib.sha256(schema.encode()).hexdigest(), True
+            ),
+        )
+
+    monkeypatch.setattr("max_core.mcp_desktop.discover_stdio_tools", fake_discover)
+    assert manager.discover("fixture") == 1
+    manager.review("fixture", "probe", enable=True)
+    connections, reviewed = manager.runtime()
+    assert len(connections) == 1 and len(reviewed) == 1
+    connection = connections[0]
+    assert connection.connection_id == "fixture"
+    assert reviewed[0][1].risk == ReviewedRiskTier.R1
+
+    shrunk = MCPDesktopManager(profile, env={"MAX_MCP_CONFIG_PATH": str(profile)})
+    with pytest.raises(MCPSettingsError, match="stdio_not_allowed"):
+        shrunk.runtime()

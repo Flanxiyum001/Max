@@ -22,6 +22,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from max_core.assistant_chat import ToolExecutionSummary, ToolStatus
 from max_core.bounded_commands import BoundedCommandError, run_bounded_command
 from max_core.bounded_worker import WorkerError, execute_operation, parse_operation
+from max_core.container_runner import run_python_sandboxed
 from max_core.gateway.contracts import ToolDefinition, ToolProposal
 from max_core.local_config import DesktopConfig
 from max_core.native_desktop.backend import NativeDesktopCore, NativeDesktopError
@@ -58,8 +59,12 @@ _MAX_DEV_ADD_ABS = 1_000_000
 _ANCHOR_OBJECTIVE = "MAX Assistant local tool session"
 _GIT_TIMEOUT_SECONDS = 30
 _PYTEST_TIMEOUT_SECONDS = 300
+_CODE_TIMEOUT_SECONDS = 120
+_MAX_SCRIPT_CHARS = 32_000
 
-_EXCLUDED_DIR_NAMES = frozenset({".git", ".venv", "__pycache__", "secrets", "private"})
+_EXCLUDED_DIR_NAMES = frozenset(
+    {".git", ".venv", "__pycache__", "secrets", "private", ".max-scratch"}
+)
 _EXCLUDED_FILE_NAMES = frozenset(
     {".env", ".server.log", "id_rsa", "id_ed25519", "credentials.json"}
 )
@@ -425,8 +430,20 @@ def _run_bounded(
         raise LocalToolError(error.code, status="failed") from None
 
 
+def _validate_execute_python(arguments: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(arguments, dict) or set(arguments) != {"script"}:
+        raise LocalToolError("invalid_action_parameters", status="denied")
+    raw = arguments["script"]
+    if not isinstance(raw, str) or not 1 <= len(raw) <= _MAX_SCRIPT_CHARS:
+        raise LocalToolError("invalid_action_parameters", status="denied")
+    if "\x00" in raw:
+        raise LocalToolError("invalid_action_parameters", status="denied")
+    _require_valid_utf8(raw, "invalid_action_parameters")
+    return {"script": raw}
+
+
 class LocalToolRegistry:
-    """Fixed host registry of 13 bounded, deterministic local tools."""
+    """Fixed host registry of 14 bounded, deterministic local tools."""
 
     def __init__(
         self,
@@ -674,6 +691,25 @@ class LocalToolRegistry:
                 requires_approval=True,
                 validate=self._validate_git_diff,
                 handler=self._handle_git_diff,
+            ),
+            LocalToolSpec(
+                name="code.execute_python",
+                description=(
+                    "Run a Python script in an ephemeral, network-disabled, read-only "
+                    "container sandbox with a scratch /work directory (requires Trust approval)."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "script": {"type": "string", "minLength": 1, "maxLength": _MAX_SCRIPT_CHARS}
+                    },
+                    "required": ["script"],
+                    "additionalProperties": False,
+                },
+                risk_tier=RiskTier.R2,
+                requires_approval=True,
+                validate=_validate_execute_python,
+                handler=self._handle_execute_python,
             ),
             LocalToolSpec(
                 name="test.run_pytest",
@@ -1286,6 +1322,21 @@ class LocalToolRegistry:
         result = _run_bounded(self._workspace_root, argv, _GIT_TIMEOUT_SECONDS)
         result["tool"] = "git.diff"
         return result
+
+    def _handle_execute_python(
+        self,
+        args: dict[str, Any],
+        _call_id: str | None,
+        _approval_id: str | None,
+    ) -> dict[str, object]:
+        try:
+            return run_python_sandboxed(
+                self._workspace_root,
+                args["script"],
+                timeout_seconds=_CODE_TIMEOUT_SECONDS,
+            )
+        except BoundedCommandError as error:
+            raise LocalToolError(error.code, status="failed") from None
 
     def _handle_test_run_pytest(
         self,
