@@ -348,14 +348,15 @@ class WebGitHubConnector:
             token = self._token
         try:
             clean = validated_arguments(entry.observation, entry.policy, arguments)
-            return _run_in_fresh_thread(asyncio.run, self._dispatch(token, entry, clean))
+            return _run_in_fresh_thread(asyncio.run, self._dispatch(token, entry, clean, generation))
         except ToolError:
             raise
         except Exception:
             raise ToolError("github_mcp_call_failed") from None
 
-    @staticmethod
-    async def _dispatch(token: str, entry: _RemoteTool, args: dict[str, Any]) -> str:
+    async def _dispatch(
+        self, token: str, entry: _RemoteTool, args: dict[str, Any], generation: int
+    ) -> str:
         try:
             with anyio.fail_after(30):
                 headers = {"Authorization": "Bearer " + token, "Accept-Encoding": "identity"}
@@ -405,6 +406,13 @@ class WebGitHubConnector:
                                     break
                             if not found:
                                 raise ToolError("github_mcp_schema_changed")
+                            with self._lock:
+                                if (
+                                    self._token != token
+                                    or self._generation != generation
+                                    or entry not in self._tools
+                                ):
+                                    raise ToolError("github_mcp_revoked")
                             output = await mcp.call_tool(entry.observation.name, arguments=args)
                 return _extract_tool_output(output)
         except ToolError:
