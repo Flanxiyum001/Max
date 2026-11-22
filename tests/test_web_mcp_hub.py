@@ -87,9 +87,7 @@ def test_owner_can_start_any_catalog_service_without_provider_env(
             "client_id_metadata_document_supported": True,
         }
 
-    async def register(
-        _service: str, _issuer: str, _meta: dict[str, object]
-    ) -> str:
+    async def register(_service: str, _issuer: str, _meta: dict[str, object]) -> str:
         return "https://max-test.onrender.com/.well-known/oauth-client-metadata/max.json"
 
     monkeypatch.setattr(hub, "_oauth_metadata", metadata)
@@ -98,9 +96,7 @@ def test_owner_can_start_any_catalog_service_without_provider_env(
     params = parse_qs(urlsplit(url).query)
     assert params["resource"] == ["https://mcp.cloudflare.com/mcp"]
     assert params["code_challenge_method"] == ["S256"]
-    assert params["redirect_uri"] == [
-        "https://max-test.onrender.com/api/connect/mcp/callback"
-    ]
+    assert params["redirect_uri"] == ["https://max-test.onrender.com/api/connect/mcp/callback"]
     assert "MAX_CLOUDFLARE_TOKEN" not in str(params)
     assert len(params["state"][0]) > 32
     assert hub.client_metadata()["client_id"] == params["client_id"][0]
@@ -166,7 +162,9 @@ def test_web_api_client_metadata_and_voice_command(
     done = client.get(f"/api/job/{job}").json()
     assert done["connect"] == {"service": "railway", "action": "authorize"}
     assert "Railway" in done["answer"]
-    assert client.get("/api/state").json()["connections"]["services"]["railway"]["connected"] is False
+    assert (
+        client.get("/api/state").json()["connections"]["services"]["railway"]["connected"] is False
+    )
     assert client.post("/api/connect/mcp/not-made-up/disconnect", json={}).status_code == 404
 
 
@@ -182,7 +180,9 @@ def test_encrypted_single_vault_persists_without_provider_secrets_in_environment
     assert b"MAX_RAILWAY_API_KEY" not in raw
     loaded = MCPCredentialVault(env).load("railway")
     assert loaded == {"token": "super-secret-railway-access-token"}
-    different = MCPCredentialVault({**env, "MAX_WEB_SECRET": "different_application_secret_123456789"})
+    different = MCPCredentialVault(
+        {**env, "MAX_WEB_SECRET": "different_application_secret_123456789"}
+    )
     assert different.load("railway") is None
     first.delete("railway")
     assert first.load("railway") is None
