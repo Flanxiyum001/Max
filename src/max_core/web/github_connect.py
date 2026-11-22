@@ -132,7 +132,7 @@ def _reviewable(observation: ObservedTool) -> _RemoteTool | None:
                 ToolParam(
                     name=name,
                     kind=param_type,
-                    description=str(descriptor.get("description", name))[:180],
+                    description=f"GitHub MCP parameter {name}",
                     required=name in required,
                     max_length=1024,
                 )
@@ -287,14 +287,20 @@ class WebGitHubConnector:
             entry = _reviewable(tool)
             if entry is not None:
                 reviewable.append(entry)
-            if len(reviewable) >= _MAX_MCP_TOOLS:
-                break
         if not reviewable:
             raise GitHubConnectionError("github_mcp_no_supported_tools")
         with self._lock:
             self._token = token
             self._account = account
-            self._tools = tuple(reviewable)
+            # Prefer utility/read-like tools while staying deny-by-default:
+            # readOnlyHint affects ordering, NEVER whether an approval is required.
+            reviewable.sort(
+                key=lambda candidate: (
+                    not candidate.observation.read_only_hint,
+                    candidate.observation.name,
+                )
+            )
+            self._tools = tuple(reviewable[:_MAX_MCP_TOOLS])
             self._generation += 1
         return account
 
