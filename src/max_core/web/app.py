@@ -11,6 +11,7 @@ on the web server.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
 import hmac
 import logging
@@ -152,6 +153,7 @@ class SttConfig:
     api_key: str | None
     model: str
     language: str | None
+    prompt: str = ""
 
 
 def stt_config(env: dict[str, str]) -> SttConfig | None:
@@ -174,10 +176,44 @@ def stt_config(env: dict[str, str]) -> SttConfig | None:
         api_key=env.get("MAX_STT_API_KEY") or env.get("MAX_TRIAL_API_KEY") or None,
         model=env.get("MAX_STT_MODEL", "whisper-large-v3"),
         language=env.get("MAX_STT_LANGUAGE") or None,
+        prompt=stt_prompt(env.get("MAX_STT_VOCAB", "")),
     )
 
 
-_STT_PROMPT = "MAX, the owner's personal assistant. Hey MAX."
+_STT_PROMPT = "Hey MAX. MAX is the owner's personal assistant."
+
+
+def stt_prompt(vocab: str, context: str = "") -> str:
+    """Whisper's prompt biases spelling toward names/terms the owner uses and the topic.
+
+    Kept short: Whisper only reads the last ~224 tokens of it.
+    """
+    parts = [_STT_PROMPT]
+    words = ", ".join(w.strip() for w in vocab.split(",") if w.strip())[:300]
+    if words:
+        parts.append(f"Words that may come up: {words}.")
+    if context:
+        parts.append(" ".join(context.split())[-400:])
+    return " ".join(parts)
+
+
+# Phrases Whisper is known to invent on silence or noise; never act on them alone.
+_HALLUCINATIONS = {
+    "thanks for watching!",
+    "thanks for watching.",
+    "thank you for watching.",
+    "thank you for watching!",
+    "please subscribe.",
+    "subtitles by the amara.org community",
+    "you",
+    ".",
+    "...",
+}
+
+
+def clean_transcript(text: str) -> str:
+    text = " ".join(str(text).split())
+    return "" if text.lower() in _HALLUCINATIONS else text[:4000]
 
 
 async def transcribe(audio: bytes, content_type: str, cfg: SttConfig) -> str:
@@ -186,7 +222,7 @@ async def transcribe(audio: bytes, content_type: str, cfg: SttConfig) -> str:
     ext = {"audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "m4a", "audio/wav": "wav",
            "audio/mpeg": "mp3"}.get(content_type.split(";")[0].strip(), "webm")  # fmt: skip
     data = {"model": cfg.model, "response_format": "json", "temperature": "0",
-            "prompt": _STT_PROMPT}  # fmt: skip
+            "prompt": cfg.prompt or _STT_PROMPT}  # fmt: skip
     if cfg.language:
         data["language"] = cfg.language
     headers = {"Authorization": f"Bearer {cfg.api_key}"} if cfg.api_key else {}
@@ -225,6 +261,7 @@ def create_app(
     backup_cfg = tts_config(env)
     backup = tts_backup or synthesize_api
     stt = stt_config(env)
+    stt_vocab = env.get("MAX_STT_VOCAB", "")
     hear = transcriber or transcribe
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
@@ -432,11 +469,18 @@ def create_app(
             raise HTTPException(413, "audio_too_large")
         if len(audio) < 200:
             raise HTTPException(400, "audio_too_short")
+        cfg = stt
+        sess = state["session"]
+        history = getattr(sess, "history", None) or []
+        last = next((m.content for m in reversed(history) if m.role == "assistant"), "")
+        if last:  # what MAX just said is the best hint for what comes next
+            cfg = dataclasses.replace(stt, prompt=stt_prompt(stt_vocab, last))
         try:
-            text = await hear(audio, content_type, stt)
-        except Exception:
+            text = await hear(audio, content_type, cfg)
+        except Exception as exc:
+            log.warning("transcription failed: %s", type(exc).__name__)
             raise HTTPException(502, "stt_unavailable") from None
-        return {"text": str(text).strip()[:4000]}
+        return {"text": clean_transcript(text)}
 
     @app.post("/api/speak")
     async def speak_text(body: SpeakBody, request: Request) -> Response:

@@ -221,6 +221,9 @@ $("deny").onclick = () => answerApproval(false);
 
 // ---------------------------------------------------------------- sound level → orb
 // level (0..1) comes from the mic while listening and from MAX's voice while speaking.
+// Clean speech for the recogniser: mono, echo-cancelled, noise-suppressed, levelled.
+const MIC = { audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } };
+let noiseFloor = 0.03;
 let level = 0, audioCtx = null, analyser = null, levelSource = null, micStream = null;
 function ensureAudio() {
   if (!audioCtx) {
@@ -246,7 +249,7 @@ requestAnimationFrame(sampleLevel);
 async function startMicLevel() {
   try {
     ensureAudio();
-    if (!micStream) micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    if (!micStream) micStream = await navigator.mediaDevices.getUserMedia(MIC);
     connectLevel(audioCtx.createMediaStreamSource(micStream));
   } catch {}
 }
@@ -331,30 +334,52 @@ let wakeRec = null, wakeWanted = false;
 // High-accuracy path: record → server Whisper-class transcription. Ends by itself
 // when you stop talking (voice-activity detection on the mic level).
 let recorder = null;
+function recOptions() {
+  const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"]
+    .find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || "";
+  return { mime, opts: mime ? { mimeType: mime, audioBitsPerSecond: 128000 } : { audioBitsPerSecond: 128000 } };
+}
+// Adaptive end-of-speech: thresholds follow the room's noise floor, and a
+// natural mid-sentence pause (< 1.6 s) does not cut you off.
+function speechGate(onDone, { spoke = false, maxWaitMs = 8000, maxMs = 30000 } = {}) {
+  const started = Date.now(); let quietSince = null;
+  const timer = setInterval(() => {
+    const now = Date.now();
+    if (!spoke) noiseFloor += (Math.min(level, 0.2) - noiseFloor) * 0.05;
+    const on = Math.max(0.09, noiseFloor * 3), off = Math.max(0.05, noiseFloor * 1.8);
+    if (level > on) { spoke = true; quietSince = null; }
+    else if (spoke && level < off) quietSince = quietSince || now;
+    if (!spoke && now - started > maxWaitMs) { clearInterval(timer); onDone(false); }
+    else if ((spoke && quietSince && now - quietSince > 1600) || now - started > maxMs) {
+      clearInterval(timer); onDone(true);
+    }
+  }, 100);
+  return () => clearInterval(timer);
+}
+async function transcribeClip(blob) {
+  const res = await fetch("/api/transcribe", { method: "POST", body: blob,
+    headers: { "Content-Type": blob.type }, credentials: "same-origin" });
+  if (!res.ok) throw new Error("stt");
+  const { text } = await res.json();
+  return (text || "").trim();
+}
 async function startRecording(opts = {}) {
   stopSpeaking(); stopWake();
   listening = true; setState("listening"); chime(true);
   show(opts.followUp ? "…" : "Listening…", 0);
   await startMicLevel();
   if (!micStream) { listening = false; setState("error", 2500); show("Microphone permission was denied.", 3500); return; }
-  const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"]
-    .find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || "";
+  const { mime, opts: ropts } = recOptions();
   const chunks = [];
-  recorder = new MediaRecorder(micStream, mime ? { mimeType: mime } : undefined);
+  recorder = new MediaRecorder(micStream, ropts);
   recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
-  const started = Date.now(); let spoke = false, quietSince = null, cancelled = false;
-  const vad = setInterval(() => {
-    const now = Date.now();
-    if (level > 0.12) { spoke = true; quietSince = null; }
-    else if (spoke && level < 0.07) quietSince = quietSince || now;
-    const waitedTooLong = !spoke && now - started > (opts.followUp ? 6000 : 8000);
-    if (waitedTooLong) cancelled = true;
-    if (waitedTooLong || (spoke && quietSince && now - quietSince > 1100) || now - started > 25000) {
-      clearInterval(vad); if (recorder.state !== "inactive") recorder.stop();
-    }
-  }, 100);
+  let cancelled = false;
+  const stopGate = speechGate((heard) => {
+    cancelled = !heard;
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+  }, { maxWaitMs: opts.followUp ? 6000 : 8000 });
   recorder.onstop = async () => {
-    clearInterval(vad); listening = false; recorder = null;
+    stopGate(); listening = false; recorder = null;
     const blob = new Blob(chunks, { type: (mime || "audio/webm").split(";")[0] });
     stopMicLevel();
     if (cancelled || blob.size < 1500) {
@@ -363,11 +388,8 @@ async function startRecording(opts = {}) {
     }
     chime(false); setState("thinking"); show("⋯", 0);
     try {
-      const res = await fetch("/api/transcribe", { method: "POST", body: blob,
-        headers: { "Content-Type": blob.type }, credentials: "same-origin" });
-      if (!res.ok) throw new Error("stt");
-      const { text } = await res.json();
-      if (text && text.trim()) { show(`“${text.trim()}”`, 0); ask(text.trim(), true); }
+      const text = await transcribeClip(blob);
+      if (text) { show(`“${text}”`, 0); ask(text, true); }
       else { setState("idle"); show("I didn't catch that.", 2500); resumeWake(); }
     } catch { setState("error", 2500); show("I couldn't transcribe that. Try again?", 3000); resumeWake(); }
   };
@@ -413,9 +435,43 @@ function toggleListening() {
 }
 canvas.addEventListener("click", toggleListening);
 
-function startWake() {
+// While "Hey MAX" is on, a rolling recording runs alongside the browser's wake
+// detector, so a command said in the same breath is transcribed by the server's
+// accurate recogniser instead of the browser's.
+let tape = null;
+function startTape() {
+  if (!sttReady || !window.MediaRecorder || !micStream || tape) return;
+  const { mime, opts } = recOptions();
+  const t = { chunks: [], mime, started: Date.now(), wake: false, rec: new MediaRecorder(micStream, opts) };
+  t.rec.ondataavailable = (e) => { if (e.data.size) t.chunks.push(e.data); };
+  t.rec.start(250); tape = t;
+}
+function dropTape() { if (tape) { const t = tape; tape = null; try { t.rec.onstop = null; t.rec.stop(); } catch {} } }
+setInterval(() => {   // keep the tape short: restart it during silence
+  if (tape && !tape.wake && Date.now() - tape.started > 20000 && level < Math.max(0.05, noiseFloor * 1.8)) { dropTape(); startTape(); }
+}, 1000);
+function finishTape() {
+  const t = tape; t.wake = true;
+  listening = true; setState("listening"); chime(true); show("Listening…", 0);
+  speechGate(() => { try { t.rec.stop(); } catch {} }, { spoke: true, maxMs: 20000 });
+  t.rec.onstop = async () => {
+    tape = null; listening = false; stopMicLevel();
+    const blob = new Blob(t.chunks, { type: (t.mime || "audio/webm").split(";")[0] });
+    chime(false); setState("thinking"); show("⋯", 0);
+    try {
+      const said = await transcribeClip(blob);
+      const m = said.match(WAKE);
+      const rest = (m ? said.slice(m.index + m[0].length) : said).trim();
+      if (rest.length > 2) { show(`“${rest}”`, 0); ask(rest, true); }
+      else { setState("idle"); startListening(); }   // just "Hey MAX": listen for the command
+    } catch { setState("error", 2500); show("I couldn't transcribe that. Try again?", 3000); resumeWake(); }
+  };
+}
+async function startWake() {
   if (!SR || !wakeOn || !authed || listening || busy || audio || wakeRec) return;
   wakeWanted = true;
+  if (sttReady && window.MediaRecorder) { await startMicLevel(); startTape(); }
+  if (!wakeWanted || wakeRec) return;
   wakeRec = new SR(); wakeRec.lang = navigator.language || "en-US";
   wakeRec.continuous = true; wakeRec.interimResults = true;
   wakeRec.onresult = (e) => {
@@ -423,6 +479,10 @@ function startWake() {
       const said = e.results[i][0].transcript;
       const m = said.match(WAKE);
       if (!m) continue;
+      if (tape && !tape.wake) {   // accurate path: let the recording finish, then transcribe it
+        wakeWanted = false; try { wakeRec.abort(); } catch {} wakeRec = null;
+        finishTape(); return;
+      }
       const rest = said.slice(m.index + m[0].length).trim();
       if (e.results[i].isFinal && rest.length > 2) {   // "Hey MAX, what's the weather?"
         stopWake(); chime(true); chime(false); show(`“${rest}”`, 0); ask(rest, true); return;
@@ -434,7 +494,10 @@ function startWake() {
   wakeRec.onend = () => { wakeRec = null; if (wakeWanted) setTimeout(startWake, 400); };  // browsers stop it periodically
   try { wakeRec.start(); } catch { wakeRec = null; }
 }
-function stopWake() { wakeWanted = false; if (wakeRec) { try { wakeRec.abort(); } catch {} wakeRec = null; } }
+function stopWake() {
+  wakeWanted = false; if (tape && !tape.wake) dropTape();
+  if (wakeRec) { try { wakeRec.abort(); } catch {} wakeRec = null; }
+}
 function resumeWake() { if (wakeOn) setTimeout(startWake, 300); }
 function saveWake() {
   localStorage.setItem("max_wake", wakeOn ? "on" : "off");
