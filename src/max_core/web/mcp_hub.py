@@ -59,7 +59,7 @@ CATALOG: dict[str, MCPProvider] = {
     "sentry": MCPProvider("Sentry", "https://mcp.sentry.dev/mcp", ("sentry.dev", "sentry.io")),
     "figma": MCPProvider("Figma", "https://mcp.figma.com/mcp", ("figma.com",)),
 }
-_SERVICE = re.compile(r"\b(github|cloudflare|railway|notion|linear|sentry)\b", re.I)
+_SERVICE = re.compile(r"\b(github|cloudflare|railway|notion|linear|sentry|figma)\b", re.I)
 _CONNECT = re.compile(r"\b(connect|link|integrate|set\s*up|setup|sign\s*in|log\s*in)\b", re.I)
 _DISCONNECT = re.compile(r"\b(disconnect|unlink|revoke)\b", re.I)
 _OAUTH_STATE = re.compile(r"[A-Za-z0-9_-]{32,128}\Z")
