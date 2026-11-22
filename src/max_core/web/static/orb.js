@@ -5,6 +5,7 @@ const canvas = $("orb"), ctx = canvas.getContext("2d");
 const answerEl = $("answer"), input = $("input"), hint = $("hint");
 const loginForm = $("login"), passcode = $("passcode"), choices = $("choices");
 const githubAuth = $("github-auth");
+const sandboxLink = $("sandbox-link");
 const appsToggle = $("connections-toggle"), appsPanel = $("connections-panel");
 const appsList = $("connections-list");
 const MCP_APPS = Object.freeze({
@@ -145,6 +146,7 @@ const ERRORS = {
   model_not_configured: "No model connected yet. Set the MAX_TRIAL_* settings on the server.",
   model_unavailable: "I couldn't reach my model just now.",
   busy: "One moment, I'm still on the last one.",
+  sandbox_failed: "The PR sandbox could not be started. Check the PR and Actions permissions.",
   slow_down: "Too many requests, give me a second.",
 };
 // Why the model call failed (sanitized gateway codes from the server).
@@ -163,6 +165,7 @@ const DETAILS = {
 function showLogin() {
   authed = false; loginForm.classList.remove("hidden"); input.classList.add("hidden");
   githubAuth.classList.add("hidden");
+  sandboxLink.classList.add("hidden");
   appsToggle.classList.add("hidden"); appsPanel.classList.add("hidden");
   hint.textContent = "enter passcode"; passcode.focus();
 }
@@ -212,6 +215,7 @@ async function boot() {
 async function ask(text, spoken) {
   if (busy || !text.trim()) return;
   githubAuth.classList.add("hidden");
+  sandboxLink.classList.add("hidden");
   pendingConnectService = null;
   busy = true; setState("thinking"); show("");
   try {
@@ -229,6 +233,16 @@ async function ask(text, spoken) {
       }
       busy = false; pendingJob = null;
       if (j.status === "done") {
+        if (j.sandbox?.run_url) {
+          try {
+            const link = new URL(j.sandbox.run_url);
+            if (link.protocol === "https:" && link.hostname === "github.com" &&
+                /^\/[A-Za-z0-9-]{1,39}\/[A-Za-z0-9_.-]{1,100}\/actions\/runs\/[0-9]+$/.test(link.pathname)) {
+              sandboxLink.href = link.href;
+              sandboxLink.classList.remove("hidden");
+            }
+          } catch {}
+        }
         if (j.connect?.action === "authorize" && MCP_APPS[j.connect.service]) {
           pendingConnectService = j.connect.service;
           githubAuth.textContent = "Authorize " + MCP_APPS[pendingConnectService][0];
