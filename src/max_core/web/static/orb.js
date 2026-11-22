@@ -16,6 +16,25 @@ const MCP_APPS = Object.freeze({
   linear: ["Linear", ["linear.app"]],
   sentry: ["Sentry", ["sentry.dev", "sentry.io"]],
   figma: ["Figma", ["figma.com"]],
+  render: ["Render", ["render.com"]],
+});
+const keybox = $("keybox"), keyLink = $("key-link"), keyInput = $("key-input");
+let keyService = null;
+keybox.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const key = keyInput.value.trim(); if (!keyService || !key) return;
+  keyInput.value = ""; keybox.classList.add("hidden");
+  setState("thinking"); show("Connecting…", 0);
+  try {
+    const res = await api(`/api/connect/mcp/${keyService}/key`, { key });
+    const { tools } = await res.json();
+    const msg = `${MCP_APPS[keyService][0]} is connected. I can use ${tools} of its tools, and I'll ask before each action.`;
+    setState("speaking"); show(msg); say(msg);
+  } catch (err) {
+    setState("error", 2500);
+    show(err.message === "mcp_api_key_invalid" ? "That doesn't look like a valid key. Try again?" : "I couldn't connect with that key.", 3500);
+  }
+  keyService = null;
 });
 let pendingConnectService = null;
 
@@ -183,7 +202,7 @@ async function boot() {
   const s = await (await fetch("/api/state", { credentials: "same-origin" })).json();
   if (!s.authed) return showLogin();
   authed = true; sttReady = !!s.stt_ready;
-  appsToggle.classList.remove("hidden");
+  // Apps panel removed: connect apps by asking MAX ("MAX, connect to Cloudflare").
   hint.textContent = "type to talk · space or tap the orb to speak";
   if (!s.model_ready) { setState("error", 3000); show(ERRORS.model_not_configured); }
   else show("Hello. I'm here.", 4000);
@@ -240,6 +259,16 @@ async function ask(text, spoken) {
                 /^\/[A-Za-z0-9-]{1,39}\/[A-Za-z0-9_.-]{1,100}\/actions\/runs\/[0-9]+$/.test(link.pathname)) {
               sandboxLink.href = link.href;
               sandboxLink.classList.remove("hidden");
+            }
+          } catch {}
+        }
+        if (j.connect?.action === "api_key" && MCP_APPS[j.connect.service]) {
+          try {
+            const link = new URL(j.connect.url);
+            if (link.protocol === "https:" && MCP_APPS[j.connect.service][1].some((d) => link.hostname === d || link.hostname.endsWith("." + d))) {
+              keyService = j.connect.service; keyLink.href = link.href;
+              keyLink.textContent = "Create " + MCP_APPS[keyService][0] + " key";
+              keybox.classList.remove("hidden"); stopWake();
             }
           } catch {}
         }

@@ -58,8 +58,17 @@ CATALOG: dict[str, MCPProvider] = {
     "linear": MCPProvider("Linear", "https://mcp.linear.app/mcp", ("linear.app",)),
     "sentry": MCPProvider("Sentry", "https://mcp.sentry.dev/mcp", ("sentry.dev", "sentry.io")),
     "figma": MCPProvider("Figma", "https://mcp.figma.com/mcp", ("figma.com",)),
+    "render": MCPProvider("Render", "https://mcp.render.com/mcp", ("render.com",)),
 }
-_SERVICE = re.compile(r"\b(github|cloudflare|railway|notion|linear|sentry|figma)\b", re.I)
+# Services whose official MCP server has no OAuth: the owner creates an API key on
+# the provider's own dashboard and hands it to MAX once (stored encrypted).
+API_KEY_SERVICES: dict[str, tuple[str, re.Pattern[str]]] = {
+    "render": (
+        "https://dashboard.render.com/u/settings#api-keys",
+        re.compile(r"rnd_[A-Za-z0-9]{16,128}\Z"),
+    ),
+}
+_SERVICE = re.compile(r"\b(github|cloudflare|railway|notion|linear|sentry|figma|render)\b", re.I)
 _CONNECT = re.compile(r"\b(connect|link|integrate|set\s*up|setup|sign\s*in|log\s*in)\b", re.I)
 _DISCONNECT = re.compile(r"\b(disconnect|unlink|revoke)\b", re.I)
 _OAUTH_STATE = re.compile(r"[A-Za-z0-9_-]{32,128}\Z")
@@ -384,6 +393,8 @@ class WebMCPHub:
                 raise MCPHubError(exc.code) from None
         if service not in CATALOG:
             raise MCPHubError("unknown_mcp_service")
+        if service in API_KEY_SERVICES:
+            raise MCPHubError("mcp_needs_api_key")
         try:
             return asyncio.run(self._start_auto(service))
         except MCPHubError:
@@ -455,6 +466,46 @@ class WebMCPHub:
         if isinstance(expires, (int, float)) and 0 < expires < 31536000:
             deadline = time.time() + float(expires)
         return token, refresh, deadline
+
+    def connect_with_key(self, service: str, key: str) -> int:
+        """API-key services (no OAuth): verify the key by discovering tools, then store it."""
+        spec = API_KEY_SERVICES.get(service)
+        key = key.strip()
+        if spec is None:
+            raise MCPHubError("unknown_mcp_service")
+        if not spec[1].fullmatch(key):
+            raise MCPHubError("mcp_api_key_invalid")
+        provider = CATALOG[service]
+        try:
+            observed = asyncio.run(
+                discover_tools(MCPConnection(service, provider.endpoint, True, key))
+            )
+        except Exception:
+            raise MCPHubError("mcp_discovery_failed") from None
+        reviewed = tuple(
+            sorted(
+                (e for t in observed if (e := _reviewable(t, service=service)) is not None),
+                key=lambda e: (not e.observation.read_only_hint, e.observation.name),
+            )
+        )[:_MAX_TOOLS]
+        if not reviewed:
+            raise MCPHubError("mcp_no_compatible_tools")
+        with self._lock:
+            generation = self._generations.get(service, 0) + 1
+            self._generations[service] = generation
+            record = _Connection(
+                key,
+                None,
+                None,
+                provider.endpoint,
+                "api_key",
+                provider.endpoint,
+                reviewed,
+                generation,
+            )
+            self._connections[service] = record
+            self._save(service, record)
+        return len(reviewed)
 
     def finish(self, state: str, code: str, iss: str = "") -> str:
         if not _OAUTH_STATE.fullmatch(state) or not 1 <= len(code) <= 2048:

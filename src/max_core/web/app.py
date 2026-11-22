@@ -17,6 +17,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import secrets
 import threading
 import time
@@ -31,7 +32,8 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from max_core.web.github_connect import GitHubConnectionError, WebGitHubConnector
-from max_core.web.mcp_hub import MCPHubError, WebMCPHub, connection_intent
+from max_core.web.mcp_hub import API_KEY_SERVICES, MCPHubError, WebMCPHub, connection_intent
+from max_core.web.mcp_hub import CATALOG as MCP_CATALOG
 from max_core.web.pr_sandbox import (
     GitHubPRSandbox,
     SandboxError,
@@ -58,11 +60,18 @@ class ApproveBody(BaseModel):
     allow: bool
 
 
+class ApiKeyBody(BaseModel):
+    key: str = Field(min_length=8, max_length=300)
+
+
 class SpeakBody(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
 
 
 log = logging.getLogger("max_core.web")
+_APPS_QUESTION = re.compile(
+    r"\b(which|what)\b.{0,40}\b(apps?|connections?|integrations?|connected)\b", re.I
+)
 
 
 @dataclass
@@ -405,6 +414,17 @@ def create_app(
         except MCPHubError as error:
             raise HTTPException(503, error.code) from None
 
+    @app.post("/api/connect/mcp/{service}/key")
+    def connect_mcp_key(service: str, body: ApiKeyBody, request: Request) -> dict[str, Any]:
+        require(request)
+        if not login_limit.allow(_client_ip(request)):
+            raise HTTPException(429, "slow_down")
+        try:
+            tools = hub.connect_with_key(service, body.key)
+        except MCPHubError as error:
+            raise HTTPException(400, error.code) from None
+        return {"ok": True, "tools": tools}
+
     @app.get("/api/connect/mcp/callback")
     def mcp_callback(
         state: str = "", code: str = "", error: str = "", iss: str = ""
@@ -533,6 +553,20 @@ def create_app(
             threading.Thread(target=run_sandbox, daemon=True).start()
             return {"job": job.id}
 
+        if _APPS_QUESTION.search(body.text[:200]) and connection_intent(body.text) is None:
+            services = hub.status()["services"]
+            names = {"github": "GitHub", **{k: v.name for k, v in MCP_CATALOG.items()}}
+            on = [names[k] for k, v in services.items() if v.get("connected")]
+            off = [names[k] for k, v in services.items() if not v.get("connected")]
+            job = Job(uuid.uuid4().hex, status="done")
+            job.answer = (
+                ("Connected: " + ", ".join(on) + ". " if on else "No apps are connected yet. ")
+                + "You can connect "
+                + ", ".join(off)
+                + ' by saying "connect to" and the app name.'
+            )
+            jobs[job.id] = job
+            return {"job": job.id}
         intent = connection_intent(body.text)
         if intent is not None:
             # Trusted, authenticated user intent; model output cannot add apps.
@@ -550,6 +584,17 @@ def create_app(
                     "GitHub OAuth App registration. I won't ask you to paste a token in chat."
                 )
                 job.connect = {"service": service, "action": "needs_configuration"}
+            elif service in API_KEY_SERVICES and not hub.status()["services"][service]["connected"]:
+                job.answer = (
+                    f"{label} doesn't offer one-click sign-in, so I need an API key once. "
+                    f"Open {label}'s key page, create a key, and paste it in the box. "
+                    "I'll keep it encrypted and ask before every action."
+                )
+                job.connect = {
+                    "service": service,
+                    "action": "api_key",
+                    "url": API_KEY_SERVICES[service][0],
+                }
             elif service != "github" and not hub.configured:
                 job.answer = (
                     "MAX needs its public HTTPS URL to register as an OAuth client. "
