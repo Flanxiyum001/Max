@@ -27,7 +27,7 @@ from max_core.local_config import load_dotenv_into_mapping
 from max_core.persona import persona_message
 from max_core.task_routing import TaskKind, classify, route_table
 from max_core.tool_loop import LoopResult, ToolLoop, ToolStep
-from max_core.tools import Tool, ToolError, ToolParam, ToolRisk
+from max_core.tools import Tool, ToolError, ToolParam, ToolRegistry, ToolRisk
 
 if TYPE_CHECKING:
     from max_core.mcp_execute import MCPToolExecutor
@@ -102,6 +102,7 @@ class AssistantSession:
         self.options = options
         self.is_cloud = settings.spec.inference_destination == InferenceDestination.CLOUD
         self.store = AssistantStore(options.data_dir)
+        self._mcp_core = mcp_core
         self.registry = assistant_registry(
             data_dir=options.data_dir,
             workspace=options.workspace,
@@ -148,7 +149,6 @@ class AssistantSession:
         executor = core._mcp_executor
         if not isinstance(executor, MCPToolExecutor):
             return
-        bound_executor: MCPToolExecutor = executor
         types = {
             "string": str,
             "integer": int,
@@ -192,9 +192,9 @@ class AssistantSession:
                 arguments: Mapping[str, Any],
                 *,
                 selected_name: str = name,
-                selected_executor: MCPToolExecutor = bound_executor,
+                selected_core: NativeDesktopCore = core,
             ) -> str:
-                return self._execute_approved_mcp(selected_executor, selected_name, dict(arguments))
+                return self._execute_approved_mcp(selected_core, selected_name, dict(arguments))
 
             try:
                 self.registry.register(
@@ -213,12 +213,21 @@ class AssistantSession:
 
     @staticmethod
     def _execute_approved_mcp(
-        executor: MCPToolExecutor, name: str, arguments: dict[str, Any]
+        core: NativeDesktopCore, name: str, arguments: dict[str, Any]
     ) -> str:
         from uuid import uuid4
 
         from max_core.gateway.contracts import ToolProposal
+        from max_core.mcp_execute import MCPToolExecutor
 
+        # Re-check the owner's CURRENT allowlist at the last possible point.
+        # A disabled tool is never executable through a stale orb session.
+        _ = core.tool_executor
+        executor = core._mcp_executor
+        if not isinstance(executor, MCPToolExecutor):
+            raise ToolError("mcp_tool_revoked")
+        if name not in {tool.name for tool in executor.tool_definitions()}:
+            raise ToolError("mcp_tool_revoked")
         proposal = ToolProposal(f"orb-{uuid4().hex}", name, arguments)
         requested = executor.execute(proposal)
         if requested.status != "awaiting_approval" or requested.approval_id is None:
@@ -230,6 +239,16 @@ class AssistantSession:
         if isinstance(completed.output, dict):
             return str(completed.output.get("result", ""))
         return str(completed.output)
+
+    def _refresh_mcp_tools(self) -> None:
+        if self._mcp_core is None:
+            return
+        # Rebuild only the MCP slice at the start of each turn. Enabling and
+        # disabling tools is reflected without restarting the orb process.
+        self.registry = ToolRegistry(
+            tuple(tool for tool in self.registry if not tool.name.startswith("mcp."))
+        )
+        self._register_mcp_tools(self._mcp_core)
 
     def _system(self) -> list[ChatMessage]:
         now = _dt.datetime.now().astimezone().strftime("%A %d %B %Y, %H:%M %Z")
@@ -265,6 +284,7 @@ class AssistantSession:
             raise ValueError("empty_prompt")
         kind = classify(text)
         with self._lock:
+            self._refresh_mcp_tools()
             self.history.append(ChatMessage("user", text))
             messages = self._system() + self.history[-MAX_HISTORY:]
             base = self.settings.spec.model_id
