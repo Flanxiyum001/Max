@@ -58,9 +58,10 @@ not a personal GitHub access token for every session.
 
 MAX uses the existing **MAX_WEB_SECRET** (already generated in
 `render.yaml`) as the basis of a separately derived Fernet encryption key.
-Every supported provider's OAuth access and refresh tokens and pinned schema
+Auto-registering providers' OAuth access and refresh tokens and pinned schema
 snapshots can be encrypted and saved in one local SQLite database or in the
-configured PostgreSQL database.
+configured PostgreSQL database. GitHub's legacy pre-registered OAuth path
+currently remains in process memory and requires a dedicated MAX app registration.
 
 There are **no app-specific token environment variables**. Authentication
 happens at the provider sign-in screen and the tokens remain in MAX's
