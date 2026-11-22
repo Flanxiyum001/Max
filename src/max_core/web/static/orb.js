@@ -14,6 +14,7 @@ const MCP_APPS = Object.freeze({
   notion: ["Notion", ["notion.com", "makenotion.com"]],
   linear: ["Linear", ["linear.app"]],
   sentry: ["Sentry", ["sentry.dev", "sentry.io"]],
+  figma: ["Figma", ["figma.com"]],
 });
 let pendingConnectService = null;
 
