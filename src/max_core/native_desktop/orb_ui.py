@@ -54,6 +54,7 @@ from max_core.native_desktop.backend import (
     NativeDesktopCore,
     NativeDesktopError,
 )
+from max_core.voice.turn_resume import SpeechCursor, is_resume_request
 
 IDLE, THINKING, SPEAKING, ERROR = "idle", "thinking", "speaking", "error"
 LISTENING = "listening"
@@ -227,6 +228,7 @@ class _Signals(QObject):
     step = Signal(str, str)
     approval = Signal(str, object, object)  # tool name, arguments, _Approval
     heard = Signal(str)
+    resume = Signal()
 
 
 class _Approval:
@@ -241,10 +243,13 @@ class _Approval:
 class _Ask(QRunnable):
     """Runs one assistant turn (model + tools) off the GUI thread."""
 
-    def __init__(self, window: OrbWindow, prompt: str, transcribe: Any = None) -> None:
+    def __init__(
+        self, window: OrbWindow, prompt: str, transcribe: Any = None, can_resume: bool = False
+    ) -> None:
         super().__init__()
         self.window, self.prompt, self.signals = window, prompt, _Signals()
         self.transcribe = transcribe  # voice turn: callable returning text or None
+        self.can_resume = can_resume
 
     def _approve(self, name: str, arguments: dict[str, Any]) -> bool:
         request = _Approval()
@@ -261,6 +266,9 @@ class _Ask(QRunnable):
                     return
                 self.prompt = heard
                 self.signals.heard.emit(heard)
+                if self.can_resume and is_resume_request(heard):
+                    self.signals.resume.emit()
+                    return
             session = self.window.ensure_session()
             if session is None:
                 self.signals.failed.emit(self.window.session_error or "local_model_not_configured")
@@ -378,6 +386,7 @@ class OrbWindow(QWidget):
         self._voice_failed: str | None = None
         self._recorder_proxy: Any = None
         self._voice_turn = False
+        self._speech_cursor = SpeechCursor()
         self._speak_poll = QTimer(self)
         self._speak_poll.setInterval(300)
         self._speak_poll.timeout.connect(self._poll_speaking)
@@ -514,16 +523,40 @@ class OrbWindow(QWidget):
         return self._voice is not None and bool(self._voice.is_speaking)
 
     def _speak(self, text: str) -> bool:
+        self._speech_cursor.begin(text[:1500])
+        return self._play_current_chunk()
+
+    def _play_current_chunk(self) -> bool:
         voice = self._voice
-        if voice is None:
+        chunk = self._speech_cursor.current
+        if voice is None or not chunk:
             return False
         try:
-            return bool(voice.speak_text(text[:1500]))
+            return bool(voice.speak_text(chunk))
         except Exception:
             return False
 
+    def _resume_speech(self) -> None:
+        self._busy = False
+        self._voice_turn = False
+        if self._closing or self._close_requested:
+            if self._close_requested:
+                QTimer.singleShot(0, self.close)
+            return
+        if self._play_current_chunk():
+            self.orb.set_state(SPEAKING)
+            self._speak_poll.start()
+        else:
+            self._idle_after_reply()
+
     def _poll_speaking(self) -> None:
-        if self._closing or not self._is_speaking():
+        if self._closing:
+            self._speak_poll.stop()
+            return
+        if not self._is_speaking():
+            self._speech_cursor.advance()
+            if self._play_current_chunk():
+                return
             self._speak_poll.stop()
             self._idle_after_reply()
 
@@ -542,7 +575,14 @@ class OrbWindow(QWidget):
             self._voice_turn = True
             self.orb.set_state(THINKING)
             self._show_answer("⋯ transcribing")
-            self._start_job(_Ask(self, "", transcribe=voice.stop_push_to_talk_and_transcribe))
+            self._start_job(
+                _Ask(
+                    self,
+                    "",
+                    transcribe=voice.stop_push_to_talk_and_transcribe,
+                    can_resume=bool(self._speech_cursor.current),
+                )
+            )
             return
         if self._busy:
             return
@@ -604,6 +644,10 @@ class OrbWindow(QWidget):
         prompt = self.input.text().strip()
         if not prompt or self._busy or self._closing:
             return
+        self._speech_cursor.clear()
+        if self._is_speaking():
+            self._voice.interrupt_speech()
+            self._speak_poll.stop()
         self.input.clear()
         self.setFocus()
         self._busy = True
@@ -617,6 +661,7 @@ class OrbWindow(QWidget):
         job.signals.step.connect(self._on_step)
         job.signals.approval.connect(self._on_approval)
         job.signals.heard.connect(self._on_heard)
+        job.signals.resume.connect(self._resume_speech)
         self._job = job
         self._pool.start(job)
 
@@ -627,6 +672,7 @@ class OrbWindow(QWidget):
             return
         if self._closing:
             return
+        self._speech_cursor.clear()
         if not isinstance(reply, LocalModelReply):  # assistant LoopResult
             if reply.stopped_reason == "model_failed":
                 self._failed("unavailable")
@@ -708,6 +754,7 @@ class OrbWindow(QWidget):
             return
         if event.key() == Qt.Key.Key_Escape and self._is_speaking():
             self._voice.interrupt_speech()
+            self._speech_cursor.clear()
             self._speak_poll.stop()
             self._idle_after_reply()
             return
