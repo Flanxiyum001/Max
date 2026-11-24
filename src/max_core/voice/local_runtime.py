@@ -88,8 +88,8 @@ def _load_qwen(path: Path):  # type: ignore[no-untyped-def]
 
 
 def prepare() -> None:
-    from huggingface_hub import snapshot_download  # type: ignore[import-not-found]
     import soundfile as sf  # type: ignore[import-not-found]
+    from huggingface_hub import snapshot_download  # type: ignore[import-not-found]
 
     root = voice_dir()
     root.mkdir(parents=True, exist_ok=True)
