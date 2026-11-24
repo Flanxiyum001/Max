@@ -385,12 +385,22 @@ $("connections-close").addEventListener("click", () => appsPanel.classList.add("
 $("allow").onclick = () => answerApproval(true);
 $("deny").onclick = () => answerApproval(false);
 
-// ---------------------------------------------------------------- sound level → orb
-// level (0..1) comes from the mic while listening and from MAX's voice while speaking.
-// Clean speech for the recogniser: mono, echo-cancelled, noise-suppressed, levelled.
-const MIC = { audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } };
-let noiseFloor = 0.03;
-let level = 0, audioCtx = null, analyser = null, levelSource = null, micStream = null;
+// ---------------------------------------------------------------- sound level & voice isolation → orb
+// level (0..1) drives the orb animation; voiceLevel (0..1) measures speech-band (120–3800 Hz)
+// energy after high-pass & presence filtering, isolating the user's voice from background noise.
+const MIC = {
+  audio: {
+    channelCount: 1,
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+    voiceIsolation: true,
+  },
+};
+let noiseFloor = 0.025;
+let level = 0, voiceLevel = 0;
+let audioCtx = null, analyser = null, voiceAnalyser = null, levelSource = null, micStream = null;
+let cleanStream = null, cleanDest = null, gateGain = null, gateHoldUntil = 0;
 function ensureAudio() {
   if (!audioCtx) {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -402,24 +412,100 @@ function connectLevel(node) {
   try { if (levelSource) levelSource.disconnect(); } catch {}
   levelSource = node; node.connect(analyser);
 }
+function buildVoiceChain(stream) {
+  ensureAudio();
+  const src = audioCtx.createMediaStreamSource(stream);
+  connectLevel(src);
+
+  // 1. Cut low-frequency room rumble, AC hum, desk bumps (< 95 Hz)
+  const hp = audioCtx.createBiquadFilter();
+  hp.type = "highpass"; hp.frequency.value = 95; hp.Q.value = 0.75;
+
+  // 2. Boost speech consonant clarity (~2.4 kHz) and tame high-frequency hiss (> 7.2 kHz)
+  const presence = audioCtx.createBiquadFilter();
+  presence.type = "peaking"; presence.frequency.value = 2400; presence.Q.value = 1.1; presence.gain.value = 3.5;
+
+  const lp = audioCtx.createBiquadFilter();
+  lp.type = "lowpass"; lp.frequency.value = 7200; lp.Q.value = 0.7;
+
+  // 3. Dedicated speech-band analyser (before the gate) so VAD sees clean vocal frequencies
+  voiceAnalyser = audioCtx.createAnalyser();
+  voiceAnalyser.fftSize = 512;
+  voiceAnalyser.smoothingTimeConstant = 0.45;
+
+  // 4. Adaptive noise-floor gate: ducks background voices/room noise between commands
+  gateGain = audioCtx.createGain();
+  gateGain.gain.value = 0.03;
+
+  // 5. Broadcast-style voice compressor so soft and loud syllables transcribe evenly
+  const comp = audioCtx.createDynamicsCompressor();
+  comp.threshold.value = -20; comp.knee.value = 12; comp.ratio.value = 4;
+  comp.attack.value = 0.003; comp.release.value = 0.15;
+
+  src.connect(hp);
+  hp.connect(presence);
+  presence.connect(lp);
+  lp.connect(voiceAnalyser);
+  lp.connect(gateGain);
+  gateGain.connect(comp);
+
+  if (typeof audioCtx.createMediaStreamDestination === "function") {
+    cleanDest = audioCtx.createMediaStreamDestination();
+    comp.connect(cleanDest);
+    cleanStream = cleanDest.stream;
+  } else {
+    cleanStream = stream;
+  }
+}
 const buf = new Uint8Array(512);
+const freqBuf = new Uint8Array(256);
+function measureSpeechBand() {
+  if (!voiceAnalyser || !audioCtx) return level;
+  voiceAnalyser.getByteFrequencyData(freqBuf);
+  const binHz = (audioCtx.sampleRate || 48000) / (voiceAnalyser.fftSize || 512);
+  const lo = Math.max(1, Math.floor(120 / binHz));
+  const hi = Math.min(freqBuf.length - 1, Math.ceil(3800 / binHz));
+  let sum = 0, count = 0;
+  for (let i = lo; i <= hi; i++) { sum += freqBuf[i]; count++; }
+  return count ? Math.min(1, (sum / (count * 255)) * 2.2) : level;
+}
 function sampleLevel() {
   if (analyser && (state === "listening" || state === "speaking")) {
     analyser.getByteTimeDomainData(buf);
     let sum = 0; for (const v of buf) { const d = (v - 128) / 128; sum += d * d; }
     level += (Math.min(1, Math.sqrt(sum / buf.length) * 4) - level) * 0.35;
-  } else level *= 0.85;
+    if (state === "listening" && voiceAnalyser) {
+      const sv = measureSpeechBand();
+      voiceLevel += (sv - voiceLevel) * 0.45;
+      if (gateGain && audioCtx) {
+        const now = Date.now();
+        const openAt = Math.max(0.08, noiseFloor * 2.6);
+        if (voiceLevel >= openAt) gateHoldUntil = now + 220;
+        const target = now <= gateHoldUntil ? 1.0 : 0.03;
+        const tc = target > 0.5 ? 0.012 : 0.08;
+        gateGain.gain.setTargetAtTime(target, audioCtx.currentTime, tc);
+      }
+    } else {
+      voiceLevel = level;
+    }
+  } else {
+    level *= 0.85;
+    voiceLevel *= 0.85;
+  }
   requestAnimationFrame(sampleLevel);
 }
 requestAnimationFrame(sampleLevel);
 async function startMicLevel() {
   try {
     ensureAudio();
-    if (!micStream) micStream = await navigator.mediaDevices.getUserMedia(MIC);
-    connectLevel(audioCtx.createMediaStreamSource(micStream));
+    if (!micStream) {
+      micStream = await navigator.mediaDevices.getUserMedia(MIC);
+      buildVoiceChain(micStream);
+    }
   } catch {}
 }
 function stopMicLevel() {
+  cleanStream = null; cleanDest = null; gateGain = null; voiceAnalyser = null;
   if (micStream) { micStream.getTracks().forEach((tr) => tr.stop()); micStream = null; }
 }
 function chime(up) {
@@ -549,18 +635,24 @@ function recOptions() {
     .find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || "";
   return { mime, opts: mime ? { mimeType: mime, audioBitsPerSecond: 128000 } : { audioBitsPerSecond: 128000 } };
 }
-// Adaptive end-of-speech: thresholds follow the room's noise floor, and a
-// natural mid-sentence pause (< 1.6 s) does not cut you off.
+// Adaptive end-of-speech: uses speech-band voiceLevel so background rumble/chatter
+// doesn't hold the gate open, and requires sustained speech before locking on.
 function speechGate(onDone, { spoke = false, maxWaitMs = 8000, maxMs = 30000 } = {}) {
-  const started = Date.now(); let quietSince = null;
+  const started = Date.now(); let quietSince = null, speechMs = spoke ? 200 : 0;
   const timer = setInterval(() => {
     const now = Date.now();
-    if (!spoke) noiseFloor += (Math.min(level, 0.2) - noiseFloor) * 0.05;
-    const on = Math.max(0.09, noiseFloor * 3), off = Math.max(0.05, noiseFloor * 1.8);
-    if (level > on) { spoke = true; quietSince = null; }
-    else if (spoke && level < off) quietSince = quietSince || now;
+    const v = voiceLevel || level;
+    if (!spoke) noiseFloor += (Math.min(v, 0.18) - noiseFloor) * 0.05;
+    const on = Math.max(0.085, noiseFloor * 2.8), off = Math.max(0.045, noiseFloor * 1.7);
+    if (v > on) {
+      speechMs += 100;
+      if (speechMs >= 150) { spoke = true; quietSince = null; }
+    } else {
+      if (!spoke) speechMs = Math.max(0, speechMs - 50);
+      if (spoke && v < off) quietSince = quietSince || now;
+    }
     if (!spoke && now - started > maxWaitMs) { clearInterval(timer); onDone(false); }
-    else if ((spoke && quietSince && now - quietSince > 1600) || now - started > maxMs) {
+    else if ((spoke && quietSince && now - quietSince > 1500) || now - started > maxMs) {
       clearInterval(timer); onDone(true);
     }
   }, 100);
@@ -581,7 +673,7 @@ async function startRecording(opts = {}) {
   if (!micStream) { listening = false; setState("error", 2500); show("Microphone permission was denied.", 3500); return; }
   const { mime, opts: ropts } = recOptions();
   const chunks = [];
-  recorder = new MediaRecorder(micStream, ropts);
+  recorder = new MediaRecorder(cleanStream || micStream, ropts);
   recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
   let cancelled = false;
   const stopGate = speechGate((heard) => {
@@ -652,13 +744,14 @@ let tape = null;
 function startTape() {
   if (!sttReady || !window.MediaRecorder || !micStream || tape) return;
   const { mime, opts } = recOptions();
-  const t = { chunks: [], mime, started: Date.now(), wake: false, rec: new MediaRecorder(micStream, opts) };
+  const t = { chunks: [], mime, started: Date.now(), wake: false, rec: new MediaRecorder(cleanStream || micStream, opts) };
   t.rec.ondataavailable = (e) => { if (e.data.size) t.chunks.push(e.data); };
   t.rec.start(250); tape = t;
 }
 function dropTape() { if (tape) { const t = tape; tape = null; try { t.rec.onstop = null; t.rec.stop(); } catch {} } }
 setInterval(() => {   // keep the tape short: restart it during silence
-  if (tape && !tape.wake && Date.now() - tape.started > 20000 && level < Math.max(0.05, noiseFloor * 1.8)) { dropTape(); startTape(); }
+  const v = voiceLevel || level;
+  if (tape && !tape.wake && Date.now() - tape.started > 20000 && v < Math.max(0.045, noiseFloor * 1.7)) { dropTape(); startTape(); }
 }, 1000);
 function finishTape() {
   const t = tape; t.wake = true;

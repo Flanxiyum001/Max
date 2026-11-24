@@ -222,19 +222,35 @@ def stt_prompt(vocab: str, context: str = "") -> str:
 _HALLUCINATIONS = {
     "thanks for watching!",
     "thanks for watching.",
+    "thanks for watching",
     "thank you for watching.",
     "thank you for watching!",
+    "thank you for watching",
     "please subscribe.",
+    "please subscribe!",
+    "please subscribe",
+    "like and subscribe.",
+    "like and subscribe",
     "subtitles by the amara.org community",
+    "thank you.",
+    "thanks.",
+    "bye.",
+    "bye!",
     "you",
+    "you.",
     ".",
     "...",
 }
 
+_NON_SPEECH_TAG_RE = re.compile(r"(\[[^\]]{1,40}\]|\([^)]{1,40}\)|♪[^♪]{0,80}♪)")
+
 
 def clean_transcript(text: str) -> str:
-    text = " ".join(str(text).split())
-    return "" if text.lower() in _HALLUCINATIONS else text[:4000]
+    cleaned = _NON_SPEECH_TAG_RE.sub(" ", str(text))
+    cleaned = " ".join(cleaned.split()).strip()
+    if not cleaned or cleaned.lower() in _HALLUCINATIONS:
+        return ""
+    return cleaned[:4000]
 
 
 async def transcribe(audio: bytes, content_type: str, cfg: SttConfig) -> str:
