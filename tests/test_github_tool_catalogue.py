@@ -12,8 +12,8 @@ import pytest
 from max_core.github_tool_catalogue import (
     GITHUB_MCP_ENDPOINT,
     GITHUB_READS,
-    GITHUB_TOOLS,
     GITHUB_TOOL_GUIDANCE,
+    GITHUB_TOOLS,
     GitHubSchemaError,
     github_headers,
     validate_github_arguments,
@@ -121,9 +121,7 @@ def test_schema_references_and_digest_mismatch_fail_closed() -> None:
 
 def test_ui_get_requires_repository_except_for_org_issue_types() -> None:
     validate_github_operation("ui_get", {"method": "issue_types", "owner": "example"})
-    validate_github_operation(
-        "ui_get", {"method": "labels", "owner": "example", "repo": "project"}
-    )
+    validate_github_operation("ui_get", {"method": "labels", "owner": "example", "repo": "project"})
     for invalid in (
         {"method": "labels", "owner": "example"},
         {"method": "unsupported", "owner": "example", "repo": "project"},
