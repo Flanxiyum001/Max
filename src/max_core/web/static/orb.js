@@ -245,6 +245,7 @@ async function ask(text, spoken) {
       const j = await (await api(`/api/job/${job}`)).json();
       if (j.status === "approval" && j.approval) { askApproval(j.approval); continue; }
       choices.classList.add("hidden");
+      approvalShown = false; activeApprovalId = null;
       if (j.status === "running") {
         const last = j.steps[j.steps.length - 1];
         if (last) show("⋯ " + last.split(":")[0], 0);
@@ -291,18 +292,25 @@ async function ask(text, spoken) {
 }
 
 let approvalShown = false;
+let activeApprovalId = null, lastAnsweredApprovalId = null;
 function askApproval(a) {
-  if (approvalShown) return;
+  const id = a.id || null;
+  if (id && id === lastAnsweredApprovalId) return;
+  if (approvalShown && activeApprovalId === id) return;
+  activeApprovalId = id;
   approvalShown = true; setState("speaking");
-  const detail = Object.entries(a.arguments).map(([k, v]) => `${k}: ${v}`).join(", ");
+  const detail = JSON.stringify(a.arguments, null, 2);
   show(`MAX wants to run ${a.tool}\n${detail}`, 0);
   choices.classList.remove("hidden");
 }
 async function answerApproval(allow) {
   if (!approvalShown || !pendingJob) return;
-  approvalShown = false; choices.classList.add("hidden");
+  const approval_id = activeApprovalId;
+  lastAnsweredApprovalId = approval_id;
+  approvalShown = false; activeApprovalId = null; choices.classList.add("hidden");
   setState("thinking"); show(allow ? "⋯ allowed" : "⋯ denied", 0);
-  try { await api(`/api/job/${pendingJob}/approve`, { allow }); } catch {}
+  try { await api(`/api/job/${pendingJob}/approve`, { allow, approval_id }); }
+  catch { lastAnsweredApprovalId = null; }
 }
 function appAuthorizationURL(service, url) {
   const item = MCP_APPS[service];
@@ -354,7 +362,8 @@ async function renderApps() {
     title.textContent = config[0];
     const description = document.createElement("small");
     description.textContent = current.connected
-      ? "Connected · " + (current.tools || 0) + " tools"
+      ? "Connected · " + (current.tools || 0) +
+        (current.requested_tools ? "/" + current.requested_tools : "") + " tools"
       : current.configured ? "Not connected" : "Needs one-time app setup";
     label.append(title, description);
     const button = document.createElement("button");
