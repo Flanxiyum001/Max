@@ -357,9 +357,7 @@ class WebGitHubConnector:
             ) -> str:
                 return self._call(selected, dict(arguments), version)
 
-            def validate(
-                arguments: object, *, selected: _RemoteTool = entry
-            ) -> dict[str, Any]:
+            def validate(arguments: object, *, selected: _RemoteTool = entry) -> dict[str, Any]:
                 try:
                     return validate_github_arguments(
                         selected.observation.schema_json,
@@ -372,10 +370,15 @@ class WebGitHubConnector:
             result.append(
                 Tool(
                     name=name,
-                    description="GitHub MCP: "
-                    + entry.observation.name
-                    + (" (read; requires approval)" if entry.observation.name in GITHUB_READS
-                       else " (write; requires approval)"),
+                    description=(
+                        "GitHub MCP: "
+                        + entry.observation.name
+                        + (
+                            " (read; requires approval)"
+                            if entry.observation.name in GITHUB_READS
+                            else " (write; requires approval)"
+                        )
+                    ),
                     risk=ToolRisk.EFFECTFUL,
                     params=entry.params,
                     handler=handler,
@@ -463,7 +466,7 @@ class WebGitHubConnector:
                                 ):
                                     raise ToolError("github_mcp_revoked")
                             output = await mcp.call_tool(entry.observation.name, arguments=args)
-                return _extract_tool_output(output)
+                return _extract_tool_output(output).replace(token, "[redacted]")
         except ToolError:
             raise
         except Exception:
