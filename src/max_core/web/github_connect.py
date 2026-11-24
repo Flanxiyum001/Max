@@ -31,11 +31,13 @@ from max_core.github_tool_catalogue import (
     GITHUB_MCP_ENDPOINT,
     GITHUB_READS,
     GITHUB_TOOLS,
+    GITHUB_TOOL_GUIDANCE,
     GitHubSchemaError,
     compact_schema,
     github_headers,
     reviewed_github_schema,
     validate_github_arguments,
+    validate_github_operation,
 )
 from max_core.mcp_discovery import MCPConnection, ObservedTool, discover_tools
 from max_core.mcp_execute import _extract_tool_output, _run_in_fresh_thread
@@ -359,11 +361,13 @@ class WebGitHubConnector:
 
             def validate(arguments: object, *, selected: _RemoteTool = entry) -> dict[str, Any]:
                 try:
-                    return validate_github_arguments(
+                    clean = validate_github_arguments(
                         selected.observation.schema_json,
                         selected.observation.schema_sha256,
                         arguments,
                     )
+                    validate_github_operation(selected.observation.name, clean)
+                    return clean
                 except GitHubSchemaError:
                     raise ToolError("github_invalid_arguments") from None
 
@@ -372,7 +376,7 @@ class WebGitHubConnector:
                     name=name,
                     description=(
                         "GitHub MCP: "
-                        + entry.observation.name
+                        + GITHUB_TOOL_GUIDANCE[entry.observation.name]
                         + (
                             " (read; requires approval)"
                             if entry.observation.name in GITHUB_READS
@@ -397,6 +401,7 @@ class WebGitHubConnector:
             clean = validate_github_arguments(
                 entry.observation.schema_json, entry.observation.schema_sha256, arguments
             )
+            validate_github_operation(entry.observation.name, clean)
             return _run_in_fresh_thread(
                 asyncio.run, self._dispatch(token, entry, clean, generation)
             )
