@@ -98,7 +98,7 @@ def _bounded(value: Any, *, depth: int = 0, schema: bool = False) -> None:
             if schema and key in {"$ref", "$dynamicRef", "$recursiveRef", "$schema"}:
                 # Do not permit remote reference resolution or dialect selection.
                 raise GitHubSchemaError("github_unsupported_schema")
-            if schema and key in {"pattern", "patternProperties", "format"}:
+            if schema and key in {"pattern", "patternProperties"}:
                 # Avoid executing provider-supplied regexes in this host.
                 raise GitHubSchemaError("github_unsupported_schema")
             _bounded(child, depth=depth + 1, schema=schema)
@@ -143,9 +143,7 @@ def reviewed_github_schema(encoded: str, digest: str) -> dict[str, Any]:
         raise GitHubSchemaError("github_unsupported_schema") from None
 
 
-def validate_github_arguments(
-    encoded: str, digest: str, arguments: object
-) -> dict[str, Any]:
+def validate_github_arguments(encoded: str, digest: str, arguments: object) -> dict[str, Any]:
     """Validate the exact JSON value that will be displayed and dispatched."""
     schema = reviewed_github_schema(encoded, digest)
     if not isinstance(arguments, dict):
@@ -167,6 +165,7 @@ def validate_github_arguments(
 
 def compact_schema(schema: dict[str, Any]) -> dict[str, Any]:
     """Omit remote prose/examples from model catalogue; retain structural constraints."""
+
     def strip(value: Any) -> Any:
         if isinstance(value, dict):
             return {
@@ -185,4 +184,6 @@ def compact_schema(schema: dict[str, Any]) -> dict[str, Any]:
 
     result = strip(schema)
     assert isinstance(result, dict)
+    if len(json.dumps(result, ensure_ascii=True)) > 12_000:
+        raise GitHubSchemaError("github_unsupported_schema")
     return result
