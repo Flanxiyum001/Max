@@ -16,7 +16,7 @@ a language model is allowed to invent or auto-install.
    HTTPS domain and approve/reject its permissions.
 5. MAX verifies a fresh one-use OAuth state and PKCE verifier, exchanges the
    code on its server, discovers the available MCP tool schemas and pins them.
-6. MAX offers only supported flat-scalar tools to its model. Each invocation
+6. MAX offers schema-validated tools to its model (bounded structured JSON for hosted GitHub; flat-scalar for other providers). Each invocation
    is always explicitly owner-approved with its **full exact arguments**,
    regardless of the remote tool's read-only hint.
 
@@ -91,7 +91,7 @@ For non-Render deployments, the operator may configure *one*
   for metadata, authorization and token endpoints.
 - Remote tool descriptions and schemas are untrusted. MAX pins their
   canonical input schema; unsupported types do not execute.
-- Only up to 20 tools total are offered to the model across providers.
+- GitHub has a fixed 46-name catalogue; only discovered, compatible tools are offered. Other providers share a separate 20-tool cap.
 - An explicit approval is required **for every remote tool call**, even reads.
 - No shell subprocess/stdio MCP servers are automatically installed.
 - OAuth registration may be rate-limited, restricted by an administrator,

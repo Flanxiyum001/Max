@@ -4,7 +4,8 @@ canvas { position: fixed; inset: 0; width: 100%; height: 100%; }
 .hidden { display: none !important; }
 #answer { position: fixed; left: 8%; right: 8%; bottom: 17%; text-align: center;
   font-size: clamp(15px, 2.2vw, 19px); line-height: 1.45; opacity: 0;
-  transition: opacity .45s ease; white-space: pre-wrap; max-height: 30vh; overflow-y: auto; }
+  transition: opacity .45s ease; white-space: pre-wrap; overflow-wrap: anywhere;
+  max-height: 30vh; overflow-y: auto; }
 #answer.show { opacity: 1; }
 #input, #passcode { position: fixed; left: 50%; bottom: 9%; transform: translateX(-50%);
   width: min(620px, 84vw); background: transparent; border: none;

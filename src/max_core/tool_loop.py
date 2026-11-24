@@ -202,7 +202,20 @@ class ToolLoop:
         system = [m for m in base if m.role == "system"]
         turns = [m for m in base if m.role != "system"]
         if prompt:
-            system.append(ChatMessage("system", prompt))
+            # Split large catalogues at tool boundaries, not by truncating schemas.
+            if len(prompt) <= 32_000:
+                system.append(ChatMessage("system", prompt))
+            else:
+                intro = prompt.split("Available tools:\n", 1)[0]
+                group = intro + "Available tools:\n"
+                for tool in self._registry:
+                    description = json.dumps(tool.describe(), ensure_ascii=True) + "\n"
+                    if len(group) + len(description) > 30_000:
+                        system.append(ChatMessage("system", group))
+                        group = "Available tools (continued):\n"
+                    group += description
+                if group:
+                    system.append(ChatMessage("system", group))
         scratch: list[ChatMessage] = []
         for _ in range(self._max_steps):
             if monotonic() >= deadline_at:
