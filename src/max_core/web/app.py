@@ -175,6 +175,7 @@ class SttConfig:
     model: str
     language: str | None
     prompt: str = ""
+    verbatim: bool = False
 
 
 def stt_config(env: dict[str, str]) -> SttConfig | None:
@@ -198,6 +199,7 @@ def stt_config(env: dict[str, str]) -> SttConfig | None:
         model=env.get("MAX_STT_MODEL", "whisper-large-v3"),
         language=env.get("MAX_STT_LANGUAGE") or None,
         prompt=stt_prompt(env.get("MAX_STT_VOCAB", "")),
+        verbatim=env.get("MAX_STT_VERBATIM", "").strip().lower() in {"yes", "true", "1"},
     )
 
 
@@ -245,7 +247,10 @@ _HALLUCINATIONS = {
 _NON_SPEECH_TAG_RE = re.compile(r"(\[[^\]]{1,40}\]|\([^)]{1,40}\)|♪[^♪]{0,80}♪)")
 
 
-def clean_transcript(text: str) -> str:
+def clean_transcript(text: str, *, verbatim: bool = False) -> str:
+    if verbatim:
+        # Preserve actual short replies and punctuation; the provider may still mishear.
+        return text.strip()[:4000]
     cleaned = _NON_SPEECH_TAG_RE.sub(" ", str(text))
     cleaned = " ".join(cleaned.split()).strip()
     if not cleaned or cleaned.lower() in _HALLUCINATIONS:
@@ -759,14 +764,14 @@ def create_app(
         sess = state["session"]
         history = getattr(sess, "history", None) or []
         last = next((m.content for m in reversed(history) if m.role == "assistant"), "")
-        if last:  # what MAX just said is the best hint for what comes next
+        if last and not stt.verbatim:  # avoid injecting previous answers in verbatim mode
             cfg = dataclasses.replace(stt, prompt=stt_prompt(stt_vocab, last))
         try:
             text = await hear(audio, content_type, cfg)
         except Exception as exc:
             log.warning("transcription failed: %s", type(exc).__name__)
             raise HTTPException(502, "stt_unavailable") from None
-        return {"text": clean_transcript(text)}
+        return {"text": clean_transcript(text, verbatim=stt.verbatim)}
 
     @app.post("/api/speak")
     async def speak_text(body: SpeakBody, request: Request) -> Response:
