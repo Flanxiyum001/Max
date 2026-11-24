@@ -170,7 +170,12 @@ def compact_schema(schema: dict[str, Any]) -> dict[str, Any]:
     def strip(value: Any) -> Any:
         if isinstance(value, dict):
             return {
-                key: strip(child)
+                key: (
+                    {name: strip(prop) for name, prop in child.items()}
+                    if key in {"properties", "$defs", "dependentSchemas"}
+                    and isinstance(child, dict)
+                    else strip(child)
+                )
                 for key, child in value.items()
                 if key not in {"description", "title", "examples", "default", "$comment"}
             }
