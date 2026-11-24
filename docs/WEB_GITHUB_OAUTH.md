@@ -5,7 +5,7 @@ When the owner says or types **"MAX, connect to GitHub"**, MAX:
 2. Presents an **Authorize GitHub** button. The owner clicks it and reviews GitHub's requested access on github.com.
 3. Validates a random, single-use OAuth state and PKCE code verifier on the server.
 4. Exchanges the authorization code server-side, verifies the GitHub username, connects to GitHub's official remote HTTPS MCP endpoint, and discovers its tool schemas.
-5. Offers up to 20 compatible flat-scalar MCP tools to the hosted assistant. Each invocation is marked EFFECTFUL and **needs explicit owner approval** in the orb, regardless of the remote tool's read-only hint.
+5. Requests the 45 owner-selected GitHub tools and offers only those actually discovered with a compatible schema. Each invocation is marked EFFECTFUL and **needs explicit owner approval** in the orb, regardless of the remote tool's read-only hint.
 6. On **"MAX, disconnect GitHub"**, immediately revokes MAX's in-memory connection and invalidates all old tool handlers. Revoke the OAuth grant in GitHub settings to revoke the token itself.
 
 The owner never enters a PAT or MCP server URL in MAX. No OAuth token, client secret or authorization code is returned in the web API response or shown to the language model.
@@ -34,7 +34,9 @@ Restart/redeploy MAX after setting them. For example, if MAX is hosted on `https
 
 - The token is **in server process memory only**. On free Render, an instance restart, redeploy, autosuspend/recycle or replica change loses the GitHub connection: say "connect to GitHub" again. No long-lived token is saved in a file, browser cookie, Render env, or MAX memory tool.
 - This release supports GitHub's official remote Streamable HTTP MCP server only; it does not automatically provision arbitrary MCP hosts, local stdio agents, or browser login for every service.
-- Only tools with **flat primitive input schemas** (string/integer/number/boolean) are registered. Unsupported tools are not silently exposed with relaxed validation.
+- The hosted GitHub connector accepts bounded structured JSON arguments, including file batches and review comments. MAX pins the observed schema, revalidates before dispatch, and rejects unsupported schemas and oversized calls. Approval displays the exact JSON and is bound to a one-use identifier.
+- The connection status reports requested, available and unavailable tool names. GitHub may omit tools based on token permissions, account capabilities and repository settings. Secret scanning requires GitHub Secret Protection where applicable. Never paste real secrets into a conversation.
+- The native desktop MCP connector retains its original flat-scalar and 20-tool limits. The expanded catalogue is for the hosted web orb.
 - A GitHub sign-in success is **not** the same as an MCP connection success: MAX must also discover usable tools. If discovery fails, the connection reports failure.
 - The web orb is **single-owner** and protected by `MAX_WEB_PASSCODE`; GitHub OAuth state is one-time and short-lived (10 minutes). Keep `MAX_WEB_PASSCODE`, `MAX_WEB_SECRET`, and the OAuth App secret private.
 - MAX automatically refreshes the available GitHub tool list at the next assistant turn, and a revoked connection blocks any stale tool handler at execution time.
