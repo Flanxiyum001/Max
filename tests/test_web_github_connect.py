@@ -38,7 +38,7 @@ def observation(*, nested: bool = False) -> ObservedTool:
     encoded = json.dumps(schema, sort_keys=True, separators=(",", ":"))
     return ObservedTool(
         "github",
-        "search",
+        "unexpected_tool" if nested else "search_code",
         encoded,
         hashlib.sha256(encoded.encode()).hexdigest(),
         True,
@@ -111,10 +111,11 @@ def test_real_callback_consumes_one_use_state_and_discovers_tools(
 
     async def fake_exchange(_code: str, verifier: str) -> tuple[str, str]:
         assert verifier
-        return ("ghu_token_that_must_never_be_in_responses", "Flanxiyum001")
+        return ("synthetic-fixture-value", "Flanxiyum001")
 
     async def fake_discover(connection: MCPConnection) -> tuple[ObservedTool, ...]:
-        assert connection.bearer_token == "ghu_token_that_must_never_be_in_responses"
+        assert connection.bearer_token == "synthetic-fixture-value"
+        assert connection.github_catalogue
         return (observation(), observation(nested=True))
 
     monkeypatch.setattr(connector, "_exchange", fake_exchange)
@@ -128,12 +129,12 @@ def test_real_callback_consumes_one_use_state_and_discovers_tools(
     )
     assert callback.status_code == 303
     assert callback.headers["location"] == "/?github=connected"
-    assert "ghu_token" not in str(callback.headers)
+    assert "synthetic-fixture-value" not in str(callback.headers)
     status = client.get("/api/state").json()["github"]
     assert status["connected"] is True
     assert status["account"] == "Flanxiyum001"
     assert status["tools"] == 1
-    assert "ghu_token" not in str(status)
+    assert "synthetic-fixture-value" not in str(status)
     assert len(connector.tools_for_session()) == 1
     assert connector.tools_for_session()[0].risk == ToolRisk.EFFECTFUL
     assert (
