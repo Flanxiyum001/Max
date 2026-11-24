@@ -22,6 +22,7 @@ import secrets
 import threading
 import time
 import uuid
+from _thread import LockType
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -58,6 +59,7 @@ class AskBody(BaseModel):
 
 class ApproveBody(BaseModel):
     allow: bool
+    approval_id: str | None = Field(default=None, max_length=64)
 
 
 class ApiKeyBody(BaseModel):
@@ -87,6 +89,7 @@ class Job:
     steps: list[str] = field(default_factory=list)
     _event: threading.Event = field(default_factory=threading.Event)
     _allowed: bool = False
+    _approval_lock: LockType = field(default_factory=threading.Lock)
     created: float = field(default_factory=time.time)
 
 
@@ -652,7 +655,6 @@ def create_app(
         jobs[job.id] = job
 
         def approve(tool: str, arguments: dict[str, Any]) -> bool:
-            job._event.clear()
             # Remote operation approvals must show EXACT arguments. Never silently
             # truncate the values the owner is asked to authorize.
             if tool.startswith("mcp."):
@@ -665,12 +667,19 @@ def create_app(
                 safe_arguments = dict(arguments)
             else:
                 safe_arguments = {k: str(v)[:300] for k, v in arguments.items()}
-            job.approval = {"tool": tool, "arguments": safe_arguments}
-            job.status = "approval"
+            with job._approval_lock:
+                job._event.clear()
+                job._allowed = False
+                job.approval = {"tool": tool, "arguments": safe_arguments}
+                if tool.startswith("mcp.github."):
+                    job.approval["id"] = secrets.token_hex(16)
+                job.status = "approval"
             answered = job._event.wait(120)
-            job.approval = None
-            job.status = "running"
-            return answered and job._allowed
+            with job._approval_lock:
+                allowed = answered and job._allowed
+                job.approval = None
+                job.status = "running"
+                return allowed
 
         def run() -> None:
             try:
@@ -724,10 +733,16 @@ def create_app(
     def approve_job(job_id: str, body: ApproveBody, request: Request) -> dict[str, bool]:
         require(request)
         job = jobs.get(job_id)
-        if job is None or job.status != "approval":
+        if job is None:
             raise HTTPException(409, "no_pending_approval")
-        job._allowed = body.allow
-        job._event.set()
+        with job._approval_lock:
+            if job.status != "approval" or job.approval is None or job._event.is_set():
+                raise HTTPException(409, "no_pending_approval")
+            expected = job.approval.get("id")
+            if expected is not None and body.approval_id != expected:
+                raise HTTPException(409, "approval_mismatch")
+            job._allowed = body.allow
+            job._event.set()
         return {"ok": True}
 
     @app.post("/api/reset")

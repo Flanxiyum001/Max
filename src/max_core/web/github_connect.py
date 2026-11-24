@@ -27,13 +27,25 @@ import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
+from max_core.github_tool_catalogue import (
+    GITHUB_MCP_ENDPOINT,
+    GITHUB_READS,
+    GITHUB_TOOL_GUIDANCE,
+    GITHUB_TOOLS,
+    GitHubSchemaError,
+    compact_schema,
+    github_headers,
+    reviewed_github_schema,
+    validate_github_arguments,
+    validate_github_operation,
+)
 from max_core.mcp_discovery import MCPConnection, ObservedTool, discover_tools
 from max_core.mcp_execute import _extract_tool_output, _run_in_fresh_thread
 from max_core.mcp_policy import ReviewedToolPolicy, RiskTier, validated_arguments
 from max_core.mcp_transport import EndpointTransport
 from max_core.tools import Tool, ToolError, ToolParam, ToolRisk
 
-_REMOTE_ENDPOINT = "https://api.githubcopilot.com/mcp/"
+_REMOTE_ENDPOINT = GITHUB_MCP_ENDPOINT
 _AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
 _TOKEN_URL = "https://github.com/login/oauth/access_token"
 _USER_URL = "https://api.github.com/user"
@@ -46,7 +58,6 @@ _SCALAR_TYPES: dict[str, type] = {
     "number": float,
     "boolean": bool,
 }
-_MAX_MCP_TOOLS = 20
 _PENDING_SECONDS = 600
 
 _CONNECT = re.compile(
@@ -85,6 +96,7 @@ class _RemoteTool:
     observation: ObservedTool
     policy: ReviewedToolPolicy
     params: tuple[ToolParam, ...]
+    input_schema: dict[str, Any] | None = None
 
 
 def _callback_ok(value: str) -> bool:
@@ -103,8 +115,27 @@ def _callback_ok(value: str) -> bool:
 
 
 def _reviewable(observation: ObservedTool, *, service: str = "github") -> _RemoteTool | None:
-    """Only expose bounded flat-scalar tools to the legacy orb tool protocol."""
-    if observation.connection_id != service or not _TOOL_NAME.fullmatch(observation.name):
+    """GitHub has a fixed host allowlist; other providers retain scalar review."""
+    if observation.connection_id != service:
+        return None
+    if service == "github":
+        if observation.name not in GITHUB_TOOLS:
+            return None
+        try:
+            schema = reviewed_github_schema(observation.schema_json, observation.schema_sha256)
+            policy = ReviewedToolPolicy(
+                "owner",
+                service,
+                observation.name,
+                observation.schema_sha256,
+                RiskTier.R1 if observation.name in GITHUB_READS else RiskTier.R2,
+                frozenset(schema.get("properties", {})),
+                True,
+            )
+            return _RemoteTool(observation, policy, (), compact_schema(schema))
+        except (ValueError, TypeError, KeyError, RecursionError):
+            return None
+    if not _TOOL_NAME.fullmatch(observation.name):
         return None
     try:
         schema = json.loads(observation.schema_json)
@@ -184,6 +215,11 @@ class WebGitHubConnector:
                 "connected": bool(self._token),
                 "account": self._account,
                 "tools": len(self._tools),
+                "requested_tools": len(GITHUB_TOOLS),
+                "available_tools": sorted(entry.observation.name for entry in self._tools),
+                "unavailable_tools": sorted(
+                    GITHUB_TOOLS - {entry.observation.name for entry in self._tools}
+                ),
                 "ephemeral": True,
             }
 
@@ -277,7 +313,7 @@ class WebGitHubConnector:
         if not isinstance(code, str) or not 1 <= len(code) <= 2048:
             raise GitHubConnectionError("github_oauth_code_invalid")
         token, account = asyncio.run(self._exchange(code, pending.verifier))
-        connection = MCPConnection("github", _REMOTE_ENDPOINT, True, token)
+        connection = MCPConnection("github", _REMOTE_ENDPOINT, True, token, github_catalogue=True)
         try:
             observed = asyncio.run(discover_tools(connection))
         except Exception:
@@ -292,15 +328,10 @@ class WebGitHubConnector:
         with self._lock:
             self._token = token
             self._account = account
-            # Prefer utility/read-like tools while staying deny-by-default:
-            # readOnlyHint affects ordering, NEVER whether an approval is required.
-            reviewable.sort(
-                key=lambda candidate: (
-                    not candidate.observation.read_only_hint,
-                    candidate.observation.name,
-                )
-            )
-            self._tools = tuple(reviewable[:_MAX_MCP_TOOLS])
+            # Never let a remote annotation promote a write to a trusted read.
+            # All operations, including reads, still require exact-call consent.
+            reviewable.sort(key=lambda candidate: candidate.observation.name)
+            self._tools = tuple(reviewable)
             self._generation += 1
         return account
 
@@ -328,15 +359,35 @@ class WebGitHubConnector:
             ) -> str:
                 return self._call(selected, dict(arguments), version)
 
+            def validate(arguments: object, *, selected: _RemoteTool = entry) -> dict[str, Any]:
+                try:
+                    clean = validate_github_arguments(
+                        selected.observation.schema_json,
+                        selected.observation.schema_sha256,
+                        arguments,
+                    )
+                    validate_github_operation(selected.observation.name, clean)
+                    return clean
+                except GitHubSchemaError:
+                    raise ToolError("github_invalid_arguments") from None
+
             result.append(
                 Tool(
                     name=name,
-                    description="GitHub MCP: "
-                    + entry.observation.name
-                    + " (REMOTE operation; requires approval for each call)",
+                    description=(
+                        "GitHub MCP: "
+                        + GITHUB_TOOL_GUIDANCE[entry.observation.name]
+                        + (
+                            " (read; requires approval)"
+                            if entry.observation.name in GITHUB_READS
+                            else " (write; requires approval)"
+                        )
+                    ),
                     risk=ToolRisk.EFFECTFUL,
                     params=entry.params,
                     handler=handler,
+                    argument_validator=validate,
+                    input_schema=entry.input_schema,
                 )
             )
         return tuple(result)
@@ -347,7 +398,10 @@ class WebGitHubConnector:
                 raise ToolError("github_mcp_revoked")
             token = self._token
         try:
-            clean = validated_arguments(entry.observation, entry.policy, arguments)
+            clean = validate_github_arguments(
+                entry.observation.schema_json, entry.observation.schema_sha256, arguments
+            )
+            validate_github_operation(entry.observation.name, clean)
             return _run_in_fresh_thread(
                 asyncio.run, self._dispatch(token, entry, clean, generation)
             )
@@ -362,6 +416,7 @@ class WebGitHubConnector:
         try:
             with anyio.fail_after(30):
                 headers = {"Authorization": "Bearer " + token, "Accept-Encoding": "identity"}
+                headers.update(github_headers())
                 async with httpx.AsyncClient(
                     transport=EndpointTransport(
                         _REMOTE_ENDPOINT, httpx.AsyncHTTPTransport(retries=0)
@@ -416,7 +471,7 @@ class WebGitHubConnector:
                                 ):
                                     raise ToolError("github_mcp_revoked")
                             output = await mcp.call_tool(entry.observation.name, arguments=args)
-                return _extract_tool_output(output)
+                return _extract_tool_output(output).replace(token, "[redacted]")
         except ToolError:
             raise
         except Exception:

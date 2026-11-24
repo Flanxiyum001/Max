@@ -220,7 +220,9 @@ def test_harness_delegates_to_scoped_subagent_without_privilege_escalation() -> 
     assert secret_ran is False
     assert child_report.answer == "Time is 19:50."
     assert parent_report.subagent_runs == 1
-    assert any(s.tool_name == "vault.unlock" and s.error_code == "unknown_tool" for s in child_report.steps)
+    assert any(
+        s.tool_name == "vault.unlock" and s.error_code == "unknown_tool" for s in child_report.steps
+    )
     assert any(s.tool_name == "clock.now" and s.status == "executed" for s in child_report.steps)
 
 
@@ -332,7 +334,9 @@ def test_coding_tools_read_search_edit_write_and_block_secrets(tmp_path: Path) -
     with pytest.raises(ToolError, match="path_not_allowed"):
         cw.read_lines({"path": ".env"})
 
-    assert cw.edit({"path": "app.py", "target": "'hi'", "replacement": "'hello'"}) == "edited app.py"
+    assert (
+        cw.edit({"path": "app.py", "target": "'hi'", "replacement": "'hello'"}) == "edited app.py"
+    )
     assert "'hello'" in (tmp_path / "app.py").read_text(encoding="utf-8")
 
     with pytest.raises(ToolError, match="target_not_found"):
@@ -394,7 +398,9 @@ def test_harness_research_plan_self_prompt_and_guardrail(tmp_path: Path) -> None
         for s in report.steps
     )
     assert any(e.kind == "web.researched" and e.phase == HarnessPhase.RESEARCH for e in events)
-    assert any(e.kind == "self_prompt.ready" and e.phase == HarnessPhase.SELF_PROMPT for e in events)
+    assert any(
+        e.kind == "self_prompt.ready" and e.phase == HarnessPhase.SELF_PROMPT for e in events
+    )
     # Self-prompt was injected into the model's system messages for step 5+
     assert any(
         "[Self-Instruction Prompt]" in m.content

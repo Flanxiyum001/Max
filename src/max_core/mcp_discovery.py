@@ -18,6 +18,7 @@ import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
+from max_core.github_tool_catalogue import GITHUB_MCP_ENDPOINT, github_headers
 from max_core.mcp_transport import MAX_BYTES, EndpointTransport
 
 __all__ = [
@@ -44,6 +45,7 @@ class MCPConnection:
     endpoint: str = field(repr=False)
     discovery_approved: bool = False
     bearer_token: str | None = field(default=None, repr=False, compare=False)
+    github_catalogue: bool = False
 
     def __post_init__(self) -> None:
         try:
@@ -60,6 +62,11 @@ class MCPConnection:
                 and not any(ord(c) < 33 or ord(c) > 126 for c in self.endpoint)
                 and parsed.port in (None, 443)
                 and type(self.discovery_approved) is bool
+                and type(self.github_catalogue) is bool
+                and (
+                    not self.github_catalogue
+                    or (self.connection_id == "github" and self.endpoint == GITHUB_MCP_ENDPOINT)
+                )
             )
         except (ValueError, TypeError):
             valid = False
@@ -123,6 +130,8 @@ async def discover_tools(
     if connection.discovery_approved is not True:
         raise DiscoveryError("mcp_discovery_not_approved")
     headers = {"Accept-Encoding": "identity"}
+    if connection.github_catalogue:
+        headers.update(github_headers())
     if connection.bearer_token is not None:
         headers["Authorization"] = "Bearer " + connection.bearer_token
     observed: list[ObservedTool] = []

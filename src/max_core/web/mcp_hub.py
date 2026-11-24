@@ -658,8 +658,10 @@ class WebMCPHub:
             self._vault.delete(service)
 
     def tools_for_session(self) -> tuple[Tool, ...]:
-        # Model tool budget remains bounded for ALL connected providers.
-        all_tools: list[Tool] = list(self._github.tools_for_session())
+        # GitHub has a finite host-owned catalogue. Keep the existing separate
+        # budget for other providers rather than letting them crowd out GitHub.
+        github_tools = self._github.tools_for_session()
+        all_tools: list[Tool] = []
         with self._lock:
             snapshot = tuple(self._connections.items())
         for service, connection in snapshot:
@@ -685,7 +687,7 @@ class WebMCPHub:
                         handler=handler,
                     )
                 )
-        return tuple(all_tools[:_MAX_TOOLS])
+        return (*github_tools, *all_tools[:_MAX_TOOLS])
 
     def _refresh(self, service: str, record: _Connection) -> _Connection:
         if record.expires_at is None or record.expires_at > time.time() + 60:

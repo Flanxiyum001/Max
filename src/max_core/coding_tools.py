@@ -25,7 +25,9 @@ from max_core.tools import (
     Workspace,
 )
 
-_SKIP_DIRS = frozenset({".git", ".venv", "venv", "__pycache__", "node_modules", ".mypy_cache", ".ruff_cache"})
+_SKIP_DIRS = frozenset(
+    {".git", ".venv", "venv", "__pycache__", "node_modules", ".mypy_cache", ".ruff_cache"}
+)
 _ALLOWED_RUNNERS = frozenset({"pytest", "ruff", "mypy"})
 _SAFE_ARG_RE = re.compile(r"^[A-Za-z0-9_./:=,@+-]{1,120}$")
 

@@ -258,9 +258,7 @@ def _compact_scratch(scratch: list[ChatMessage], plan: ExecutionPlan) -> list[Ch
         return scratch
     older = scratch[:-6]
     recent = scratch[-6:]
-    summary_lines = [
-        f"{m.role}: {' '.join(m.content.split())[:160]}" for m in older[-10:]
-    ]
+    summary_lines = [f"{m.role}: {' '.join(m.content.split())[:160]}" for m in older[-10:]]
     plan_text = plan.render()
     compacted = (
         "[Context summary of earlier steps]\n"
@@ -520,10 +518,13 @@ class MaxHarness:
         plan = ExecutionPlan()
         self._emit(report, HarnessPhase.UNDERSTAND, "harness.started")
 
-        run_registry = _scoped_registry(
-            self._registry, frozenset(t.name for t in self._registry)
-        )
-        if self._enable_planning and len(run_registry) > 0 and run_registry.get("plan.update") is None:
+        run_registry = _scoped_registry(self._registry, frozenset(t.name for t in self._registry))
+        if (
+            self._enable_planning
+            and len(run_registry) > 0
+            and run_registry.get("plan.update") is None
+        ):
+
             def _plan_handler(args: Mapping[str, Any]) -> str:
                 rendered = plan.update(str(args["steps_json"]))
                 report.plan = list(plan.steps)
@@ -544,6 +545,7 @@ class MaxHarness:
             and len(run_registry) > 0
             and run_registry.get("prompt.set") is None
         ):
+
             def _prompt_handler(args: Mapping[str, Any]) -> str:
                 chosen = " ".join(str(args.get("chosen_option", "")).split())[:300]
                 rationale = " ".join(str(args.get("rationale", "")).split())[:800]
@@ -561,9 +563,26 @@ class MaxHarness:
                     "Set your own production execution self-prompt after researching and planning.",
                     ToolRisk.READ_ONLY,
                     (
-                        ToolParam("self_prompt", str, "Refined execution instructions for yourself", max_length=4_000),
-                        ToolParam("chosen_option", str, "Best option selected", required=False, max_length=300),
-                        ToolParam("rationale", str, "Why this option is best", required=False, max_length=800),
+                        ToolParam(
+                            "self_prompt",
+                            str,
+                            "Refined execution instructions for yourself",
+                            max_length=4_000,
+                        ),
+                        ToolParam(
+                            "chosen_option",
+                            str,
+                            "Best option selected",
+                            required=False,
+                            max_length=300,
+                        ),
+                        ToolParam(
+                            "rationale",
+                            str,
+                            "Why this option is best",
+                            required=False,
+                            max_length=800,
+                        ),
                     ),
                     _prompt_handler,
                 )

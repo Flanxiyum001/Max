@@ -12,6 +12,7 @@ dependencies = [
     "uvicorn>=0.35,<1",
     "httpx>=0.28,<1",
     "mcp>=1.29,<2",
+    "jsonschema>=4.20,<5",
     "cryptography>=50.0.2,<51",
     "sqlalchemy>=2.0.46,<2.1",
     "alembic>=1.17,<2",
