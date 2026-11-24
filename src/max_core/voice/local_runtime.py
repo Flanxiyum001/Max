@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import io
 import os
 import subprocess
@@ -78,7 +79,7 @@ def local_settings(models: set[str]) -> dict[str, str]:
 
 
 def _load_qwen(path: Path):  # type: ignore[no-untyped-def]
-    import torch  # type: ignore[import-untyped, import-not-found]
+    import torch  # type: ignore[import-not-found]
     from qwen_tts import Qwen3TTSModel  # type: ignore[import-not-found]
 
     torch.set_num_threads(6)
@@ -88,8 +89,9 @@ def _load_qwen(path: Path):  # type: ignore[no-untyped-def]
 
 
 def prepare() -> None:
-    import soundfile as sf  # type: ignore[import-not-found]
     from huggingface_hub import snapshot_download  # type: ignore[import-not-found]
+
+    sf = importlib.import_module("soundfile")
 
     root = voice_dir()
     root.mkdir(parents=True, exist_ok=True)
@@ -198,11 +200,11 @@ class LocalNeuralTTS(DesktopTextToSpeech):
 
 
 def speak_child() -> None:
-    import soundfile as sf  # type: ignore[import-not-found]
+    sf = importlib.import_module("soundfile")
 
     if os.name != "nt":
         raise RuntimeError("windows_playback_required")
-    import winsound  # type: ignore[import-not-found]
+    winsound = importlib.import_module("winsound")
 
     os.environ["HF_HUB_OFFLINE"] = "1"
     os.environ["TRANSFORMERS_OFFLINE"] = "1"
