@@ -22,7 +22,7 @@ def _user32() -> Any:
         raise ToolError("windows_desktop_required")
     from ctypes import wintypes
 
-    api = getattr(ctypes, "WinDLL")("user32", use_last_error=True)
+    api = getattr(ctypes, "WinDLL")("user32", use_last_error=True)  # noqa: B009
     api.GetForegroundWindow.restype = wintypes.HWND
     api.GetWindowTextLengthW.argtypes = [wintypes.HWND]
     api.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
@@ -56,7 +56,8 @@ def list_windows(_: Mapping[str, Any]) -> str:
     from ctypes import wintypes
 
     windows: list[dict[str, Any]] = []
-    callback_type = getattr(ctypes, "WINFUNCTYPE")(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    factory = getattr(ctypes, "WINFUNCTYPE")  # noqa: B009
+    callback_type = factory(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
     def visit(hwnd: int, _: int) -> bool:
         if api.IsWindowVisible(hwnd) and api.GetWindowTextLengthW(hwnd):
