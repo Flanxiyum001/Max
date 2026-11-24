@@ -22,6 +22,7 @@ import secrets
 import threading
 import time
 import uuid
+from _thread import LockType
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -88,7 +89,7 @@ class Job:
     steps: list[str] = field(default_factory=list)
     _event: threading.Event = field(default_factory=threading.Event)
     _allowed: bool = False
-    _approval_lock: threading.Lock = field(default_factory=threading.Lock)
+    _approval_lock: LockType = field(default_factory=threading.Lock)
     created: float = field(default_factory=time.time)
 
 
