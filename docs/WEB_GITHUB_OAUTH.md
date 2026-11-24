@@ -5,7 +5,7 @@ When the owner says or types **"MAX, connect to GitHub"**, MAX:
 2. Presents an **Authorize GitHub** button. The owner clicks it and reviews GitHub's requested access on github.com.
 3. Validates a random, single-use OAuth state and PKCE code verifier on the server.
 4. Exchanges the authorization code server-side, verifies the GitHub username, connects to GitHub's official remote HTTPS MCP endpoint, and discovers its tool schemas.
-5. Requests the 45 owner-selected GitHub tools and offers only those actually discovered with a compatible schema. Each invocation is marked EFFECTFUL and **needs explicit owner approval** in the orb, regardless of the remote tool's read-only hint.
+5. Requests the 46 owner-selected GitHub tools and offers only those actually discovered with a compatible schema. Each invocation is marked EFFECTFUL and **needs explicit owner approval** in the orb, regardless of the remote tool's read-only hint.
 6. On **"MAX, disconnect GitHub"**, immediately revokes MAX's in-memory connection and invalidates all old tool handlers. Revoke the OAuth grant in GitHub settings to revoke the token itself.
 
 The owner never enters a PAT or MCP server URL in MAX. No OAuth token, client secret or authorization code is returned in the web API response or shown to the language model.
@@ -44,3 +44,27 @@ Restart/redeploy MAX after setting them. For example, if MAX is hosted on `https
 - Tool outputs are untrusted; they are not commands or instructions to MAX.
 
 Official documentation: https://github.com/github/github-mcp-server/blob/main/docs/host-integration.md
+
+### Operation contracts
+
+The requested catalogue includes the 45 repository/identity operations plus
+`ui_get`, for metadata such as labels, assignees, milestones, issue types,
+branches, issue fields and reviewers. MAX requires the owner's approval even
+for identity and metadata reads. A repository is required for UI metadata
+methods other than organization-level issue types. GitHub may mark the helper
+as app-only or omit it from discovery; MAX does not render remote MCP Apps
+HTML, run their scripts, or load avatar assets. Only actually discovered tools
+are callable through MAX's own approval surface.
+
+MAX supplies host-authored usage guidance to the model, including retrieving the
+target branch's current blob SHA before replacing a file, using PR search for
+author filters, cursor/page handling, and pending-review prerequisites. These
+instructions do not replace server-side authorization or concurrency checks.
+
+`run_secret_scanning` is a targeted remote content scan, not a repository-wide
+scanner. Only nonempty in-codebase snippets/diffs should be sent, excluding
+ignored files. A raw-content tool cannot establish source-path or gitignore
+provenance by itself; the owner must verify the source before approval.
+Do not put real credentials in model prompts or use MAX to display raw
+secret values. Prefer trusted local scanning for potentially sensitive content.
+See https://docs.github.com/en/code-security/how-tos/use-ghas-with-ai-coding-agents/scan-for-secrets-with-github-mcp-server.
