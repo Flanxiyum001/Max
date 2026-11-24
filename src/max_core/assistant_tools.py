@@ -580,6 +580,10 @@ def assistant_registry(
                 web.weather,
             ),
         ]
+    if host_tools and not cloud and sys.platform == "win32":
+        from max_core.desktop_awareness import desktop_tools
+
+        tools.extend(desktop_tools())
     for tool in tools:
         registry.register(tool)
     return registry
