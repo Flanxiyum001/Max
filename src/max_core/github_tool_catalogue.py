@@ -191,8 +191,10 @@ def validate_github_operation(name: str, arguments: dict[str, Any]) -> None:
     elif name == "run_secret_scanning":
         raw = arguments.get("files")
         files = [raw] if isinstance(raw, str) else raw
-        if not isinstance(files, list) or not files or any(
-            not isinstance(item, str) or not item.strip() for item in files
+        if (
+            not isinstance(files, list)
+            or not files
+            or any(not isinstance(item, str) or not item.strip() for item in files)
         ):
             raise GitHubSchemaError("github_scan_content_required")
     elif name == "push_files":
@@ -283,7 +285,10 @@ def validate_github_arguments(encoded: str, digest: str, arguments: object) -> d
         _bounded(arguments)
         canonical = json.dumps(arguments, sort_keys=True, separators=(",", ":"), allow_nan=False)
         # The web approval surface uses ensure_ascii=True and includes spaces.
-        if len(json.dumps(arguments, sort_keys=True, ensure_ascii=True)) > MAX_GITHUB_ARGUMENT_BYTES:
+        if (
+            len(json.dumps(arguments, sort_keys=True, ensure_ascii=True))
+            > MAX_GITHUB_ARGUMENT_BYTES
+        ):
             raise ValueError
         clean = json.loads(canonical)
         _validator(schema).validate(clean)
