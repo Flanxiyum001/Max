@@ -10,6 +10,7 @@ htmlcov/
 build/
 dist/
 .venv/
+.venv-local-voice/
 venv/
 
 # Local credentials, environment overrides and personal data
