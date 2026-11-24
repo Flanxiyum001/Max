@@ -24,7 +24,7 @@ Speech-to-text needs any OpenAI-compatible `/v1/audio/transcriptions` service:
 ```
 # Free tier example (check the provider's current docs and limits):
 MAX_STT_ENDPOINT=https://api.groq.com/openai/v1/audio/transcriptions
-MAX_STT_MODEL=whisper-large-v3-turbo
+MAX_STT_MODEL=whisper-large-v3
 MAX_STT_API_KEY=<your key>
 
 # Or fully local (no upload, no consent prompt) with a local Whisper server
@@ -33,6 +33,50 @@ MAX_STT_API_KEY=<your key>
 # MAX_STT_MODEL=<model name your server expects>
 # MAX_STT_API_KEY=local
 ```
+
+### Precision recognition (optional)
+
+For a quality-first configuration, select a higher-accuracy model supported by
+your own speech service. The example above uses Groq's Whisper Large V3;
+the turbo variant remains selectable for speed. OpenAI's
+`gpt-4o-transcribe` is another option on the official OpenAI transcription
+endpoint (metered API charges). Model choice is explicit: MAX does not switch
+providers, buy API usage, or retry against another provider automatically.
+
+```dotenv
+MAX_STT_VOCAB=MAX, Aventas, Ryoko, GitHub, Cloudflare, pull request
+MAX_STT_AUDIO_MODE=raw
+# Optional language hint, not needed for automatic detection:
+# MAX_STT_LANGUAGE=en
+# Optional web-only setting; preserve literal short replies and punctuation:
+# MAX_STT_VERBATIM=yes
+```
+
+- Spelling hints are sent to the selected provider with the recording. Use only
+  non-sensitive words, not credentials or personal information. They are hints,
+  not hard-coded transcript substitutions.
+- Raw PCM bypasses the native adaptive noise gate for quiet consonants and
+  natural pauses; the default filtered mode remains available for noisy rooms.
+  Compare them on your microphone. Pre-encoded WAV is already passed through.
+- The native orb and dashboard use the same environment configuration. A custom
+  STT endpoint does not inherit a chat provider's key.
+- The web verbatim setting disables the existing phrase blacklist and prior
+  assistant-answer context. This can preserve genuine short replies but can
+  also surface recognizer hallucinations on noise. Leave it off if that occurs.
+- A loopback endpoint may be used with a separately installed local Whisper
+  service; verify that service does not relay audio remotely. This PR does not
+  install a local model or start a server.
+- No changes to microphone activation, remote consent or tool approval gates.
+
+**Acceptance:** record the same spoken commands in quiet and noisy rooms,
+including mixed-language speech, corrections such as "no, not PR 12, PR 18",
+and technical terms. Compare exact words, numbers, names, and time-to-transcript
+between models and raw/filtered modes. No real-device accuracy or latency
+benchmark is claimed. Continuous streaming, acoustic echo cancellation and
+automatic endpointing are outside this increment.
+
+References: [Groq speech-to-text](https://console.groq.com/docs/speech-to-text),
+[OpenAI speech-to-text](https://platform.openai.com/docs/guides/speech-to-text).
 
 Without `MAX_STT_*`, MAX falls back to the OpenAI settings from `local_config`
 (`OPENAI_API_KEY`, endpoint `api.openai.com`).

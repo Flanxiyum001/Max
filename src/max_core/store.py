@@ -22,6 +22,7 @@ from max_core.persistence import _locked as _locked
 
 _KEY = re.compile(r"^[A-Za-z0-9._:-]{8,100}$")
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
+_TERMINAL_STATES = ("completed", "cancelled", "failed")
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,6 +167,19 @@ class TaskStore:
                 select(Task)
                 .where(Task.owner_id == owner_id)
                 .order_by(Task.created_at.desc(), Task.id.desc())
+                .limit(limit)
+            ).all()
+            return [TaskView.from_record(record) for record in records]
+
+    def list_terminal(self, owner_id: str, limit: int = 200) -> list[TaskView]:
+        """Bounded finished-task records for derived recall indexes; read-only."""
+        if type(limit) is not int or not 1 <= limit <= 1000:
+            raise StoreError("Invalid terminal task limit", 422)
+        with self.sessions() as session:
+            records = session.scalars(
+                select(Task)
+                .where(Task.owner_id == owner_id, Task.state.in_(_TERMINAL_STATES))
+                .order_by(Task.updated_at.desc(), Task.id.desc())
                 .limit(limit)
             ).all()
             return [TaskView.from_record(record) for record in records]

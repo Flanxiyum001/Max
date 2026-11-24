@@ -25,6 +25,13 @@ from max_core.bounded_worker import WorkerError, execute_operation, parse_operat
 from max_core.container_runner import run_python_sandboxed
 from max_core.gateway.contracts import ToolDefinition, ToolProposal
 from max_core.local_config import DesktopConfig
+from max_core.memory_recall import (
+    MemoryRecallError,
+    MemoryRecallIndex,
+    append_memory_entry,
+    remove_memory_entry,
+    terminal_task_documents,
+)
 from max_core.native_desktop.backend import NativeDesktopCore, NativeDesktopError
 from max_core.persistence import _is_expired
 from max_core.planner import PlanError, PlanService
@@ -431,6 +438,38 @@ def _run_bounded(
         raise LocalToolError(error.code, status="failed") from None
 
 
+def _validate_memory_search(arguments: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(arguments, dict) or not {"query"} <= set(arguments) <= {"query", "limit"}:
+        raise LocalToolError("invalid_action_parameters", status="denied")
+    query = arguments["query"]
+    if not isinstance(query, str) or not 1 <= len(" ".join(query.split())) <= 300:
+        raise LocalToolError("invalid_action_parameters", status="denied")
+    if _has_control_chars(query):
+        raise LocalToolError("invalid_action_parameters", status="denied")
+    _require_valid_utf8(query, "invalid_action_parameters")
+    if "limit" in arguments:
+        limit = arguments["limit"]
+        if type(limit) is not int or not 1 <= limit <= 8:
+            raise LocalToolError("invalid_action_parameters", status="denied")
+        return {"query": query, "limit": limit}
+    return {"query": query}
+
+
+def _validate_memory_propose_update(arguments: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(arguments, dict) or set(arguments) != {"action", "entry"}:
+        raise LocalToolError("invalid_action_parameters", status="denied")
+    action = arguments["action"]
+    if action not in ("append", "remove"):
+        raise LocalToolError("invalid_action_parameters", status="denied")
+    entry = arguments["entry"]
+    if not isinstance(entry, str) or not 1 <= len(entry) <= 280:
+        raise LocalToolError("invalid_action_parameters", status="denied")
+    if _has_control_chars(entry):
+        raise LocalToolError("invalid_action_parameters", status="denied")
+    _require_valid_utf8(entry, "invalid_action_parameters")
+    return {"action": action, "entry": " ".join(entry.split())}
+
+
 def _validate_execute_python(arguments: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(arguments, dict) or set(arguments) != {"script"}:
         raise LocalToolError("invalid_action_parameters", status="denied")
@@ -444,7 +483,7 @@ def _validate_execute_python(arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 class LocalToolRegistry:
-    """Fixed host registry of 15 bounded, deterministic local tools."""
+    """Fixed host registry of 17 bounded, deterministic local tools."""
 
     def __init__(
         self,
@@ -488,6 +527,20 @@ class LocalToolRegistry:
             self._task_store = TaskStore(core.engine)
         else:
             self._task_store = None
+        self._memory_md_path = Path(
+            os.environ.get("MAX_MEMORY_MD_PATH") or (self._notes_dir.parent / "MEMORY.md")
+        )
+        self._memory_index_path = Path(
+            os.environ.get("MAX_MEMORY_INDEX_PATH")
+            or (self._notes_dir.parent / "max-memory-index.sqlite3")
+        )
+        if any(
+            _has_control_chars(str(path))
+            for path in (self._memory_md_path, self._memory_index_path)
+        ):
+            raise ValueError("invalid_memory_path")
+        self._memory_index: MemoryRecallIndex | None = None
+        self._memory_index_lock = threading.Lock()
 
         specs = (
             LocalToolSpec(
@@ -688,6 +741,47 @@ class LocalToolRegistry:
                 requires_approval=True,
                 validate=_validate_notes_save,
                 handler=self._handle_notes_save,
+            ),
+            LocalToolSpec(
+                name="memory.search",
+                description=(
+                    "Hybrid keyword + local-vector recall over notes, completed tasks and "
+                    "MEMORY.md (read-only; returns bounded snippets, never full documents)."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "minLength": 1, "maxLength": 300},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 8},
+                    },
+                    "required": ["query"],
+                    "additionalProperties": False,
+                },
+                risk_tier=RiskTier.R0,
+                requires_approval=False,
+                validate=_validate_memory_search,
+                handler=self._handle_memory_search,
+            ),
+            LocalToolSpec(
+                name="memory.propose_update",
+                description=(
+                    "Append (or remove) one bounded, deduplicated fact line in the owner's "
+                    "MEMORY.md journal (requires Trust approval; proposed content is only a "
+                    "suggestion until this single-use approval)."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string", "enum": ["append", "remove"]},
+                        "entry": {"type": "string", "minLength": 1, "maxLength": 280},
+                    },
+                    "required": ["action", "entry"],
+                    "additionalProperties": False,
+                },
+                risk_tier=RiskTier.R1,
+                requires_approval=True,
+                validate=_validate_memory_propose_update,
+                handler=self._handle_memory_propose_update,
             ),
             LocalToolSpec(
                 name="git.status",
@@ -1303,6 +1397,59 @@ class LocalToolRegistry:
             ],
             "created": created,
         }
+
+    def _memory_index_for_tool(self) -> MemoryRecallIndex:
+        with self._memory_index_lock:
+            if self._memory_index is None:
+                self._memory_index = MemoryRecallIndex(self._memory_index_path)
+            return self._memory_index
+
+    def _handle_memory_search(
+        self,
+        args: dict[str, Any],
+        _call_id: str | None,
+        _approval_id: str | None,
+    ) -> dict[str, object]:
+        index = self._memory_index_for_tool()
+        try:
+            index.sync(
+                self._notes_dir if self._notes_dir.is_dir() else None,
+                terminal_task_documents(self._task_store, self._owner_id),
+                self._memory_md_path,
+            )
+            hits = index.search(args["query"], limit=args.get("limit", 8))
+        except MemoryRecallError as error:
+            raise LocalToolError(error.code, status="failed") from None
+        return {
+            "count": len(hits),
+            "vector": index.vector_ready(),
+            "results": [
+                {
+                    "source": hit.source,
+                    "ref": hit.ref,
+                    "title": hit.title,
+                    "snippet": hit.snippet,
+                }
+                for hit in hits
+            ],
+        }
+
+    def _handle_memory_propose_update(
+        self,
+        args: dict[str, Any],
+        _call_id: str | None,
+        _approval_id: str | None,
+    ) -> dict[str, object]:
+        try:
+            result = (
+                append_memory_entry(self._memory_md_path, args["entry"])
+                if args["action"] == "append"
+                else remove_memory_entry(self._memory_md_path, args["entry"])
+            )
+        except MemoryRecallError as error:
+            raise LocalToolError(error.code, status="failed") from None
+        result["file"] = self._memory_md_path.name
+        return result
 
     def _handle_notes_save(
         self,
