@@ -22,10 +22,11 @@ import threading
 import wave
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
+from pathlib import Path
 from typing import Protocol, cast
 from urllib.parse import urlsplit, urlunsplit
 
-from max_core.local_config import DesktopConfig, ProviderConfig
+from max_core.local_config import DesktopConfig, ProviderConfig, load_dotenv_into_mapping
 from max_core.voice.pipeline import (
     MAX_INPUT_AUDIO_BYTES,
     MAX_INPUT_FRAME_BYTES,
@@ -685,6 +686,9 @@ class DesktopSpeechToText:
         api_key: str | None = None,
         endpoint: str | None = None,
         model: str = DEFAULT_STT_MODEL,
+        vocabulary: str = "",
+        language: str | None = None,
+        audio_mode: str = "filtered",
         timeout_seconds: float = 20.0,
         sample_rate: int = DEFAULT_SAMPLE_RATE,
         channels: int = DEFAULT_CHANNELS,
@@ -696,6 +700,12 @@ class DesktopSpeechToText:
             raise VoiceError("invalid_stt_model")
         if _has_control_chars(model):
             raise VoiceError("invalid_stt_model")
+        if audio_mode not in {"filtered", "raw"}:
+            raise VoiceError("invalid_stt_audio_mode")
+        if language is not None and (
+            len(language) != 2 or not language.isascii() or not language.isalpha()
+        ):
+            raise VoiceError("invalid_stt_language")
         if (
             isinstance(timeout_seconds, bool)
             or not isinstance(timeout_seconds, int | float)
@@ -745,6 +755,9 @@ class DesktopSpeechToText:
         self._api_key = cleaned_key
         self._endpoint = resolved_endpoint
         self._model = model.strip()
+        self._prompt = vocabulary_prompt(vocabulary)
+        self._language = language.lower() if language else None
+        self._audio_mode = audio_mode
         self._timeout_seconds = float(timeout_seconds)
         self._sample_rate = sample_rate
         self._channels = channels
@@ -819,7 +832,9 @@ class DesktopSpeechToText:
                         audio_payload,
                         sample_rate=self._sample_rate,
                         channels=self._channels,
-                    ),
+                    )
+                    if self._audio_mode == "filtered"
+                    else audio_payload,
                     sample_rate=self._sample_rate,
                     channels=self._channels,
                 )
@@ -855,6 +870,7 @@ class DesktopSpeechToText:
         client_kwargs: dict[str, object] = {
             "timeout": self._timeout_seconds,
             "follow_redirects": False,
+            "trust_env": False,
         }
         if self._transport is not None:
             client_kwargs["transport"] = self._transport
@@ -886,6 +902,10 @@ class DesktopSpeechToText:
         data = {
             "model": self._model,
         }
+        if self._prompt:
+            data["prompt"] = self._prompt
+        if self._language:
+            data["language"] = self._language
         body_buf = bytearray()
         try:
             try:
@@ -937,3 +957,41 @@ class DesktopSpeechToText:
         if not isinstance(parsed, dict) or not isinstance(parsed.get("text"), str):
             raise VoiceError("stt_invalid_response") from None
         return str(parsed["text"])
+
+
+def vocabulary_prompt(vocabulary: str) -> str:
+    """Bound explicit spelling hints; do not include conversation history or secrets."""
+    words = []
+    for word in vocabulary.split(","):
+        word = word.strip()
+        if not word or _has_control_chars(word):
+            continue
+        if len(word) > 64 or word in words:
+            continue
+        words.append(word)
+    return ", ".join(words)[:300]
+
+
+def desktop_stt_from_environment(
+    config: DesktopConfig | None = None, *, env: Mapping[str, str] | None = None
+) -> DesktopSpeechToText:
+    """Resolve opt-in STT settings for both native desktop surfaces.
+
+    Explicit STT endpoints never inherit a chat provider's API key.
+    """
+    if env is None:
+        settings = load_dotenv_into_mapping(Path.cwd() / ".env")
+        settings.update(os.environ)
+    else:
+        settings = dict(env)
+    endpoint = settings.get("MAX_STT_ENDPOINT") or None
+    api_key = settings.get("MAX_STT_API_KEY") or None
+    return DesktopSpeechToText(
+        desktop_config=config if endpoint is None and api_key is None else None,
+        endpoint=endpoint,
+        api_key=api_key,
+        model=settings.get("MAX_STT_MODEL") or DEFAULT_STT_MODEL,
+        vocabulary=settings.get("MAX_STT_VOCAB", ""),
+        language=settings.get("MAX_STT_LANGUAGE") or None,
+        audio_mode=settings.get("MAX_STT_AUDIO_MODE") or "filtered",
+    )
