@@ -28,6 +28,7 @@ from max_core.voice.desktop_stt import (
     DesktopSpeechToText,
     MicrophoneRecorder,
     QtMicrophoneRecorder,
+    desktop_stt_from_environment,
     pcm16_to_wav,
 )
 from max_core.voice.desktop_tts import DesktopAudioSink, DesktopTextToSpeech
@@ -130,7 +131,7 @@ class VoiceController:
             else DesktopTextToSpeech(preference=preference, headless=headless)
         )
         self._sink = sink if sink is not None else DesktopAudioSink(self._tts)
-        self._stt = stt if stt is not None else DesktopSpeechToText(desktop_config=config)
+        self._stt = stt if stt is not None else desktop_stt_from_environment(config)
         self._recorder: MicrophoneRecorder = (
             recorder if recorder is not None else QtMicrophoneRecorder(headless=headless)
         )
