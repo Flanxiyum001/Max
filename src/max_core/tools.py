@@ -55,9 +55,13 @@ class Tool:
     risk: ToolRisk
     params: tuple[ToolParam, ...]
     handler: Callable[[Mapping[str, Any]], str]
+    argument_validator: Callable[[object], dict[str, Any]] | None = None
+    input_schema: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
-        if not _NAME.fullmatch(self.name):
+        if not _NAME.fullmatch(self.name) and not re.fullmatch(
+            r"mcp\.github\.[a-z][a-z0-9_]{0,63}", self.name
+        ):
             raise ValueError("invalid_tool_name")
         if not isinstance(self.risk, ToolRisk):
             raise ValueError("invalid_tool_risk")
@@ -66,6 +70,8 @@ class Tool:
 
     def validate(self, arguments: object) -> dict[str, Any]:
         """Strict argument check: no unknown keys, exact primitive types, bounded text."""
+        if self.argument_validator is not None:
+            return self.argument_validator(arguments)
         if not isinstance(arguments, dict):
             raise ToolError("arguments_not_object")
         known = {p.name: p for p in self.params}
@@ -93,7 +99,9 @@ class Tool:
             "name": self.name,
             "description": self.description,
             "needs_owner_approval": self.risk == ToolRisk.EFFECTFUL,
-            "arguments": {
+            "arguments": self.input_schema
+            if self.input_schema is not None
+            else {
                 p.name: f"{types[p.kind]}{'' if p.required else ' (optional)'} - {p.description}"
                 for p in self.params
             },
