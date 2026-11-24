@@ -202,29 +202,20 @@ class ToolLoop:
         system = [m for m in base if m.role == "system"]
         turns = [m for m in base if m.role != "system"]
         if prompt:
-            # The explicit GitHub catalogue can exceed one message's 32k
-            # character bound. Split at tool boundaries, never truncate tools.
+            # Split large catalogues at tool boundaries, not by truncating schemas.
             if len(prompt) <= 32_000:
                 system.append(ChatMessage("system", prompt))
             else:
-                system.append(ChatMessage("system", prompt.split("Available tools:\\n", 1)[0]))
+                intro = prompt.split("Available tools:\n", 1)[0]
+                group = intro + "Available tools:\n"
                 for tool in self._registry:
-                    system.append(ChatMessage("system", json.dumps(tool.describe())))
-                if len(system) >= 45:
-                    # Group tool descriptions into bounded system messages.
-                    descriptions = [json.dumps(tool.describe()) for tool in self._registry]
-                    groups: list[str] = []
-                    current = ""
-                    for description in descriptions:
-                        if len(current) + len(description) + 1 > 30_000:
-                            groups.append(current)
-                            current = ""
-                        current += description + "\\n"
-                    if current:
-                        groups.append(current)
-                    system = [m for m in base if m.role == "system"]
-                    system.append(ChatMessage("system", prompt.split("Available tools:\\n", 1)[0]))
-                    system.extend(ChatMessage("system", group) for group in groups)
+                    description = json.dumps(tool.describe(), ensure_ascii=True) + "\n"
+                    if len(group) + len(description) > 30_000:
+                        system.append(ChatMessage("system", group))
+                        group = "Available tools (continued):\n"
+                    group += description
+                if group:
+                    system.append(ChatMessage("system", group))
         scratch: list[ChatMessage] = []
         for _ in range(self._max_steps):
             if monotonic() >= deadline_at:
