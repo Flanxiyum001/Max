@@ -15,7 +15,7 @@ import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import httpx
 
@@ -23,10 +23,11 @@ from max_core.assistant_tools import AssistantStore, assistant_registry
 from max_core.chat import request_factory
 from max_core.gateway import ChatMessage, Gateway, HTTPAdapter, InferenceDestination
 from max_core.gateway_trial import TrialSettings
+from max_core.harness import HarnessReport, MaxHarness
 from max_core.local_config import load_dotenv_into_mapping
 from max_core.persona import persona_message
 from max_core.task_routing import TaskKind, classify, route_table
-from max_core.tool_loop import LoopResult, ToolLoop, ToolStep
+from max_core.tool_loop import LoopResult, ToolStep
 from max_core.tools import Tool, ToolError, ToolParam, ToolRegistry, ToolRisk
 
 if TYPE_CHECKING:
@@ -332,14 +333,28 @@ class AssistantSession:
         on_step: Callable[[ToolStep], None] | None,
     ) -> LoopResult:
         spec = dataclasses.replace(self.settings.spec, model_id=model)
-        loop = ToolLoop(
+        harness = MaxHarness(
             Gateway((spec,), HTTPAdapter(self._client)),
             self.registry,
             approve=approve,
             on_step=on_step,
         )
-        future = asyncio.run_coroutine_threadsafe(loop.run(messages, self._make), self._loop)
-        return future.result(timeout=120)
+        future = asyncio.run_coroutine_threadsafe(harness.run(messages, self._make), self._loop)
+        report: HarnessReport = future.result(timeout=120)
+        stopped: Literal["answered", "step_limit", "model_failed"]
+        if report.stopped_reason == "answered":
+            stopped = "answered"
+        elif report.stopped_reason == "model_failed":
+            stopped = "model_failed"
+        else:
+            stopped = "step_limit"
+        return LoopResult(
+            answer=report.answer,
+            steps=report.steps,
+            stopped_reason=stopped,
+            error_code=report.error_code,
+            model=report.model,
+        )
 
     def reset(self) -> None:
         with self._lock:
