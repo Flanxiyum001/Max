@@ -95,16 +95,17 @@ class Tool:
 
     def describe(self) -> dict[str, Any]:
         types = {str: "string", int: "integer", float: "number", bool: "boolean"}
+        arguments: dict[str, Any] = {
+            p.name: f"{types[p.kind]}{'' if p.required else ' (optional)'} - {p.description}"
+            for p in self.params
+        }
+        if self.input_schema is not None:
+            arguments = self.input_schema
         return {
             "name": self.name,
             "description": self.description,
             "needs_owner_approval": self.risk == ToolRisk.EFFECTFUL,
-            "arguments": self.input_schema
-            if self.input_schema is not None
-            else {
-                p.name: f"{types[p.kind]}{'' if p.required else ' (optional)'} - {p.description}"
-                for p in self.params
-            },
+            "arguments": arguments,
         }
 
 
