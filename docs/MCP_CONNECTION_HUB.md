@@ -91,7 +91,7 @@ For non-Render deployments, the operator may configure *one*
   for metadata, authorization and token endpoints.
 - Remote tool descriptions and schemas are untrusted. MAX pins their
   canonical input schema; unsupported types do not execute.
-- GitHub has a fixed 45-name catalogue; only discovered, compatible tools are offered. Other providers share a separate 20-tool cap.
+- GitHub has a fixed 46-name catalogue; only discovered, compatible tools are offered. Other providers share a separate 20-tool cap.
 - An explicit approval is required **for every remote tool call**, even reads.
 - No shell subprocess/stdio MCP servers are automatically installed.
 - OAuth registration may be rate-limited, restricted by an administrator,
