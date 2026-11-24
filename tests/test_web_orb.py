@@ -443,3 +443,30 @@ def test_transcribe_sends_last_reply_as_context() -> None:
     res = client.post("/api/transcribe", content=b"x" * 500, headers={"content-type": "audio/webm"})
     assert res.json() == {"text": "yes please"}
     assert "Want me to email Asha?" in seen[0] and "Words that may come up: Asha." in seen[0]
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["[Music]", "(sighs)", "♪ la la ♪", "[INAUDIBLE] Thank you.", "Bye!", "Please subscribe"],
+)
+def test_clean_transcript_drops_non_speech_tags_and_noise_artifacts(raw: str) -> None:
+    from max_core.web.app import clean_transcript
+
+    assert clean_transcript(raw) == ""
+
+
+def test_clean_transcript_strips_background_tags_around_real_command() -> None:
+    from max_core.web.app import clean_transcript
+
+    assert clean_transcript("[Music] Hey MAX check my reminders (background noise)") == (
+        "Hey MAX check my reminders"
+    )
+
+
+def test_orb_js_exposes_voice_isolation_dsp_chain(web) -> None:  # type: ignore[no-untyped-def]
+    client, _ = web
+    js = client.get("/static/orb.js").text
+    assert "voiceIsolation: true" in js
+    assert "buildVoiceChain" in js
+    assert "createDynamicsCompressor" in js
+    assert "createMediaStreamDestination" in js

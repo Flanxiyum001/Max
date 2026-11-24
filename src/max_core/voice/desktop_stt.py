@@ -9,6 +9,7 @@ sanitized ``VoiceError`` codes.
 
 from __future__ import annotations
 
+import array
 import importlib
 import inspect
 import io
@@ -16,6 +17,7 @@ import ipaddress
 import json
 import math
 import os
+import sys
 import threading
 import wave
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
@@ -107,6 +109,85 @@ def derive_transcription_endpoint(endpoint: str) -> str:
     else:
         new_path = "/v1/audio/transcriptions"
     return urlunsplit((scheme, netloc, new_path, "", ""))
+
+
+def clean_pcm16(
+    pcm_bytes: bytes,
+    *,
+    sample_rate: int = DEFAULT_SAMPLE_RATE,
+    channels: int = DEFAULT_CHANNELS,
+) -> bytes:
+    """Apply high-pass filtering, adaptive noise gating, and peak normalization to PCM16 audio."""
+    if not isinstance(pcm_bytes, bytes) or not pcm_bytes:
+        raise VoiceError("empty_audio")
+    if len(pcm_bytes) > MAX_INPUT_AUDIO_BYTES:
+        raise VoiceError("audio_limit_exceeded")
+    if type(sample_rate) is not int or not 8_000 <= sample_rate <= 192_000:
+        raise VoiceError("invalid_audio_format")
+    if type(channels) is not int or channels not in (1, 2):
+        raise VoiceError("invalid_audio_format")
+    frame_bytes = 2 * channels
+    usable = len(pcm_bytes) - (len(pcm_bytes) % frame_bytes)
+    if usable <= 0:
+        raise VoiceError("empty_audio")
+
+    samples = array.array("h")
+    samples.frombytes(pcm_bytes[:usable])
+    if sys.byteorder != "little":
+        samples.byteswap()
+    if len(samples) == 0:
+        raise VoiceError("empty_audio")
+
+    # 1. DC-offset removal + first-order high-pass filter (~90 Hz) per channel
+    alpha = sample_rate / (sample_rate + 2.0 * math.pi * 90.0)
+    filtered: list[float] = [0.0] * len(samples)
+    for ch in range(channels):
+        prev_x = float(samples[ch])
+        prev_y = 0.0
+        for idx in range(ch, len(samples), channels):
+            x = float(samples[idx])
+            y = alpha * (prev_y + x - prev_x)
+            prev_x = x
+            prev_y = y
+            filtered[idx] = y
+
+    # 2. Frame-level RMS adaptive noise gate (20 ms frames) to duck background chatter/noise
+    frame_samples = max(1, (sample_rate // 50) * channels)
+    frame_rms: list[float] = []
+    for start in range(0, len(filtered), frame_samples):
+        chunk = filtered[start : start + frame_samples]
+        rms = math.sqrt(sum(s * s for s in chunk) / len(chunk))
+        frame_rms.append(rms)
+
+    sorted_rms = sorted(frame_rms)
+    noise_est = sorted_rms[max(0, len(sorted_rms) // 5)] if sorted_rms else 0.0
+    gate_thresh = max(180.0, noise_est * 2.2)
+
+    gated: list[float] = [0.0] * len(filtered)
+    hold_frames = 4  # 80 ms hangover so syllable tails aren't clipped
+    hold = 0
+    for f_idx, rms in enumerate(frame_rms):
+        if rms >= gate_thresh:
+            hold = hold_frames
+            gain = 1.0
+        elif hold > 0:
+            hold -= 1
+            gain = 1.0
+        else:
+            gain = 0.04  # -28 dB soft attenuation
+        start = f_idx * frame_samples
+        end = min(len(filtered), start + frame_samples)
+        for i in range(start, end):
+            gated[i] = filtered[i] * gain
+
+    # 3. Peak normalization to -3 dBFS (~23170) when speech is present
+    peak = max((abs(s) for s in gated), default=0.0)
+    scale = min(8.0, 23170.0 / peak) if peak >= 200.0 else 1.0
+
+    out = array.array("h", (max(-32768, min(32767, int(round(s * scale)))) for s in gated))
+    if sys.byteorder != "little":
+        out.byteswap()
+    return out.tobytes()
 
 
 def pcm16_to_wav(
@@ -734,7 +815,11 @@ class DesktopSpeechToText:
                 audio_payload
                 if _is_wav_payload(audio_payload)
                 else pcm16_to_wav(
-                    audio_payload,
+                    clean_pcm16(
+                        audio_payload,
+                        sample_rate=self._sample_rate,
+                        channels=self._channels,
+                    ),
                     sample_rate=self._sample_rate,
                     channels=self._channels,
                 )
