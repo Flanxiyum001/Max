@@ -489,17 +489,11 @@ class OrbWindow(QWidget):
         from max_core.local_config import load_desktop_config
         from max_core.native_desktop.qt_ui import _MainThreadRecorderProxy
         from max_core.voice.controller import VoiceController
-        from max_core.voice.desktop_stt import DesktopSpeechToText, QtMicrophoneRecorder
+        from max_core.voice.desktop_stt import QtMicrophoneRecorder, desktop_stt_from_environment
 
         env = merged_environment()
         config = load_desktop_config()
-        stt = None
-        if env.get("MAX_STT_API_KEY") or env.get("MAX_STT_ENDPOINT"):
-            stt = DesktopSpeechToText(
-                endpoint=env.get("MAX_STT_ENDPOINT") or None,
-                api_key=env.get("MAX_STT_API_KEY") or None,
-                model=env.get("MAX_STT_MODEL") or "whisper-1",
-            )
+        stt = desktop_stt_from_environment(config, env=env)
         self._recorder_proxy = _MainThreadRecorderProxy(QtMicrophoneRecorder(), parent=self)
         self._always_allow_remote_stt = env.get(
             "MAX_VOICE_ALWAYS_ALLOW_REMOTE_STT", ""
