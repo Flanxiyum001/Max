@@ -30,8 +30,8 @@ from mcp.client.streamable_http import streamable_http_client
 from max_core.github_tool_catalogue import (
     GITHUB_MCP_ENDPOINT,
     GITHUB_READS,
-    GITHUB_TOOLS,
     GITHUB_TOOL_GUIDANCE,
+    GITHUB_TOOLS,
     GitHubSchemaError,
     compact_schema,
     github_headers,
