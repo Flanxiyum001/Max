@@ -13,9 +13,11 @@ from max_core.github_tool_catalogue import (
     GITHUB_MCP_ENDPOINT,
     GITHUB_READS,
     GITHUB_TOOLS,
+    GITHUB_TOOL_GUIDANCE,
     GitHubSchemaError,
     github_headers,
     validate_github_arguments,
+    validate_github_operation,
 )
 from max_core.mcp_discovery import DiscoveryError, MCPConnection, ObservedTool
 from max_core.tools import ToolError, ToolRisk
@@ -27,8 +29,10 @@ def observed(name: str, schema: dict[str, Any]) -> ObservedTool:
     return ObservedTool("github", name, encoded, hashlib.sha256(encoded.encode()).hexdigest())
 
 
-def test_explicit_catalogue_requests_all_45_tools() -> None:
-    assert len(GITHUB_TOOLS) == 45
+def test_explicit_catalogue_requests_all_46_tools() -> None:
+    assert len(GITHUB_TOOLS) == 46
+    assert set(GITHUB_TOOL_GUIDANCE) == GITHUB_TOOLS
+    assert "ui_get" in GITHUB_READS
     assert "get_me" in GITHUB_READS
     assert "merge_pull_request" not in GITHUB_READS
     headers = github_headers()
@@ -113,3 +117,31 @@ def test_schema_references_and_digest_mismatch_fail_closed() -> None:
     valid = observed("get_me", {"type": "object", "properties": {}})
     with pytest.raises(GitHubSchemaError):
         validate_github_arguments(valid.schema_json, "0" * 64, {})
+
+
+def test_ui_get_requires_repository_except_for_org_issue_types() -> None:
+    validate_github_operation("ui_get", {"method": "issue_types", "owner": "example"})
+    validate_github_operation(
+        "ui_get", {"method": "labels", "owner": "example", "repo": "project"}
+    )
+    for invalid in (
+        {"method": "labels", "owner": "example"},
+        {"method": "unsupported", "owner": "example", "repo": "project"},
+        {"method": "issue_types", "owner": ""},
+    ):
+        with pytest.raises(GitHubSchemaError, match="github_invalid_ui_request"):
+            validate_github_operation("ui_get", invalid)
+
+
+def test_operation_checks_require_nonempty_content_or_reaction() -> None:
+    validate_github_operation("run_secret_scanning", {"files": ["example source"]})
+    validate_github_operation("run_secret_scanning", {"files": "example source"})
+    validate_github_operation("add_issue_comment", {"reaction": "+1"})
+    for invalid in ({"files": ""}, {"files": []}, {"files": [" "]}):
+        with pytest.raises(GitHubSchemaError, match="github_scan_content_required"):
+            validate_github_operation("run_secret_scanning", invalid)
+    for name in ("add_issue_comment", "add_reply_to_pull_request_comment"):
+        with pytest.raises(GitHubSchemaError, match="github_comment_or_reaction_required"):
+            validate_github_operation(name, {"body": " "})
+    with pytest.raises(GitHubSchemaError, match="github_file_batch_required"):
+        validate_github_operation("push_files", {"files": []})
