@@ -553,6 +553,8 @@ class OrbWindow(QWidget):
         if self._closing:
             self._speak_poll.stop()
             return
+        if not self._speak_poll.isActive():
+            return
         if not self._is_speaking():
             self._speech_cursor.advance()
             if self._play_current_chunk():
@@ -586,9 +588,13 @@ class OrbWindow(QWidget):
             return
         if self._busy:
             return
+        if self._speak_poll.isActive():
+            self._speak_poll.stop()
+            if not self._is_speaking():
+                # The current sentence finished before the next timer tick.
+                self._speech_cursor.advance()
         if self._is_speaking():
             voice.interrupt_speech()
-            self._speak_poll.stop()
         stt = voice.stt
         if (
             stt.available
@@ -637,6 +643,8 @@ class OrbWindow(QWidget):
 
     def _on_heard(self, text: str) -> None:
         if not self._closing:
+            if not is_resume_request(text):
+                self._speech_cursor.clear()
             self._show_answer(f"“{text[:300]}”")
 
     # --- conversation -------------------------------------------------------
@@ -645,9 +653,9 @@ class OrbWindow(QWidget):
         if not prompt or self._busy or self._closing:
             return
         self._speech_cursor.clear()
+        self._speak_poll.stop()
         if self._is_speaking():
             self._voice.interrupt_speech()
-            self._speak_poll.stop()
         self.input.clear()
         self.setFocus()
         self._busy = True
@@ -752,8 +760,11 @@ class OrbWindow(QWidget):
         if event.key() == Qt.Key.Key_Space and not self.input.text() and not event.isAutoRepeat():
             self.toggle_listening()
             return
-        if event.key() == Qt.Key.Key_Escape and self._is_speaking():
-            self._voice.interrupt_speech()
+        if event.key() == Qt.Key.Key_Escape and (
+            self._is_speaking() or self._speak_poll.isActive()
+        ):
+            if self._is_speaking():
+                self._voice.interrupt_speech()
             self._speech_cursor.clear()
             self._speak_poll.stop()
             self._idle_after_reply()

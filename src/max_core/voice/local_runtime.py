@@ -178,9 +178,7 @@ class LocalNeuralTTS(DesktopTextToSpeech):
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                creationflags=(
-                    0x00004000 if os.environ.get("MAX_LOCAL_GAMING") == "yes" else 0
-                ),
+                creationflags=(0x00004000 if os.environ.get("MAX_LOCAL_GAMING") == "yes" else 0),
             )
             if self._process.stdin is None:
                 self.stop()
