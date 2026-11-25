@@ -1,0 +1,31 @@
+name: MAX Magnitude Windows smoke
+
+on:
+  pull_request:
+    branches: [max]
+    paths:
+      - 'src/max_core/magnitude.py'
+      - 'src/max_core/assistant_session.py'
+      - 'src/max_core/native_desktop/**'
+      - 'tests/test_magnitude_provider.py'
+      - '.github/workflows/magnitude-windows.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  windows-magnitude:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install desktop test dependencies
+        run: python -m pip install -e '.[desktop,dev]'
+      - name: Exercise the desktop entrypoint and provider against a test endpoint
+        run: python -m pytest -q tests/test_magnitude_provider.py

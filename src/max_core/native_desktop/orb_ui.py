@@ -310,6 +310,10 @@ _ERRORS = {
         "(see docs/M28_ASSISTANT_TOOLKIT.md)."
     ),
     "local_model_only": "This window only talks to a local model.",
+    "magnitude_completion_failed": (
+        "Magnitude didn't finish this reply. Check the model in Magnitude, "
+        "or rerun start-max.cmd --check-magnitude, then retry."
+    ),
     "invalid_model_prompt": "Say that again, a bit shorter.",
 }
 
@@ -683,6 +687,10 @@ class OrbWindow(QWidget):
         self._speech_cursor.clear()
         if not isinstance(reply, LocalModelReply):  # assistant LoopResult
             if reply.stopped_reason == "model_failed":
+                if getattr(getattr(self._session, "settings", None), "spec", None) is not None:
+                    if self._session.settings.spec.provider_id == "magnitude":
+                        self._failed("magnitude_completion_failed")
+                        return
                 self._failed("unavailable")
                 return
             text = reply.answer.strip() or "…"

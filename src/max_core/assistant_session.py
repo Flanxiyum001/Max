@@ -21,14 +21,16 @@ import httpx
 
 from max_core.assistant_tools import AssistantStore, assistant_registry
 from max_core.chat import request_factory
-from max_core.gateway import ChatMessage, Gateway, HTTPAdapter, InferenceDestination
+from max_core.gateway import ChatMessage, Gateway, GatewayError, HTTPAdapter, InferenceDestination
 from max_core.gateway_trial import TrialSettings
 from max_core.harness import HarnessReport, MaxHarness
 from max_core.local_config import load_dotenv_into_mapping
+from max_core.magnitude import PROVIDER_ID as MAGNITUDE_PROVIDER
+from max_core.magnitude import magnitude_settings
 from max_core.persona import persona_message
 from max_core.task_routing import TaskKind, classify, route_table
-from max_core.tool_loop import LoopResult, ToolStep
-from max_core.tools import Tool, ToolError, ToolParam, ToolRegistry, ToolRisk
+from max_core.tool_loop import LoopResult, ToolLoop, ToolStep
+from max_core.tools import Tool, ToolError, ToolParam, ToolRegistry, ToolRisk, builtin_registry
 
 if TYPE_CHECKING:
     from max_core.native_desktop.backend import NativeDesktopCore
@@ -105,22 +107,37 @@ class AssistantSession:
         self.options = options
         self.is_cloud = settings.spec.inference_destination == InferenceDestination.CLOUD
         self.store = AssistantStore(options.data_dir)
-        self._mcp_core = mcp_core
-        self._github_connector = github_connector
-        self.registry = assistant_registry(
-            data_dir=options.data_dir,
-            workspace=options.workspace,
-            cloud=self.is_cloud,
-            cloud_personal_tools=options.cloud_personal_tools,
-            enable_shell=options.enable_shell,
-            enable_web=options.enable_web,
-            http=tool_http,
-            host_tools=options.host_tools,
-        )
-        if mcp_core is not None:
-            self._register_mcp_tools(mcp_core)
-        if github_connector is not None:
-            self._refresh_github_tools()
+        self._magnitude = settings.spec.provider_id == MAGNITUDE_PROVIDER
+        self._mcp_core = None if self._magnitude else mcp_core
+        self._github_connector = None if self._magnitude else github_connector
+        if self._magnitude:
+            workspace = (
+                options.workspace
+                if options.host_tools and "tools" in settings.spec.capabilities
+                else None
+            )
+            self.registry = ToolRegistry(
+                tuple(
+                    tool
+                    for tool in builtin_registry(workspace)
+                    if tool.name in {"workspace.list", "workspace.read"}
+                )
+            )
+        else:
+            self.registry = assistant_registry(
+                data_dir=options.data_dir,
+                workspace=options.workspace,
+                cloud=self.is_cloud,
+                cloud_personal_tools=options.cloud_personal_tools,
+                enable_shell=options.enable_shell,
+                enable_web=options.enable_web,
+                http=tool_http,
+                host_tools=options.host_tools,
+            )
+            if mcp_core is not None:
+                self._register_mcp_tools(mcp_core)
+            if github_connector is not None:
+                self._refresh_github_tools()
         self.history: list[ChatMessage] = []
         self._make = request_factory(settings)
         self._loop = asyncio.new_event_loop()
@@ -134,11 +151,14 @@ class AssistantSession:
         cls, env: Mapping[str, str] | None = None, *, mcp_core: NativeDesktopCore | None = None
     ) -> AssistantSession:
         merged = merged_environment(env)
-        settings = TrialSettings.from_env(merged)
+        magnitude = merged.get("MAX_LOCAL_PROVIDER") == MAGNITUDE_PROVIDER
+        settings = magnitude_settings(merged) if magnitude else TrialSettings.from_env(merged)
         return cls(
             settings,
             SessionOptions.from_env(merged),
-            routes=route_table(settings.spec.model_id, merged),
+            routes=route_table(
+                settings.spec.model_id, {"MAX_ROUTING": "off"} if magnitude else merged
+            ),
             mcp_core=mcp_core,
         )
 
@@ -271,6 +291,12 @@ class AssistantSession:
             "should remember long-term about the owner, use memory.remember."
         )
         messages = [persona_message()] if self.settings.persona_enabled else []
+        if self._magnitude:
+            intro = (
+                "You are MAX, a local coding assistant. Help the owner understand and write "
+                "code. Never claim to have edited files or run commands. Only use tools if "
+                "their names are explicitly provided in this turn."
+            )
         messages.append(ChatMessage("system", intro))
         if "memory.recall" in {t.name for t in self.registry}:
             facts = self.store.recall("", limit=15)
@@ -322,6 +348,9 @@ class AssistantSession:
             except Exception:
                 self.history.pop()
                 raise
+            if self._magnitude and result.stopped_reason == "model_failed":
+                self.history.pop()
+                return result
             self.history.append(ChatMessage("assistant", result.answer[:20_000]))
             return result
 
@@ -333,8 +362,16 @@ class AssistantSession:
         on_step: Callable[[ToolStep], None] | None,
     ) -> LoopResult:
         spec = dataclasses.replace(self.settings.spec, model_id=model)
+        gateway = Gateway((spec,), HTTPAdapter(self._client))
+        if self._magnitude:
+            if len(self.registry):
+                turn = ToolLoop(gateway, self.registry, approve=approve, on_step=on_step)
+                task = turn.run(messages, self._make)
+            else:
+                task = self._stream_local_text(gateway, messages)
+            return asyncio.run_coroutine_threadsafe(task, self._loop).result(timeout=120)
         harness = MaxHarness(
-            Gateway((spec,), HTTPAdapter(self._client)),
+            gateway,
             self.registry,
             approve=approve,
             on_step=on_step,
@@ -355,6 +392,23 @@ class AssistantSession:
             error_code=report.error_code,
             model=report.model,
         )
+
+    async def _stream_local_text(
+        self, gateway: Gateway, messages: list[ChatMessage]
+    ) -> LoopResult:
+        chunks: list[str] = []
+        try:
+            async with asyncio.timeout(110):
+                async for event in gateway.stream(self._make(tuple(messages))):
+                    if event.kind == "content_delta":
+                        chunks.append(event.text)
+        except (GatewayError, TimeoutError) as exc:
+            code = exc.code if isinstance(exc, GatewayError) else "timeout"
+            return LoopResult(answer="", stopped_reason="model_failed", error_code=code)
+        text = "".join(chunks).strip()
+        if not text:
+            return LoopResult(answer="", stopped_reason="model_failed", error_code="empty_response")
+        return LoopResult(answer=text)
 
     def reset(self) -> None:
         with self._lock:
