@@ -350,3 +350,49 @@ def test_voice_unavailable_is_explained(monkeypatch: pytest.MonkeyPatch) -> None
     window.toggle_listening()
     assert window.orb.state == "error" and "Voice problem" in window.answer.text()
     window.close()
+
+
+@pytest.mark.parametrize("finished_before_interrupt", [False, True])
+def test_resume_does_not_play_during_recording(
+    monkeypatch: pytest.MonkeyPatch, finished_before_interrupt: bool
+) -> None:
+    voice = _FakeVoice(transcript="continue")
+    app, window, session = _voice_orb(monkeypatch, voice)
+    try:
+        assert window.ensure_voice() is voice
+        assert window._speak("First sentence. Second sentence.")
+        window._speak_poll.start()
+        if finished_before_interrupt:
+            voice.is_speaking = False
+        window.toggle_listening()
+        assert voice.is_recording
+        assert not window._speak_poll.isActive()
+        window._poll_speaking()
+        assert voice.spoken == ["First sentence."]
+        window.toggle_listening()
+        _settle(app, window)
+        expected = "Second sentence." if finished_before_interrupt else "First sentence."
+        assert voice.spoken == ["First sentence.", expected]
+        assert not hasattr(session, "asked")
+    finally:
+        window.close()
+
+
+def test_typed_turn_stops_pending_sentence_timer(monkeypatch: pytest.MonkeyPatch) -> None:
+    voice = _FakeVoice()
+    app, window, session = _voice_orb(monkeypatch, voice)
+    try:
+        assert window.ensure_voice() is voice
+        assert window._speak("First sentence. Second sentence.")
+        window._speak_poll.start()
+        voice.is_speaking = False
+        window.input.setText("new question")
+        window.send()
+        assert not window._speak_poll.isActive()
+        window._poll_speaking()
+        _settle(app, window)
+        assert session.asked == "new question"
+        assert voice.spoken == ["First sentence."]
+        assert not window._speech_cursor.current
+    finally:
+        window.close()

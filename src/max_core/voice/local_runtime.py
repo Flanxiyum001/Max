@@ -47,10 +47,10 @@ def installed_models() -> set[str]:
         return {item["name"] for item in response.json()["models"]}
 
 
-def local_settings(models: set[str]) -> dict[str, str]:
+def local_settings(models: set[str], *, gaming: bool = False) -> dict[str, str]:
     if CHAT not in models:
         raise ValueError("local_chat_model_missing")
-    advanced = REASON if REASON in models else CHAT
+    advanced = REASON if REASON in models and not gaming else CHAT
     return {
         "MAX_TRIAL_DESTINATION": "verified_local",
         "MAX_TRIAL_DIALECT": "openai_chat",
@@ -73,6 +73,7 @@ def local_settings(models: set[str]) -> dict[str, str]:
         "MAX_ENABLE_WEB": "no",
         "MAX_ENABLE_SHELL": "no",
         "MAX_LOCAL_NEURAL_VOICE": "yes",
+        "MAX_LOCAL_GAMING": "yes" if gaming else "no",
         "HF_HUB_OFFLINE": "1",
         "TRANSFORMERS_OFFLINE": "1",
     }
@@ -82,7 +83,7 @@ def _load_qwen(path: Path):  # type: ignore[no-untyped-def]
     import torch  # type: ignore[import-not-found]
     from qwen_tts import Qwen3TTSModel  # type: ignore[import-not-found]
 
-    torch.set_num_threads(6)
+    torch.set_num_threads(2 if os.environ.get("MAX_LOCAL_GAMING") == "yes" else 6)
     return Qwen3TTSModel.from_pretrained(
         str(path), device_map="cpu", dtype=torch.float32, local_files_only=True
     )
@@ -132,12 +133,15 @@ def local_stt() -> DesktopSpeechToText:
                         str(voice_dir() / "whisper"),
                         device="cpu",
                         compute_type="int8",
-                        cpu_threads=6,
+                        cpu_threads=2 if os.environ.get("MAX_LOCAL_GAMING") == "yes" else 6,
                         local_files_only=True,
                     )
                 wav = payload if payload.startswith(b"RIFF") else pcm16_to_wav(payload)
                 segments, _ = model.transcribe(
-                    io.BytesIO(wav), language="en", beam_size=3, vad_filter=True
+                    io.BytesIO(wav),
+                    language="en",
+                    beam_size=1 if os.environ.get("MAX_LOCAL_GAMING") == "yes" else 3,
+                    vad_filter=True,
                 )
                 return " ".join(segment.text.strip() for segment in segments).strip()
             except VoiceError:
@@ -174,6 +178,7 @@ class LocalNeuralTTS(DesktopTextToSpeech):
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                creationflags=(0x00004000 if os.environ.get("MAX_LOCAL_GAMING") == "yes" else 0),
             )
             if self._process.stdin is None:
                 self.stop()
@@ -226,7 +231,7 @@ def main() -> int:
     if sys.argv[1:] == ["speak"]:
         speak_child()
         return 0
-    if sys.argv[1:] != ["launch"] or os.name != "nt":
+    if sys.argv[1:] not in (["launch"], ["launch", "--gaming"]) or os.name != "nt":
         return 2
     try:
         models = installed_models()
@@ -239,7 +244,8 @@ def main() -> int:
                 timeout=3600,
             )
             models = installed_models()
-        settings = local_settings(models)
+        settings = local_settings(models, gaming="--gaming" in sys.argv)
+        os.environ["MAX_LOCAL_GAMING"] = settings["MAX_LOCAL_GAMING"]
         prepare()
         os.environ.update(settings)
     except Exception:

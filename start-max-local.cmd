@@ -16,7 +16,7 @@ if not exist ".venv-local-voice\.max-local-voice-v1" (
     if errorlevel 1 goto failed
     >".venv-local-voice\.max-local-voice-v1" echo ready
 )
-".venv-local-voice\Scripts\python.exe" -m max_core.voice.local_runtime launch
+".venv-local-voice\Scripts\python.exe" -m max_core.voice.local_runtime launch %*
 set "exitCode=%errorlevel%"
 popd
 exit /b %exitCode%
