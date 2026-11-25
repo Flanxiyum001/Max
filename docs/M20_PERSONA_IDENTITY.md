@@ -16,6 +16,12 @@ voice ID is selected in this milestone. The exact voice is awaiting the
 owner's later choice. A British-English locale is a preference, not a
 functioning accent guarantee.
 
+## Assistant presence and greeting direction
+
+The text persona now allows one brief, context-aware greeting at a new conversation when the host supplies a reliable local time and daypart. It may use “Flanx” or “boss” occasionally, and a concise acknowledgement such as “Understood, boss” when it fits. It must not infer the time, repeat greetings during an active session, or force a title into every answer. These are presentation preferences only.
+
+The text persona does not yet implement scheduled briefings, wake-word listening, automatic audio greetings, or persistent session lifecycle detection. Those need separate runtime and voice work.
+
 ## Code delivered
 
 - `max_core.persona.persona_message()` returns a fixed, reusable system
