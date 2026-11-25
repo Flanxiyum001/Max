@@ -123,9 +123,7 @@ def prepare_original_reference(design_dir: Path) -> None:
     if reference.is_file():
         return
     model = _load_qwen(design_dir)
-    wavs, rate = model.generate_voice_design(
-        text=REFERENCE, language="English", instruct=DIRECTION
-    )
+    wavs, rate = model.generate_voice_design(text=REFERENCE, language="English", instruct=DIRECTION)
     temporary = root / "reference.pending.wav"
     sf.write(str(temporary), wavs[0], rate)
     temporary.replace(reference)
