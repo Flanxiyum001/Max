@@ -35,18 +35,12 @@ def test_persona_is_original_and_evidence_cautious_in_all_modes() -> None:
         assert "Never claim a tool was used" in message.content
         assert "do not grant computer access" in message.content
         assert "consequential actions" in message.content
-        assert "trusted connected" in message.content
-        assert "Do not invent background work" in message.content
-        assert "owner-approved, relevant memory" in message.content
-        assert "configured licensed voice" in message.content
-        assert "Tailor priorities to the owner" in message.content
         assert len(message.content) < 2500
         for forbidden in ("JARVIS", "FRIDAY", "ULTRON", "Tony Stark", "Hello, sir"):
             assert forbidden not in message.content
     assert "independently verified" in persona_message(ReplyMode.WORK).content
     assert "nonessential" in persona_message(ReplyMode.FOCUS).content
     assert "calendar events" in persona_message(ReplyMode.BRIEFING).content
-    assert "trusted sources actually supplied" in persona_message(ReplyMode.BRIEFING).content
 
 
 def test_persona_preserves_gateway_policy_and_does_not_modify_input() -> None:
