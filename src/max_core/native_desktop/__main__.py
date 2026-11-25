@@ -16,8 +16,9 @@ def main() -> int:
         or ("--magnitude" in args and "--dashboard" in args)
     ):
         print(
-            "Usage: python -m max_core.native_desktop "
-            "[--dashboard | --magnitude] [--smoke-test] or --check-magnitude",
+            "Usage: python -m max_core.native_desktop [--dashboard] [--smoke-test]\n"
+            "       python -m max_core.native_desktop --magnitude [--smoke-test]\n"
+            "       python -m max_core.native_desktop --check-magnitude",
             file=sys.stderr,
         )
         return 2

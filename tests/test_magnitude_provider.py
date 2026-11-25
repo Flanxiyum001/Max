@@ -132,7 +132,10 @@ def test_opted_in_model_can_read_a_file_but_cannot_write(tmp_path) -> None:
             answer = "I found the fixture line."
         return httpx.Response(
             200,
-            json={"model": MODEL, "choices": [{"message": {"role": "assistant", "content": answer}}]},
+            json={
+                "model": MODEL,
+                "choices": [{"message": {"role": "assistant", "content": answer}}],
+            },
         )
 
     settings = magnitude_settings({"MAX_MAGNITUDE_MODEL": MODEL, "MAX_MAGNITUDE_TOOLS": "yes"})
