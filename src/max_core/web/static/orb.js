@@ -52,90 +52,90 @@ function resize() {
 addEventListener("resize", resize); resize();
 
 const rgba = (r, g, b, a) => `rgba(${r},${g},${b},${a})`;
-let smooth = 0;
-function frame() {
-  const target = { idle: 0, thinking: 1, speaking: 0.6, error: 0.2, listening: 0.75 }[state];
-  energy += (target - energy) * 0.04;
-  smooth += (level - smooth) * (level > smooth ? 0.3 : 0.08); // fast attack, soft release, like Siri
-  t += 0.016 * (0.4 + 1.2 * energy + 2.5 * smooth);        // calm when quiet, lively with voice
-  const w = innerWidth, h = innerHeight, cx = w / 2, cy = h * 0.42;
-  const err = state === "error";
-  const rim = err ? [255, 90, 90] : [90, 230, 255];
-  const breathe = 1 + 0.012 * Math.sin(t * 1.3) + 0.16 * smooth;
-  const r = Math.min(w, h) * 0.24 * breathe;
-  ctx.clearRect(0, 0, w, h);
+// Particle-sphere voice orb. Adapted from "Speaking Orb" by aqualang89 (21st.dev), MIT licence.
+// Swells and sends lit rings on every syllable while speaking, reacts to mic level while listening.
+const ORB_STATES = ["listening", "thinking", "speaking", "error"];
+const ORB_COLORS = [[255, 185, 105], [178, 151, 255], [255, 150, 214], [255, 90, 90]];
+const TAU = Math.PI * 2;
+const ORB_N = 1400;
+const SPHERE = Array.from({ length: ORB_N }, (_, i) => {
+  const rnd = (v) => { const q = Math.sin(v * 12.9898) * 43758.5453; return q - Math.floor(q); };
+  const j = (1 - 1000 / ORB_N) * 1.6 / Math.sqrt(ORB_N);
+  const y = Math.max(-1, Math.min(1, 1 - 2 * (i + 0.5) / ORB_N + (rnd(i + 0.37) - 0.5) * j));
+  const a = i * 2.399963229728653 + (rnd(i) - 0.5) * j * 6, s = Math.sqrt(1 - y * y);
+  return { x: Math.cos(a) * s, y, z: Math.sin(a) * s, a, u: i / ORB_N, sa: Math.sin(a) };
+});
+let orbW = [1, 0, 0, 0], orbEnv = 0, orbOnsets = [], orbLast = 0, orbTime = 0, orbSprite = null, orbSpriteKey = "";
+const orbSpark = makeSprite("255,255,255", 0.5);
+function makeSprite(rgb, core) {
+  const c = document.createElement("canvas"); c.width = c.height = 64;
+  const x = c.getContext("2d"), g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, `rgba(${rgb},1)`); g.addColorStop(core, `rgba(${rgb},1)`);
+  g.addColorStop(core + 0.03, `rgba(${rgb},.065)`); g.addColorStop(0.94, `rgba(${rgb},.065)`);
+  g.addColorStop(1, `rgba(${rgb},0)`); x.fillStyle = g; x.fillRect(0, 0, 64, 64); return c;
+}
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
+function frame(now) {
+  const dt = orbLast ? Math.min((now - orbLast) / 1000, 0.05) : 0; orbLast = now;
+  const still = reduceMotion.matches;
+  orbTime += dt;
+  const key = state === "idle" ? "listening" : state;
+  const k = 1 - Math.exp(-dt * 7);
+  orbW = orbW.map((w, i) => w + ((ORB_STATES[i] === key ? 1 : 0) - w) * k);
+  // speech envelope: fast attack, soft release; onsets (syllables) spawn rings
+  // Browser speech has no measurable audio, so fall back to a syllable-like rhythm (~5/s).
+  const synthPulse = 0.55 + 0.45 * Math.sin(Math.PI * ((orbTime * 4.6) % 1)) * (0.6 + 0.4 * Math.sin(orbTime * 1.7));
+  const target = state === "speaking" ? (level > 0.04 ? level : synthPulse * ((orbTime * 4.6) % 1 < 0.7 ? 1 : 0.3)) : 0, prev = orbEnv;
+  orbEnv += (target - orbEnv) * (target > orbEnv ? 0.55 : 0.18);
+  if (orbEnv - prev > 0.06 && orbTime - (orbOnsets.at(-1) ?? -1) > 0.12) orbOnsets.push(orbTime);
+  orbOnsets = orbOnsets.filter((o) => orbTime - o < 1.2);
+  const h = still ? 0 : orbTime, env = still ? 0 : orbEnv, onsets = still ? [] : orbOnsets;
+  const mic = state === "listening" ? level : 0;
 
-  // halo
-  let g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 1.28);
-  const a = Math.min(1, (110 + 60 * energy + 145 * smooth) / 255);
-  g.addColorStop(0.74, rgba(...rim, a)); g.addColorStop(0.84, rgba(...rim, a / 3));
-  g.addColorStop(1, rgba(0, 0, 0, 0));
-  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, r * 1.28, 0, 7); ctx.fill();
+  const w = innerWidth, hh = innerHeight, S = Math.min(w, hh) * 0.62 / 720;
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const dpr = window.devicePixelRatio || 1;
+  ctx.setTransform(dpr * S, 0, 0, dpr * S, dpr * (w / 2 - 360 * S), dpr * (hh * 0.42 - 360 * S));
+  const col = [0, 1, 2].map((c) => Math.round(ORB_COLORS.reduce((s, rgb, i) => s + rgb[c] * orbW[i], 0)));
+  const rgb = col.join(","), sw = orbW[2];
+  if (rgb !== orbSpriteKey) { orbSpriteKey = rgb; orbSprite = makeSprite(rgb, 0.2); }
+  const ga = 0.075 + 0.05 * env * sw, glow = ctx.createRadialGradient(360, 360, 10, 360, 360, 305 + 25 * env * sw);
+  glow.addColorStop(0, `rgba(${rgb},${ga})`); glow.addColorStop(0.57, `rgba(${rgb},${ga * 0.47})`);
+  glow.addColorStop(1, `rgba(${rgb},0)`); ctx.fillStyle = glow; ctx.fillRect(0, 0, 720, 720);
 
-  // body
-  g = ctx.createRadialGradient(cx - r * .08, cy + r * .05, 0, cx - r * .08, cy + r * .05, r);
-  g.addColorStop(0, "#000"); g.addColorStop(0.6, "rgb(0,1,8)");
-  g.addColorStop(0.84, err ? "rgb(60,6,12)" : "rgb(3,14,90)");
-  g.addColorStop(0.95, err ? "rgb(160,40,40)" : "rgb(30,150,220)");
-  g.addColorStop(1, err ? "rgb(255,150,150)" : "rgb(150,245,255)");
-  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.fill();
-
-  // inner currents
-  ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.clip(); ctx.translate(cx, cy);
-  const ribbons = [[.21, [20, 50, 255], 150, 1], [-.15, [10, 90, 255], 110, .9],
-                   [.11, [40, 20, 200], 120, .8], [-.27, [30, 200, 255], 60, .95]];
-  ribbons.forEach(([speed, hue, alpha, scale], i) => {
-    if (err) hue = [200, 30, 50];
-    ctx.save(); ctx.rotate(t * speed + i * 1.22);
-    const wob = (0.1 + 0.25 * smooth) * Math.sin(t * (0.7 + 0.2 * i) + i);
-    ctx.beginPath();
-    ctx.moveTo(-r * .95, r * (.1 + wob));
-    ctx.bezierCurveTo(-r * .35, -r * (.95 - wob) * scale, r * .35, -r * (.7 + wob) * scale, r * .95, -r * .05);
-    ctx.bezierCurveTo(r * .45, -r * (.25 - wob) * scale, -r * .25, -r * (.15 + wob) * scale, -r * .95, r * (.1 + wob));
-    const rg = ctx.createRadialGradient(0, -r * .4, 0, 0, -r * .4, r * 1.1);
-    rg.addColorStop(0, rgba(...hue, alpha * (0.75 + 0.35 * energy) / 255));
-    rg.addColorStop(1, rgba(...hue, 0));
-    ctx.fillStyle = rg; ctx.fill();
-    ctx.strokeStyle = rgba(90, 160, 255, (25 + 70 * energy) / 255); ctx.lineWidth = 1; ctx.stroke();
-    ctx.restore();
-  });
-  g = ctx.createRadialGradient(0, r * .05, 0, 0, r * .05, r * .7);
-  g.addColorStop(0, "rgba(0,0,0,.92)"); g.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, r * .05, r * .72, 0, 7); ctx.fill();
-  ctx.restore();
-
-  // rim
-  ctx.lineWidth = Math.max(2, r * 0.045);
-  g = ctx.createConicGradient ? ctx.createConicGradient(t * 0.25, cx, cy) : null;
-  if (g) {
-    [[0, "rgb(230,255,255)"], [.18, rgba(...rim, 1)], [.42, err ? rgba(...rim, 1) : "rgb(60,200,170)"],
-     [.62, rgba(...rim, 1)], [.82, "rgb(170,250,255)"], [1, "rgb(230,255,255)"]]
-      .forEach(([p, c]) => g.addColorStop(p, c));
-    ctx.strokeStyle = g;
-  } else ctx.strokeStyle = rgba(...rim, 1);
-  ctx.beginPath(); ctx.arc(cx, cy, r * .975, 0, 7); ctx.stroke();
-  ctx.lineWidth = 1; ctx.strokeStyle = "rgba(200,255,255,.27)";
-  ctx.beginPath(); ctx.arc(cx, cy, r * .9, 0, 7); ctx.stroke();
-
-  // listening ripples (removed: the orb itself reacts to the voice now)
-  if (false) {
-    for (let k = 0; k < 3; k++) {
-      const ph = (t * 0.9 + k / 3) % 1;
-      ctx.strokeStyle = rgba(150, 240, 255, 0.6 * (1 - ph)); ctx.lineWidth = 1.6;
-      ctx.beginPath(); ctx.arc(cx, cy, r * (1 + 0.35 * ph), 0, 7); ctx.stroke();
+  const [wl, wt, wsp, we] = orbW, cos = Math.cos(h * 0.23), sin = Math.sin(h * 0.23);
+  const amp = 8 + mic * 22, rings = onsets.map((o) => { const d = h - o; return { y: -1.15 + d * 2.1, g: Math.pow(1 - d / 1.2, 2) }; });
+  ctx.globalCompositeOperation = "lighter";
+  for (let i = 0; i < ORB_N; i++) {
+    const p = SPHERE[i]; let x = 0, y = 0, z = 0, lit = 0;
+    const rx = p.x * cos + p.z * sin, rz = p.z * cos - p.x * sin;
+    const calm = wl + we;
+    if (calm > 0.001) {
+      const R = (192 + Math.sin(p.y * 11 - h * 3 + p.a * 0.03) * amp + Math.sin(p.a * 0.17 + h * 2) * 5) * calm;
+      x += rx * R; y += p.y * R; z += rz * R;
+    }
+    if (wt > 0.001) {
+      const B = p.u * TAU * 3 + h * 0.57, L = p.u * TAU * 8 - h * 0.48, Q = 137 + 41 * Math.cos(L) + 24 * p.sa;
+      const ax = Q * Math.cos(B), ay = Q * Math.sin(B), d = 65 * Math.sin(L) + 17 * p.y;
+      x += ax * wt; y += (d * 0.77 - ay * 0.52) * wt; z += (d * 0.52 + ay * 0.77) * wt;
+    }
+    if (wsp > 0.001) {
+      const n = Math.sin(rx * 2.3 + h * 1.4) * Math.sin(p.y * 2.9 - h * 1.1) * Math.cos(rz * 2.1 + h * 0.8);
+      let R = 184 + 16 * env + n * (5 + 19 * env) + Math.sin(p.y * 7 - h * 2.2) * 3 * env;
+      for (const r of rings) { const q = (p.y - r.y) / 0.15, e = Math.exp(-q * q) * r.g; R += 7 * e; lit += e; }
+      x += rx * R * wsp; y += p.y * R * wsp; z += rz * R * wsp; lit *= wsp;
+    }
+    const depth = (z + 240) / 480, persp = 850 / (850 - z);
+    const alpha = Math.min(1, 0.22 + 0.72 * depth + 0.35 * env * sw + 1.2 * lit);
+    const size = (0.8 + depth * 1.35) * (0.75 + 0.25 * Math.sin(p.a + h * 1.6)) * (1 + 0.5 * Math.min(1, lit)) * 9;
+    const px = 360 + x * persp, py = 360 + y * persp;
+    ctx.globalAlpha = alpha; ctx.drawImage(orbSprite, px - size / 2, py - size / 2, size, size);
+    if (z > 75 || lit > 0.25) {
+      const sa = (Math.max(alpha - 0.5, 0) + lit * 0.8) * 0.75;
+      if (sa > 0) { const s2 = size * 0.2; ctx.globalAlpha = Math.min(1, sa); ctx.drawImage(orbSpark, px - s2 / 2, py - s2 / 2, s2, s2); }
     }
   }
-
-  // highlights
-  ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.clip();
-  g = ctx.createRadialGradient(cx + r * .5, cy - r * .6, 0, cx + r * .5, cy - r * .6, r * .9);
-  g.addColorStop(0, "rgba(255,255,255,.94)"); g.addColorStop(1, "rgba(255,255,255,0)");
-  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, r * .96, 0, 7);
-  ctx.arc(cx - r * .09, cy + r * .09, r * .93, 0, 7, true); ctx.fill();
-  g = ctx.createRadialGradient(cx - r * .15, cy + r * .95, 0, cx - r * .15, cy + r * .95, r * .55);
-  g.addColorStop(0, rgba(...rim, .78)); g.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(cx - r * .15, cy + r * .95, r * .6, r * .35, 0, 0, 7); ctx.fill();
-  ctx.restore();
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
