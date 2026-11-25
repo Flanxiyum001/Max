@@ -1032,7 +1032,7 @@ def test_t1_f3_05_max_window_quiet_mode_and_start_max_cmd_contract(
 
     launcher = (REPO_ROOT / "start-max.cmd").read_text(encoding="utf-8")
     assert '.venv\\Scripts\\python.exe" -m max_core.native_desktop' in launcher
-    assert 'pip install -e ".[desktop]"' in launcher
+    assert r'"scripts\prepare_native_desktop.py"' in launcher
     assert "exit /b %exitCode%" in launcher
 
 

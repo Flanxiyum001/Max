@@ -8,6 +8,8 @@ import os
 import subprocess
 import sys
 import threading
+import time
+from contextlib import redirect_stdout
 from pathlib import Path
 
 import httpx
@@ -16,6 +18,7 @@ from max_core.assistant_session import default_data_dir
 from max_core.voice.desktop_stt import DesktopSpeechToText, pcm16_to_wav
 from max_core.voice.desktop_tts import DesktopTextToSpeech
 from max_core.voice.pipeline import VoiceError
+from max_core.voice.qwen_worker import QwenWorker, read_request
 
 CHAT = "qwen3.5:4b"
 REASON = "qwen3:8b"
@@ -77,6 +80,55 @@ def local_settings(models: set[str], *, gaming: bool = False) -> dict[str, str]:
         "HF_HUB_OFFLINE": "1",
         "TRANSFORMERS_OFFLINE": "1",
     }
+
+
+def selected_voice_assets() -> tuple[Path, Path, str]:
+    """Resolve already-present model weights and a local, authorized voice reference."""
+    root = voice_dir()
+    explicit_model = os.environ.get("MAX_QWEN_MODEL_DIR")
+    if explicit_model:
+        model = Path(explicit_model).expanduser()
+    elif os.environ.get("MAX_LOCAL_TTS") == "qwen":
+        model = Path.home() / "Models" / "Qwen3-TTS-12Hz-1.7B-Base"
+    else:
+        model = root / "base"
+    if not (model / "config.json").is_file():
+        raise ValueError("model_missing")
+
+    explicit_reference = os.environ.get("MAX_QWEN_REFERENCE_WAV")
+    explicit_text = os.environ.get("MAX_QWEN_REFERENCE_TEXT_FILE")
+    if bool(explicit_reference) != bool(explicit_text):
+        raise ValueError("reference_pair_required")
+    if explicit_reference and explicit_text:
+        wav = Path(explicit_reference).expanduser()
+        with Path(explicit_text).expanduser().open("rb") as file:
+            transcript = file.read(6001).decode("utf-8").strip()
+        if not transcript or len(transcript) > 1500:
+            raise ValueError("reference_transcript_invalid")
+    else:
+        wav, transcript = root / "reference.wav", REFERENCE
+    if not wav.is_file() or wav.stat().st_size > 32_000_000:
+        raise ValueError("reference_missing_or_invalid")
+    return model, wav, transcript
+
+
+def prepare_original_reference(design_dir: Path) -> None:
+    """Generate MAX's original voice from locally installed VoiceDesign weights."""
+    if not (design_dir / "config.json").is_file():
+        raise ValueError("voice_design_missing")
+    sf = importlib.import_module("soundfile")
+    root = voice_dir()
+    root.mkdir(parents=True, exist_ok=True)
+    reference = root / "reference.wav"
+    if reference.is_file():
+        return
+    model = _load_qwen(design_dir)
+    wavs, rate = model.generate_voice_design(
+        text=REFERENCE, language="English", instruct=DIRECTION
+    )
+    temporary = root / "reference.pending.wav"
+    sf.write(str(temporary), wavs[0], rate)
+    temporary.replace(reference)
 
 
 def _load_qwen(path: Path):  # type: ignore[no-untyped-def]
@@ -153,85 +205,153 @@ def local_stt() -> DesktopSpeechToText:
 
 
 class LocalNeuralTTS(DesktopTextToSpeech):
-    """Windows playback in a cancellable child; never blocks on model inference."""
+    """Prefer the opt-in Qwen worker; keep the existing system voice available."""
 
-    def __init__(self) -> None:
-        super().__init__(headless=True)
-        self._headless = False
+    def __init__(self, fallback: DesktopTextToSpeech) -> None:
+        super().__init__(headless=True, preference=fallback.preference)
+        self._fallback = fallback
+        self._headless = fallback.headless
         self._engine_name = "qwen3-tts-local"
-        self._available = os.name == "nt" and (voice_dir() / "reference.wav").is_file()
+        root = voice_dir()
+        reference: Path | None = None
+        if os.name == "nt":
+            try:
+                _, reference, _ = selected_voice_assets()
+            except (OSError, ValueError):
+                pass
+        self._qwen_available = reference is not None
+        self._available = self._qwen_available or fallback.available
         self._reason = None if self._available else "local_voice_not_prepared"
-        self._selected_voice_name = "MAX original voice v1"
-        self._process: subprocess.Popen[bytes] | None = None
+        self._selected_voice_name = fallback.selected_voice_name
+        if self._qwen_available:
+            self._selected_voice_name = "Local reference"
+            if reference == root / "reference.wav":
+                self._selected_voice_name = "MAX original voice v1"
+        if not self._qwen_available:
+            self._engine_name = fallback.engine_name
+        self._worker = QwenWorker()
+        self._pending: str | None = None
 
     def is_speaking(self) -> bool:
-        return self._process is not None and self._process.poll() is None
+        if self._pending is not None:
+            state = self._worker.status()
+            if state == "busy":
+                return True
+            pending, self._pending = self._pending, None
+            # Never replay a sentence on the system voice after Qwen started audio.
+            if state == "failed" and not self._worker.audio_ready:
+                return self._fallback.speak(pending)
+        return self._fallback.is_speaking()
 
     def speak(self, text: str) -> bool:
-        self.stop()
-        if not self.available or not isinstance(text, str) or not text.strip():
+        if not isinstance(text, str) or not text.strip():
             return False
-        data = text.strip()[:1500].encode("utf-8")
-        try:
-            self._process = subprocess.Popen(
-                [sys.executable, "-m", "max_core.voice.local_runtime", "speak"],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=(0x00004000 if os.environ.get("MAX_LOCAL_GAMING") == "yes" else 0),
-            )
-            if self._process.stdin is None:
-                self.stop()
-                return False
-            self._process.stdin.write(data)
-            self._process.stdin.close()
+        if self._pending is not None:
+            self._worker.cancel()
+            self._pending = None
+        self._fallback.stop()
+        if self._qwen_available and self._worker.start(text):
+            self._pending = text
             return True
-        except OSError:
-            self.stop()
-            return False
+        return self._fallback.speak(text)
 
     def stop(self) -> None:
-        process, self._process = self._process, None
-        if process is not None:
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=1)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=1)
-            else:
-                process.wait()
+        self._pending = None
+        self._worker.cancel()
+        self._fallback.stop()
 
 
-def speak_child() -> None:
+def _render_wav(model: object, text: str, reference: Path, transcript: str) -> bytes:
     sf = importlib.import_module("soundfile")
-
-    if os.name != "nt":
-        raise RuntimeError("windows_playback_required")
-    winsound = importlib.import_module("winsound")
-
-    os.environ["HF_HUB_OFFLINE"] = "1"
-    os.environ["TRANSFORMERS_OFFLINE"] = "1"
-    text = sys.stdin.buffer.read(6001).decode("utf-8")
-    if not text.strip() or len(text) > 1500:
-        return
-    root = voice_dir()
-    model = _load_qwen(root / "base")
-    wavs, rate = model.generate_voice_clone(
-        text=text, language="English", ref_audio=str(root / "reference.wav"), ref_text=REFERENCE
+    wavs, rate = model.generate_voice_clone(  # type: ignore[attr-defined]
+        text=text, language="English", ref_audio=str(reference), ref_text=transcript
     )
-    # In-memory WAV: interrupted playback never leaves speech recordings on disk.
     buffer = io.BytesIO()
     sf.write(buffer, wavs[0], rate, format="WAV", subtype="PCM_16")
-    winsound.PlaySound(buffer.getvalue(), winsound.SND_MEMORY)
+    return buffer.getvalue()
+
+
+def serve_speech() -> None:
+    if os.name != "nt":
+        raise RuntimeError("windows_playback_required")
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+    output = sys.stdout.buffer
+    with redirect_stdout(sys.stderr):
+        player = importlib.import_module("winsound")
+        checkpoint, reference, transcript = selected_voice_assets()
+        model = None
+        while (text := read_request(sys.stdin.buffer)) is not None:
+            try:
+                if model is None:
+                    model = _load_qwen(checkpoint)
+                wav = _render_wav(model, text, reference, transcript)
+                output.write(b"MAX_AUDIO_READY\n")
+                output.flush()
+                player.PlaySound(wav, player.SND_MEMORY | player.SND_NODEFAULT)
+            except Exception:
+                output.write(b"MAX_FAILED\n")
+                output.flush()
+                return
+            output.write(b"MAX_DONE\n")
+            output.flush()
+
+
+def benchmark() -> None:
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+    checkpoint, reference, transcript = selected_voice_assets()
+    start = time.perf_counter()
+    model = _load_qwen(checkpoint)
+    wav = _render_wav(model, REFERENCE, reference, transcript)
+    print(f"First audio ready: {(time.perf_counter() - start) * 1000:.0f} ms ({len(wav)} bytes)")
+    for index in range(3):
+        start = time.perf_counter()
+        _render_wav(model, REFERENCE, reference, transcript)
+        print(f"Warm {index + 1}: {(time.perf_counter() - start) * 1000:.0f} ms")
 
 
 def main() -> int:
-    if sys.argv[1:] == ["speak"]:
-        speak_child()
+    args = sys.argv[1:]
+    if args == ["worker"]:
+        serve_speech()
         return 0
-    if sys.argv[1:] not in (["launch"], ["launch", "--gaming"]) or os.name != "nt":
+    if args == ["benchmark-tts"]:
+        os.environ.setdefault("MAX_LOCAL_TTS", "qwen")
+        try:
+            benchmark()
+        except Exception:
+            print("[MAX] Benchmark failed. Check local Qwen weights and voice reference.")
+            return 1
+        return 0
+    if len(args) == 2 and args[0] == "prepare-reference":
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        os.environ["TRANSFORMERS_OFFLINE"] = "1"
+        try:
+            prepare_original_reference(Path(args[1]).expanduser())
+        except Exception:
+            print("[MAX] Could not prepare the voice reference from local VoiceDesign weights.")
+            return 1
+        print("[MAX] Original voice reference is ready.")
+        return 0
+    if args == ["launch", "--tts-only"] and os.name == "nt":
+        os.environ["MAX_LOCAL_TTS"] = "qwen"
+        try:
+            selected_voice_assets()
+        except (OSError, ValueError):
+            print(
+                "[MAX] Qwen needs local Base weights and a WAV/transcript. Using the system voice."
+            )
+            print(
+                "[MAX] See docs/LOCAL_VOICE_PREVIEW.md for the default paths and reference setup."
+            )
+        else:
+            print("[MAX] Local Qwen files found. Speech will load the model on the first reply.")
+        from max_core.native_desktop.__main__ import main as desktop_main
+
+        sys.argv = [sys.argv[0]]
+        return desktop_main()
+    if args not in (["launch"], ["launch", "--gaming"]) or os.name != "nt":
         return 2
     try:
         models = installed_models()

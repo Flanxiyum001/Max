@@ -499,17 +499,26 @@ class OrbWindow(QWidget):
         from max_core.native_desktop.qt_ui import _MainThreadRecorderProxy
         from max_core.voice.controller import VoiceController
         from max_core.voice.desktop_stt import QtMicrophoneRecorder, desktop_stt_from_environment
+        from max_core.voice.desktop_tts import DesktopTextToSpeech, VoicePreference
 
         env = merged_environment()
         config = load_desktop_config()
         tts = None
-        if env.get("MAX_LOCAL_NEURAL_VOICE") == "yes":
-            from max_core.voice.local_runtime import LocalNeuralTTS, local_stt
+        local_profile = env.get("MAX_LOCAL_NEURAL_VOICE") == "yes"
+        if local_profile:
+            from max_core.voice.local_runtime import local_stt
 
             stt = local_stt()
-            tts = LocalNeuralTTS()
         else:
             stt = desktop_stt_from_environment(config, env=env)
+        if local_profile or env.get("MAX_LOCAL_TTS") == "qwen":
+            from max_core.voice.local_runtime import LocalNeuralTTS
+
+            preference = VoicePreference(
+                presentation=config.voice_presentation,
+                locale=config.voice_locale,
+            )
+            tts = LocalNeuralTTS(DesktopTextToSpeech(preference=preference))
         self._recorder_proxy = _MainThreadRecorderProxy(QtMicrophoneRecorder(), parent=self)
         self._always_allow_remote_stt = env.get(
             "MAX_VOICE_ALWAYS_ALLOW_REMOTE_STT", ""

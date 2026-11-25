@@ -2,9 +2,15 @@
 setlocal EnableExtensions
 pushd "%~dp0"
 if errorlevel 1 exit /b 2
-echo [MAX] Local voice preview: downloads open model weights and Python packages if missing.
-echo [MAX] Requires Python 3.12, running local Ollama and sufficient disk space.
-echo [MAX] No paid speech or chat API is used in this profile.
+if /I "%~1"=="--tts-only" (
+    echo [MAX] Qwen speech-only preview: uses model weights you have already downloaded.
+    echo [MAX] Only speech output changes. Your current chat and microphone settings stay in use.
+    echo [MAX] Requires Python 3.12 and sufficient disk space. Ollama is not required for TTS.
+) else (
+    echo [MAX] Full local preview downloads model weights if missing.
+    echo [MAX] Requires Python 3.12, running local Ollama and sufficient disk space.
+    echo [MAX] No paid speech or chat API is used in this profile.
+)
 choice /C YN /M "Continue with local setup"
 if errorlevel 2 goto cancel
 if not exist ".venv-local-voice\Scripts\python.exe" (
