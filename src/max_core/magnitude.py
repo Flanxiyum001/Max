@@ -120,5 +120,3 @@ def check(*, configured: str = "") -> str:
         models = discover_models(client)
     print("Magnitude models: " + ", ".join(models))
     return choose_model(configured.strip(), models)
-
-

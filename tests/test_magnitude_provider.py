@@ -125,15 +125,14 @@ def test_opted_in_model_can_read_a_file_but_cannot_write(tmp_path) -> None:
         assert body["stream"] is False
         if calls == 1:
             answer = (
-                '<tool_call>{"name":"workspace.read",'
-                '"arguments":{"path":"README.md"}}</tool_call>'
+                '<tool_call>{"name":"workspace.read","arguments":{"path":"README.md"}}</tool_call>'
             )
         else:
             assert any("Fixture line for MAX" in row["content"] for row in body["messages"])
             answer = "I found the fixture line."
         return httpx.Response(
             200,
-            json={"model": MODEL, "choices": [{"message": {"content": answer}}]},
+            json={"model": MODEL, "choices": [{"message": {"role": "assistant", "content": answer}}]},
         )
 
     settings = magnitude_settings({"MAX_MAGNITUDE_MODEL": MODEL, "MAX_MAGNITUDE_TOOLS": "yes"})

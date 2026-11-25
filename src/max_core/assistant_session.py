@@ -393,9 +393,7 @@ class AssistantSession:
             model=report.model,
         )
 
-    async def _stream_local_text(
-        self, gateway: Gateway, messages: list[ChatMessage]
-    ) -> LoopResult:
+    async def _stream_local_text(self, gateway: Gateway, messages: list[ChatMessage]) -> LoopResult:
         chunks: list[str] = []
         try:
             async with asyncio.timeout(110):
