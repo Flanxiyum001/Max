@@ -14,6 +14,20 @@ MAX must authenticate to its own MCP servers. GitHub or other ChatGPT integratio
 
 Local stdio child-process MCP servers are supported since M35, but only through the host-pinned binary allowlist (`MAX_MCP_STDIO_BINARIES`), a stripped child environment, and the same per-call Trust approval gate; see [M35](M35_SANDBOXED_CODE_AND_STDIO_MCP.md).
 
+## Playwright browser for local MAX
+
+On your Windows PC, install Node.js 20+ and run from the MAX repository root:
+
+```powershell
+.\.venv\Scripts\python.exe .\scripts\install_playwright_mcp.py
+```
+
+This installs Microsoft's `@playwright/mcp` version **0.0.86** under `%LOCALAPPDATA%\MAX\playwright-mcp` and installs its Chrome browser. The package and browser downloads happen only when you run this setup command. On Linux/macOS, run `python scripts/install_playwright_mcp.py`; the package goes under `$XDG_DATA_HOME/max/playwright-mcp` or `~/.local/share/max/playwright-mcp`.
+
+Open Dashboard → System → **Connect Playwright**, then select its row, **Discover**, and **Enable tool** on each tool you intend to use. The package version and server entry point are checked at connection time; a changed package is rejected until reviewed. MAX keeps this particular stdio server alive across approved calls so navigate, snapshot, and click can share one isolated browser session. The server starts lazily on the first approved call and closes on revoke or desktop shutdown. The isolated headless profile does not reuse your normal Chrome sign-ins and is discarded when MAX closes. Browser tool input/output is untrusted; each invocation still needs a fresh owner approval. For public Google research, navigate to a public search URL and inspect the returned page snapshot.
+
+Playwright MCP is an external browser automation process, **not** an OS or network security boundary. It can visit URLs, follow redirects, execute site scripts, and access web content. Do not enable tools that submit forms, upload files, or interact with logged-in services until you have reviewed their exact action. If a cloud model is selected, approved browser snapshots may be sent to that provider. Disable the tools in System to revoke them; stopping MAX terminates the child. The package remains installed on disk until you delete its installation directory.
+
 Not in this release: OAuth browser/PKCE login or refresh, resources/prompts, nested argument schemas, unattended calls, and the ability to share ChatGPT's MCP credentials.
 
 ## GitHub setup
