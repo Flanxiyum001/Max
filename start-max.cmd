@@ -42,7 +42,12 @@ if errorlevel 1 (
 )
 
 echo [MAX] Launching MAX Desktop...
-".venv\Scripts\python.exe" -m max_core.native_desktop %*
+if /i "%MAX_SUPERVISED%"=="yes" if /i not "%MAX_ARG1%"=="--smoke-test" (
+    rem Self-healing: the supervisor restarts MAX after a crash, stops on a crash loop.
+    ".venv\Scripts\python.exe" -m max_core.supervisor --log "%LOCALAPPDATA%\MAX\supervisor.log" -- ".venv\Scripts\python.exe" -m max_core.native_desktop %*
+) else (
+    ".venv\Scripts\python.exe" -m max_core.native_desktop %*
+)
 set "exitCode=%errorlevel%"
 if not "%exitCode%"=="0" (
     echo [MAX] App exited with code %exitCode%.

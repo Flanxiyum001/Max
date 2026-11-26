@@ -825,6 +825,14 @@ def create_app(
         kind = "audio/wav" if audio[:4] == b"RIFF" else "audio/mpeg"
         return Response(audio, media_type=kind)
 
+    try:
+        from max_core.assistant_session import default_data_dir
+        from max_core.comms import CommsStore
+        from max_core.comms.webhooks import comms_router
+
+        app.include_router(comms_router(CommsStore(default_data_dir(env) / "comms.sqlite3"), env))
+    except Exception:
+        logging.getLogger(__name__).warning("comms webhooks unavailable", exc_info=True)
     return app
 
 
