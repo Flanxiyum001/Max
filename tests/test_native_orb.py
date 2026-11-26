@@ -396,3 +396,30 @@ def test_typed_turn_stops_pending_sentence_timer(monkeypatch: pytest.MonkeyPatch
         assert not window._speech_cursor.current
     finally:
         window.close()
+
+
+def test_escape_then_typed_continue_resumes_without_microphone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    voice = _FakeVoice()
+    app, window, session = _voice_orb(monkeypatch, voice)
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    try:
+        assert window.ensure_voice() is voice
+        assert window._speak("First sentence. Second sentence.")
+        window._speak_poll.start()
+        voice.is_speaking = False
+        QTest.keyClick(window, Qt.Key.Key_Escape)
+
+        assert not window._speak_poll.isActive()
+        assert "Speech paused" in window.answer.text()
+        window.input.setText("please continue")
+        window.send()
+        assert voice.spoken == ["First sentence.", "Second sentence."]
+        assert not voice.is_recording
+        assert not hasattr(session, "asked")
+        app.processEvents()
+    finally:
+        window.close()

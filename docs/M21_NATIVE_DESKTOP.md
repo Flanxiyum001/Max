@@ -16,7 +16,28 @@ Or, from the VS Code PowerShell terminal:
 To debug with F5, choose the repo's .venv Python interpreter in VS Code,
 then choose **MAX Desktop (Native)** from .vscode/launch.json.
 If you use Python 3.11, replace -3.13 with -3.11 in the venv command.
-You can close and relaunch MAX directly without starting a web server.
+You can close and relaunch MAX directly without starting a web server. Once
+installed, an unchanged checkout launches without reinstalling its dependencies.
+If the desktop dependency configuration changes, the next start refreshes the
+environment. A failed install can be retried by relaunching. If installed files
+are damaged, run the following in PowerShell from the repository root:
+
+    $env:MAX_DESKTOP_REPAIR = '1'
+    .\start-max.cmd
+    Remove-Item Env:\MAX_DESKTOP_REPAIR
+
+Repair reinstalls packages, so it requires access to the package index. It does
+not remove your local journal or configuration. If the venv's Python itself
+no longer starts, exit MAX, rename `.venv` to `.venv-old`, and relaunch.
+
+In the orb, Esc pauses an answer being read aloud. Type `continue` to resume
+from the interrupted sentence, without starting the microphone or asking a model
+again. Typing a new question discards the paused audio. The cursor lives only
+for the current app session.
+
+CI exercises the Windows launcher on a clean environment and on repeat launch,
+then checks a clean Python wheel installation. These checks are offscreen and
+do not replace a hands-on microphone, speaker, and first-run test on your PC.
 
 A Windows executable installer, auto-update and startup integration are
 *not* included yet: this is a source-code early-use desktop application.

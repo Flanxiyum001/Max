@@ -548,17 +548,26 @@ class OrbWindow(QWidget):
         from max_core.native_desktop.qt_ui import _MainThreadRecorderProxy
         from max_core.voice.controller import VoiceController
         from max_core.voice.desktop_stt import QtMicrophoneRecorder, desktop_stt_from_environment
+        from max_core.voice.desktop_tts import DesktopTextToSpeech, VoicePreference
 
         env = merged_environment()
         config = load_desktop_config()
         tts = None
-        if env.get("MAX_LOCAL_NEURAL_VOICE") == "yes":
-            from max_core.voice.local_runtime import LocalNeuralTTS, local_stt
+        local_profile = env.get("MAX_LOCAL_NEURAL_VOICE") == "yes"
+        if local_profile:
+            from max_core.voice.local_runtime import local_stt
 
             stt = local_stt()
-            tts = LocalNeuralTTS()
         else:
             stt = desktop_stt_from_environment(config, env=env)
+        if local_profile or env.get("MAX_LOCAL_TTS") == "qwen":
+            from max_core.voice.local_runtime import LocalNeuralTTS
+
+            preference = VoicePreference(
+                presentation=config.voice_presentation,
+                locale=config.voice_locale,
+            )
+            tts = LocalNeuralTTS(DesktopTextToSpeech(preference=preference))
         self._recorder_proxy = _MainThreadRecorderProxy(QtMicrophoneRecorder(), parent=self)
         self._always_allow_remote_stt = env.get(
             "MAX_VOICE_ALWAYS_ALLOW_REMOTE_STT", ""
@@ -592,6 +601,7 @@ class OrbWindow(QWidget):
             if self._close_requested:
                 QTimer.singleShot(0, self.close)
             return
+        self._state_timer.stop()
         if self._play_current_chunk():
             self.orb.set_state(SPEAKING)
             self._speak_poll.start()
@@ -610,6 +620,15 @@ class OrbWindow(QWidget):
                 return
             self._speak_poll.stop()
             self._idle_after_reply()
+
+    def _pause_speech(self) -> None:
+        if self._speak_poll.isActive():
+            self._speak_poll.stop()
+            if not self._is_speaking():
+                # The current sentence finished before the next timer tick.
+                self._speech_cursor.advance()
+        if self._is_speaking():
+            self._voice.interrupt_speech()
 
     def toggle_listening(self) -> None:
         """Space: start listening, Space again: stop and answer."""
@@ -638,13 +657,7 @@ class OrbWindow(QWidget):
             return
         if self._busy:
             return
-        if self._speak_poll.isActive():
-            self._speak_poll.stop()
-            if not self._is_speaking():
-                # The current sentence finished before the next timer tick.
-                self._speech_cursor.advance()
-        if self._is_speaking():
-            voice.interrupt_speech()
+        self._pause_speech()
         stt = voice.stt
         if (
             stt.available
@@ -700,7 +713,19 @@ class OrbWindow(QWidget):
     # --- conversation -------------------------------------------------------
     def send(self) -> None:
         prompt = self.input.text().strip()
-        if not prompt or self._busy or self._closing:
+        if not prompt or self._busy or self._closing or self._pending_approval is not None:
+            return
+        if self._voice is not None and self._voice.is_recording:
+            return
+        if (
+            self._speech_cursor.current
+            and not self._speak_poll.isActive()
+            and not self._is_speaking()
+            and is_resume_request(prompt)
+        ):
+            self.input.clear()
+            self.setFocus()
+            self._resume_speech()
             return
         self._speech_cursor.clear()
         self._speak_poll.stop()
@@ -820,11 +845,10 @@ class OrbWindow(QWidget):
         if event.key() == Qt.Key.Key_Escape and (
             self._is_speaking() or self._speak_poll.isActive()
         ):
-            if self._is_speaking():
-                self._voice.interrupt_speech()
-            self._speech_cursor.clear()
-            self._speak_poll.stop()
+            self._pause_speech()
             self._idle_after_reply()
+            if self._speech_cursor.current:
+                self._show_answer("Speech paused. Type ‘continue’ to hear the rest.")
             return
         if event.key() == Qt.Key.Key_Escape:
             if self.input.text():
