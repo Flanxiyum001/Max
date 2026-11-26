@@ -252,8 +252,24 @@ class ToolLoop:
                         "Review the recorded error and choose a different approach."
                     )
                     return result
+                before = len(result.steps)
                 payload = await self._execute(name, arguments, result, deadline_at)
                 failure = json.loads(payload).get("error")
+                tool = self._registry.get(name)
+                if (
+                    failure is not None
+                    and tool is not None
+                    and tool.risk == ToolRisk.EFFECTFUL
+                    and len(result.steps) > before + 1
+                    and result.steps[-1].status == "failed"
+                ):
+                    result.stopped_reason = "step_limit"
+                    result.error_code = "effectful_outcome_uncertain"
+                    result.answer = (
+                        "An approved action reported an error. Its outcome may be uncertain. "
+                        "I stopped without retrying it; verify the external state before retrying."
+                    )
+                    return result
                 if failure is not None:
                     hint = failures.failed(
                         name,
