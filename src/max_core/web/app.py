@@ -426,6 +426,10 @@ def create_app(
             "error": state["error"],
             "tools": sorted(t.name for t in sess.registry) if sess is not None else [],
             "stt_ready": stt is not None,
+            "active_job": next(
+                (j.id for j in list(jobs.values()) if j.status in {"running", "approval"}),
+                None,
+            ),
             "github": github.status(),
             "connections": hub.status(),
         }
@@ -701,6 +705,7 @@ def create_app(
                     job.error, job.status = "model_unavailable", "failed"
                     job.detail = getattr(result, "error_code", None)
                 else:
+                    job.detail = getattr(result, "error_code", None)
                     job.answer, job.status = result.answer.strip() or "…", "done"
             except Exception as exc:
                 log.warning("turn failed: %s", type(exc).__name__)
