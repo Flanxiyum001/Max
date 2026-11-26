@@ -547,7 +547,8 @@ def assistant_registry(
         tools.append(
             Tool(
                 "apps.open",
-                "Open a website (http/https URL) or launch an installed app by name.",
+                "Open a website (http/https URL, e.g. https://mail.google.com or "
+                "https://www.youtube.com) or launch an installed app by name (e.g. chrome).",
                 ToolRisk.EFFECTFUL,
                 (ToolParam("target", str, "URL or app name", max_length=500),),
                 open_target,
@@ -582,8 +583,10 @@ def assistant_registry(
         ]
     if host_tools and not cloud and sys.platform == "win32":
         from max_core.desktop_awareness import desktop_tools
+        from max_core.pc_control import pc_control_tools
 
         tools.extend(desktop_tools())
+        tools.extend(pc_control_tools())
     for tool in tools:
         registry.register(tool)
     return registry

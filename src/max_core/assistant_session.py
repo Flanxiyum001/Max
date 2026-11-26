@@ -27,6 +27,7 @@ from max_core.harness import HarnessReport, MaxHarness
 from max_core.local_config import load_dotenv_into_mapping
 from max_core.magnitude import PROVIDER_ID as MAGNITUDE_PROVIDER
 from max_core.magnitude import magnitude_settings
+from max_core.pc_control import AUTO_APPROVED, full_control_enabled
 from max_core.persona import persona_message
 from max_core.task_routing import TaskKind, classify, route_table
 from max_core.tool_loop import LoopResult, ToolLoop, ToolStep
@@ -76,6 +77,7 @@ class SessionOptions:
     enable_shell: bool
     enable_web: bool
     host_tools: bool = True
+    pc_control: bool = False  # MAX_PC_CONTROL=full: run PC-control tools without asking
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> SessionOptions:
@@ -86,6 +88,7 @@ class SessionOptions:
             cloud_personal_tools=_yes(env, "MAX_CLOUD_PERSONAL_TOOLS"),
             enable_shell=_yes(env, "MAX_ENABLE_SHELL"),
             enable_web=_yes(env, "MAX_ENABLE_WEB", default=True),
+            pc_control=full_control_enabled(env),
         )
 
 
@@ -322,6 +325,7 @@ class AssistantSession:
         if not text:
             raise ValueError("empty_prompt")
         kind = classify(text)
+        approve = self._with_pc_control(approve)
         with self._lock:
             self._refresh_mcp_tools()
             self._refresh_github_tools()
@@ -353,6 +357,18 @@ class AssistantSession:
                 return result
             self.history.append(ChatMessage("assistant", result.answer[:20_000]))
             return result
+
+    def _with_pc_control(self, approve: ApproveFn | None) -> ApproveFn | None:
+        """Owner opt-in: local sessions run PC-control tools without a prompt."""
+        if not self.options.pc_control or self.is_cloud or not self.options.host_tools:
+            return approve
+
+        def decide(name: str, arguments: dict[str, Any]) -> bool:
+            if name in AUTO_APPROVED:
+                return True
+            return approve is not None and approve(name, arguments) is True
+
+        return decide
 
     def _run(
         self,
