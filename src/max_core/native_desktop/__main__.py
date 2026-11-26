@@ -21,7 +21,8 @@ def main() -> int:
         or ("--dashboard" in args and ({"--magnitude", "--tv-hotkey"} & set(args)))
     ):
         print(
-            "Usage: python -m max_core.native_desktop [--dashboard | --tv-hotkey] [--smoke-test]\n"
+            "Usage: python -m max_core.native_desktop [--dashboard] [--smoke-test]\n"
+            "       python -m max_core.native_desktop --tv-hotkey [--smoke-test]\n"
             "       python -m max_core.native_desktop --magnitude [--smoke-test]\n"
             "       python -m max_core.native_desktop --check-magnitude\n"
             "       python -m max_core.native_desktop --pair-tv <TV IP>",
