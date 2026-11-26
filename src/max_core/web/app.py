@@ -434,7 +434,9 @@ def create_app(
         tools = (
             tuple(sess.available_tools())
             if sess is not None and hasattr(sess, "available_tools")
-            else tuple(sess.registry) if sess is not None else ()
+            else tuple(sess.registry)
+            if sess is not None
+            else ()
         )
         return {
             "authed": True,
@@ -696,9 +698,7 @@ def create_app(
             # Remote operation approvals must show EXACT arguments. Never silently
             # truncate the values the owner is asked to authorize.
             try:
-                encoded = json.dumps(
-                    arguments, sort_keys=True, ensure_ascii=True, allow_nan=False
-                )
+                encoded = json.dumps(arguments, sort_keys=True, ensure_ascii=True, allow_nan=False)
             except (TypeError, ValueError, OverflowError, RecursionError):
                 return False
             if len(encoded) > (8192 if tool.startswith("mcp.") else 32_768):
