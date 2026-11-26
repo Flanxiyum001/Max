@@ -263,7 +263,7 @@ function rememberJob(job) {
   } catch {} // Private browsing/storage policies must not break chat.
 }
 async function ask(text, spoken) {
-  if (busy || !text.trim()) return;
+  if (busy || transcribing || listening || !text.trim()) return;
   if (rememberedJob()) {
     show("A previous job may still be running. Reload this tab to reconnect before sending another request.");
     return;
@@ -613,7 +613,6 @@ function chime(up) {
 }
 
 // ---------------------------------------------------------------- voice out
-let followUp = false;
 // Browsers keep page audio locked until the first tap/keypress. Unlock once, on
 // that gesture, and reuse ONE player element so later replies may play by themselves.
 let player = null, playerSrc = null;
@@ -701,8 +700,8 @@ async function playSpeech(blob, run) {
     el.onplaying = () => { started = true; };
     el.onended = () => finish(true);
     // Do not repeat a chunk that may already have been heard.
-    el.onerror = () => finish(started);
-    el.play().catch(() => finish(started));
+    el.onerror = () => finish(started ? "partial" : false);
+    el.play().catch(() => finish(started ? "partial" : false));
   });
 }
 function pickVoice() {
@@ -734,7 +733,7 @@ function browserSay(text, run) {
 }
 if (window.speechSynthesis) { speechSynthesis.getVoices(); speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices(); }
 function stopSpeaking() {
-  const run = speechRun; speechRun = null; followUp = false;
+  const run = speechRun; speechRun = null;
   if (run) { run.controller.abort(); if (run.cancel) run.cancel(); }
   if (window.speechSynthesis) speechSynthesis.cancel();
   if (audio) { audio.pause(); audio = null; }
@@ -743,7 +742,7 @@ function stopSpeaking() {
 async function say(text, { follow = false } = {}) {
   stopSpeaking(); stopWake(); stopMicLevel();
   const run = { controller: new AbortController(), cancel: null };
-  speechRun = run; followUp = follow;
+  speechRun = run;
   show(text, 0); setState("speaking");
   const chunks = speechChunks(text);
   let complete = true, serverFailed = false;
@@ -754,13 +753,14 @@ async function say(text, { follow = false } = {}) {
     if (!blob) serverFailed = true;
     // One bounded prefetch, not a burst of parallel TTS requests.
     pending = !serverFailed && i + 1 < chunks.length ? fetchSpeech(chunks[i + 1], run) : null;
-    if (!(await playSpeech(blob, run)) && speechRun === run) {
-      if (!(await browserSay(chunks[i], run))) { complete = false; break; }
-    }
+    const outcome = await playSpeech(blob, run);
+    if (speechRun !== run) return;
+    if (outcome === "partial") { complete = false; break; }
+    if (!outcome && !(await browserSay(chunks[i], run))) { complete = false; break; }
   }
   if (speechRun !== run) return;
   run.controller.abort(); speechRun = null;
-  followUp = false; setState("idle");
+  setState("idle");
   if (!complete) setActivity("Voice unavailable — full reply is on screen");
   if (follow && complete) setTimeout(() => {
     if (!busy && !speechRun && !listening && !transcribing) startListening({ followUp: true });
@@ -818,7 +818,7 @@ async function transcribeClip(blob) {
 async function startRecording(opts = {}) {
   stopSpeaking(); stopWake();
   listening = true; setState("listening"); chime(true);
-  show(opts.followUp ? "…" : "Listening…", 0);
+  if (opts.followUp) setActivity("Listening for a follow-up"); else show("Listening…", 0);
   await startMicLevel();
   if (!micStream) { listening = false; setState("error", 2500); show("Microphone permission was denied.", 3500); return; }
   const { mime, opts: ropts } = recOptions();
@@ -835,7 +835,7 @@ async function startRecording(opts = {}) {
     const blob = new Blob(chunks, { type: (mime || "audio/webm").split(";")[0] });
     stopMicLevel();
     if (cancelled || blob.size < 1500) {
-      setState("idle"); if (!opts.followUp) show("I didn't hear anything.", 2500); else show("");
+      setState("idle"); if (!opts.followUp) show("I didn't hear anything.", 2500); else setActivity(null);
       resumeWake(); return;
     }
     chime(false); setState("thinking"); setActivity("Transcribing"); transcribing = true;
@@ -875,10 +875,10 @@ function startListening(opts = {}) {
     clearTimeout(silenceTimer); listening = false; stopMicLevel();
     const text = finalText.trim();
     if (text) { chime(false); ask(text, true); }
-    else { if (state === "listening") setState("idle"); if (!opts.followUp) show("I didn't hear anything.", 2500); else show(""); resumeWake(); }
+    else { if (state === "listening") setState("idle"); if (!opts.followUp) show("I didn't hear anything.", 2500); else setActivity(null); resumeWake(); }
   };
   listening = true; setState("listening"); chime(true);
-  show(opts.followUp ? "…" : "Listening…", 0);
+  if (opts.followUp) setActivity("Listening for a follow-up"); else show("Listening…", 0);
   startMicLevel();
   try { recognition.start(); } catch { listening = false; setState("idle"); }
 }
@@ -996,12 +996,14 @@ document.addEventListener("keydown", (e) => {
 input.addEventListener("input", () => { if (!input.value) input.classList.add("hidden"); });
 
 // ---------------------------------------------------------------- reminders
+const pendingReminders = [];
 setInterval(async () => {
   if (!authed || busy || listening || transcribing || speechRun) return;
   try {
     const { due } = await (await api("/api/reminders/due")).json();
-    if (due.length && !busy && !listening && !transcribing && !speechRun) {
-      await say("Reminder: " + due.join(" · "));
+    pendingReminders.push(...due);
+    if (pendingReminders.length && !busy && !listening && !transcribing && !speechRun) {
+      await say("Reminder: " + pendingReminders.splice(0).join(" · "));
     }
   } catch {}
 }, 30000);

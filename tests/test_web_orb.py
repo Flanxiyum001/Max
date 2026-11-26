@@ -535,3 +535,14 @@ def test_authenticated_refresh_recovers_active_job_without_replay(web) -> None: 
     client.post("/api/logout")
     assert client.get("/api/state").json() == {"authed": False}
     assert client.get(f"/api/job/{job}").status_code == 401
+
+
+def test_web_speech_browser_regressions() -> None:
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for browser speech regression checks")
+    script = Path(__file__).with_name("web_speech_regression.cjs")
+    subprocess.run([node, str(script)], check=True, timeout=15)
