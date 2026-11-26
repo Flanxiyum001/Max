@@ -546,3 +546,18 @@ def test_web_speech_browser_regressions() -> None:
         pytest.skip("Node.js is required for browser speech regression checks")
     script = Path(__file__).with_name("web_speech_regression.cjs")
     subprocess.run([node, str(script)], check=True, timeout=15)
+
+
+def test_orb_transcript_has_separate_scrollable_keyboard_accessible_lane(web) -> None:  # type: ignore[no-untyped-def]
+    client, _ = web
+    html = client.get("/").text
+    css = client.get("/static/orb.css").text
+    js = client.get("/static/orb.js").text
+    assert 'aria-label="MAX response" tabindex="0"' in html
+    assert "scrollbar-color: transparent transparent" in css
+    assert "scrollbar-width: thin" in css
+    assert "overflow-y: auto" in css
+    assert "top: 53%" in css and "top: 48%" in css
+    assert "hh * 0.29" in js
+    assert "answerEl.scrollTop = 0" in js
+    assert "document.activeElement === answerEl" in js
