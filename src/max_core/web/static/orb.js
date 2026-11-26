@@ -236,9 +236,11 @@ async function boot() {
   if (mcp === "denied") show("App authorization cancelled.", 6000);
   if (outcome || mcp) history.replaceState({}, "", "/");
   saveWake();
-  const job = rememberedJob();
+  const active = /^[a-f0-9]{32}$/.test(s.active_job || "") ? s.active_job : null;
+  const job = active || rememberedJob();
   if (job && !busy) {
     stopWake();
+    rememberJob(job);
     busy = true; pendingJob = job; setState("thinking"); setActivity("Reconnecting to MAX");
     await pollJob(job, false);
   }
@@ -277,7 +279,12 @@ async function ask(text, spoken) {
     await pollJob(job, spoken);
   } catch (err) {
     busy = false; pendingJob = null; setActivity(null); choices.classList.add("hidden");
-    if (err.message !== "login_required") { setState("error", 2500); show(ERRORS[err.message] || ERRORS.model_unavailable); }
+    if (err.message !== "login_required") {
+      setState("error", 2500);
+      show(err.status === 409 || !err.status
+        ? "A job may already be running. Reload to reconnect before repeating the request."
+        : ERRORS[err.message] || ERRORS.model_unavailable);
+    }
   }
 }
 
