@@ -40,6 +40,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QGraphicsOpacityEffect,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMenu,
@@ -48,6 +49,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from max_core.activity import activity_line
 from max_core.native_desktop.backend import (
     LocalModelReply,
     NativeDesktopCore,
@@ -367,6 +369,29 @@ class OrbWindow(QWidget):
         self.orb = OrbView()
         layout.addWidget(self.orb, 1)
 
+        # "What MAX is doing" row: terminal icon + plain-English tool activity.
+        self.activity = QWidget()
+        row = QHBoxLayout(self.activity)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(12)
+        row.addStretch(1)
+        icon = QLabel(">_")
+        icon.setFixedSize(24, 24)
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon.setFont(QFont("Consolas", 8, QFont.Weight.DemiBold))
+        icon.setStyleSheet(
+            "color: #9a9a9a; background: transparent; border: 1.5px solid #9a9a9a;"
+            " border-radius: 6px;"
+        )
+        self.activity_text = QLabel("")
+        self.activity_text.setFont(QFont("Segoe UI", 12))
+        self.activity_text.setStyleSheet("color: #9a9a9a; background: transparent;")
+        row.addWidget(icon)
+        row.addWidget(self.activity_text)
+        row.addStretch(1)
+        self.activity.hide()
+        layout.addWidget(self.activity)
+
         self.answer = QLabel("")
         self.answer.setWordWrap(True)
         self.answer.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -443,13 +468,19 @@ class OrbWindow(QWidget):
             self._show_answer("Reminder: " + " · ".join(item["text"] for item in due))
             QApplication.beep()
 
+    def _set_activity(self, text: str | None) -> None:
+        if text:
+            self.activity_text.setText(text)
+            self.activity.show()
+        else:
+            self.activity.hide()
+
     def _on_step(self, tool: str, status: str) -> None:
         if self._closing:
             return
-        if status == "proposed":
-            self._show_answer(f"⋯ {tool}")
-        elif status in {"denied", "failed"}:
-            self._show_answer(f"⋯ {tool} {status}")
+        line = activity_line(tool, status)
+        if line is not None:
+            self._set_activity(line)
 
     def _on_approval(self, tool: str, arguments: dict, request: _Approval) -> None:
         if self._closing:
@@ -594,7 +625,8 @@ class OrbWindow(QWidget):
             self._busy = True
             self._voice_turn = True
             self.orb.set_state(THINKING)
-            self._show_answer("⋯ transcribing")
+            self._show_answer(None)
+            self._set_activity("Transcribing")
             self._start_job(
                 _Ask(
                     self,
@@ -679,6 +711,7 @@ class OrbWindow(QWidget):
         self._busy = True
         self.orb.set_state(THINKING)
         self._show_answer(None)
+        self._set_activity("Thinking")
         self._start_job(_Ask(self, prompt))
 
     def _start_job(self, job: _Ask) -> None:
@@ -693,6 +726,7 @@ class OrbWindow(QWidget):
 
     def _done(self, reply: Any) -> None:
         self._busy = False
+        self._set_activity(None)
         if self._close_requested:
             QTimer.singleShot(0, self.close)
             return
@@ -734,6 +768,7 @@ class OrbWindow(QWidget):
 
     def _failed(self, code: str) -> None:
         self._busy = False
+        self._set_activity(None)
         self._voice_turn = False
         if self._close_requested:
             QTimer.singleShot(0, self.close)

@@ -141,6 +141,12 @@ function frame(now) {
 requestAnimationFrame(frame);
 
 // ---------------------------------------------------------------- ui helpers
+// "What MAX is doing" line under the orb (tool activity), like an agent status row.
+const activityEl = $("activity"), activityText = $("activity-text");
+function setActivity(text) {
+  if (!text) { activityEl.classList.add("hidden"); return; }
+  activityText.textContent = text; activityEl.classList.remove("hidden");
+}
 function show(text, ms) {
   clearTimeout(hideTimer);
   if (!text) { answerEl.classList.remove("show"); return; }
@@ -238,7 +244,7 @@ async function ask(text, spoken) {
   githubAuth.classList.add("hidden");
   sandboxLink.classList.add("hidden");
   pendingConnectService = null;
-  busy = true; setState("thinking"); show("");
+  busy = true; setState("thinking"); show(""); setActivity("Thinking");
   try {
     const { job } = await (await api("/api/ask", { text, voice: spoken })).json();
     pendingJob = job;
@@ -249,11 +255,10 @@ async function ask(text, spoken) {
       choices.classList.add("hidden");
       approvalShown = false; activeApprovalId = null;
       if (j.status === "running") {
-        const last = j.steps[j.steps.length - 1];
-        if (last) show("⋯ " + last.split(":")[0], 0);
+        setActivity(j.activity || "Thinking");
         continue;
       }
-      busy = false; pendingJob = null;
+      busy = false; pendingJob = null; setActivity(null);
       if (j.status === "done") {
         if (j.sandbox?.run_url) {
           try {
@@ -288,7 +293,7 @@ async function ask(text, spoken) {
       return;
     }
   } catch (err) {
-    busy = false; pendingJob = null; choices.classList.add("hidden");
+    busy = false; pendingJob = null; setActivity(null); choices.classList.add("hidden");
     if (err.message !== "login_required") { setState("error", 2500); show(ERRORS[err.message] || ERRORS.model_unavailable); }
   }
 }

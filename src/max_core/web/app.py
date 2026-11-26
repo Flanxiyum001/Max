@@ -32,6 +32,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
+from max_core.activity import activity_line
 from max_core.web.github_connect import GitHubConnectionError, WebGitHubConnector
 from max_core.web.mcp_hub import API_KEY_SERVICES, MCPHubError, WebMCPHub, connection_intent
 from max_core.web.mcp_hub import CATALOG as MCP_CATALOG
@@ -87,10 +88,18 @@ class Job:
     connect: dict[str, str] | None = None
     sandbox_run: SandboxRun | None = None
     steps: list[str] = field(default_factory=list)
+    activity: str | None = None  # display-safe "what MAX is doing" line
     _event: threading.Event = field(default_factory=threading.Event)
     _allowed: bool = False
     _approval_lock: LockType = field(default_factory=threading.Lock)
     created: float = field(default_factory=time.time)
+
+
+def _record_step(job: Job, tool: str, status: str) -> None:
+    job.steps.append(f"{tool}:{status}")
+    line = activity_line(tool, status)
+    if line is not None:
+        job.activity = line
 
 
 class RateLimiter:
@@ -686,7 +695,7 @@ def create_app(
                 result = sess.ask(
                     body.text,
                     approve=approve,
-                    on_step=lambda step: job.steps.append(f"{step.tool_name}:{step.status}"),
+                    on_step=lambda step: _record_step(job, step.tool_name, step.status),
                 )
                 if result.stopped_reason == "model_failed":
                     job.error, job.status = "model_unavailable", "failed"
@@ -715,6 +724,7 @@ def create_app(
             "connect": job.connect,
             "sandbox": dataclasses.asdict(job.sandbox_run) if job.sandbox_run else None,
             "steps": job.steps[-6:],
+            "activity": job.activity,
         }
 
     @app.get("/api/sandbox/run/{job_id}")
