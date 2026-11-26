@@ -507,9 +507,14 @@ class AssistantChatService:
         user_text: str,
         *,
         tool_executor: ToolExecutor | None = None,
+        on_tool_activity: Callable[[str, str], None] | None = None,
     ) -> ChatTurnResult:
         """Synchronous chat entrypoint safe for ``QThreadPool`` worker threads."""
-        return asyncio.run(self.send_message_async(user_text, tool_executor=tool_executor))
+        return asyncio.run(
+            self.send_message_async(
+                user_text, tool_executor=tool_executor, on_tool_activity=on_tool_activity
+            )
+        )
 
     def resume_approval(
         self,
@@ -804,6 +809,7 @@ class AssistantChatService:
         user_text: str,
         *,
         tool_executor: ToolExecutor | None = None,
+        on_tool_activity: Callable[[str, str], None] | None = None,
     ) -> ChatTurnResult:
         """Async chat turn with persona injection, egress guard, and bounded tool loop."""
         p_name, m_id = self._provider_identity()
@@ -892,6 +898,7 @@ class AssistantChatService:
             summaries=[],
             total_cost=None,
             replace_group=None,
+            on_tool_activity=on_tool_activity,
         )
 
     async def resume_approval_async(
@@ -1190,7 +1197,15 @@ class AssistantChatService:
         summaries: list[ToolExecutionSummary],
         total_cost: Decimal | None,
         replace_group: tuple[ChatMessage, ...] | None,
+        on_tool_activity: Callable[[str, str], None] | None = None,
     ) -> ChatTurnResult:
+        def emit(name: str, status: str) -> None:
+            if on_tool_activity is not None:
+                try:
+                    on_tool_activity(name, status)
+                except Exception:
+                    pass  # status UI never controls tool execution or approvals
+
         for _iteration in range(self._max_tool_iterations):
             spent_cost = total_cost if total_cost is not None else Decimal(0)
             remaining_budget = max_cost_decimal - spent_cost
@@ -1364,7 +1379,9 @@ class AssistantChatService:
                     name=canonical_name,
                     arguments=dict(wire_call.arguments),
                 )
+                emit(canonical_name, "proposed")
                 summary = self._execute_proposal(tool_executor, canonical_call)
+                emit(canonical_name, summary.status)
                 summaries.append(summary)
 
                 if summary.status == "awaiting_approval":

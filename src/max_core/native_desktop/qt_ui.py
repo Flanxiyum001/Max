@@ -56,6 +56,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from max_core.activity import activity_line, describe
 from max_core.assistant_chat import AssistantChatService, ChatTurnResult, ToolExecutionSummary
 from max_core.gateway.adapters import _chunked_scan_messages, _walk_strings
 from max_core.gateway.privacy_guard import contains_high_confidence_secret
@@ -471,6 +472,8 @@ class WorkItem(QRunnable):
 class MaxWindow(QMainWindow):
     """Always user-visible, owner-controlled MAX desktop command centre."""
 
+    background_tool = Signal(str, str)
+
     def __init__(
         self,
         core: NativeDesktopCore,
@@ -546,6 +549,7 @@ class MaxWindow(QMainWindow):
         self._pool = QThreadPool(self)
         self._pool.setMaxThreadCount(1)
         self._running: dict[int, WorkItem] = {}
+        self.background_tool.connect(self._on_background_tool)
         self._sequence = 0
         self._latest: dict[str, int] = {}
         self._closing = False
@@ -983,7 +987,7 @@ class MaxWindow(QMainWindow):
         inside.addWidget(_label("MCP CONNECTIONS  /  OWNER REVIEW", "eyebrow"))
         inside.addWidget(
             _label(
-                "HTTPS servers only. Credentials are read from environment variables; "
+                "HTTPS or locally installed Playwright MCP. Credentials are read from environment variables; "
                 "discovery never enables a tool. Every approved tool call still needs "
                 "one explicit Trust Inbox approval.",
                 "subtle",
@@ -995,6 +999,7 @@ class MaxWindow(QMainWindow):
         actions = QHBoxLayout()
         for title, handler in (
             ("Add server", self.mcp_add_server),
+            ("Connect Playwright", self.mcp_add_playwright),
             ("Discover", self.mcp_discover_selected),
             ("Enable tool", lambda: self.mcp_review_selected(True)),
             ("Disable tool", lambda: self.mcp_review_selected(False)),
@@ -1055,6 +1060,9 @@ class MaxWindow(QMainWindow):
             "mcp_add",
             lambda: self.core.mcp_add_connection(ident.strip(), endpoint.strip(), env_name.strip()),
         )
+
+    def mcp_add_playwright(self) -> None:
+        self._run("mcp_add", self.core.mcp_add_playwright)
 
     def mcp_discover_selected(self) -> None:
         selection = self._mcp_selection()
@@ -1307,10 +1315,27 @@ class MaxWindow(QMainWindow):
 
         def _invoke() -> ChatTurnResult:
             if hasattr(self.core, "send_chat_message"):
-                return self.core.send_chat_message(cleaned)
-            return self._chat_service.send_message(cleaned, tool_executor=self._tool_executor)
+                return self.core.send_chat_message(
+                    cleaned, on_tool_activity=self.background_tool.emit
+                )
+            return self._chat_service.send_message(
+                cleaned,
+                tool_executor=self._tool_executor,
+                on_tool_activity=self.background_tool.emit,
+            )
 
         self._run("chat", _invoke)
+
+    def _on_background_tool(self, tool_name: str, status: str) -> None:
+        if self._closing or not self._chat_busy:
+            return
+        line = activity_line(tool_name, status)
+        if status == "completed":
+            line = f"{describe(tool_name)} — done"
+        elif status == "awaiting_approval":
+            line = f"{describe(tool_name)} — awaiting your approval"
+        if line:
+            self.notice.setText(line)
 
     def _handle_chat_result(self, result: ChatTurnResult) -> None:
         self._record_tool_outcomes(result.tool_executions)

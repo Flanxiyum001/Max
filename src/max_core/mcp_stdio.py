@@ -61,6 +61,7 @@ class StdioMCPConnection:
     command: str
     args: tuple[str, ...] = ()
     discovery_approved: bool = False
+    persistent: bool = False
 
     def __post_init__(self) -> None:
         command = _clean_text(self.command, 256)
@@ -71,6 +72,7 @@ class StdioMCPConnection:
             and os.path.isabs(command)
             and ".." not in command.replace("\\", "/").split("/")
             and type(self.discovery_approved) is bool
+            and type(self.persistent) is bool
             and isinstance(self.args, tuple)
             and len(self.args) <= _MAX_ARGS
         )
@@ -90,6 +92,7 @@ def allowlisted_stdio_connection(
     *,
     allowed_commands: Sequence[str],
     discovery_approved: bool = False,
+    persistent: bool = False,
 ) -> StdioMCPConnection:
     """Resolve the host allowlist once; a bare name may only denote an allowlisted path."""
     if not allowed_commands:
@@ -106,6 +109,7 @@ def allowlisted_stdio_connection(
         resolved,
         tuple(args),
         discovery_approved,
+        persistent,
     )
 
 
