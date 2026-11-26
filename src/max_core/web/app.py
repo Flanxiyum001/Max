@@ -649,8 +649,9 @@ def create_app(
                 job.answer = f"{label} disconnected. Its MCP tools are no longer available."
             elif service == "github" and not github.configured:
                 job.answer = (
-                    "I can prepare GitHub for you, but this deployment needs a one-time "
-                    "GitHub OAuth App registration. I won't ask you to paste a token in chat."
+                    "Tap Set up GitHub to register MAX's OAuth application once. "
+                    "After its settings are saved on the server, tap Authorize GitHub. "
+                    "Never paste your client secret in chat."
                 )
                 job.connect = {"service": service, "action": "needs_configuration"}
             elif service in API_KEY_SERVICES and not hub.status()["services"][service]["connected"]:
