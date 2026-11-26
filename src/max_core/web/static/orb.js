@@ -272,7 +272,7 @@ async function ask(text, spoken) {
   githubAuth.classList.add("hidden");
   sandboxLink.classList.add("hidden");
   pendingConnectService = null;
-  stopSpeaking(); stopWake(); lastVoiceText = ""; replayBtn.classList.add("hidden");
+  stopSpeaking(); stopWake(); stopMicLevel(); lastVoiceText = ""; replayBtn.classList.add("hidden");
   busy = true; setState("thinking"); show(spoken ? `“${text}”` : "", 0); setActivity("Thinking");
   try {
     const { job } = await (await api("/api/ask", { text, voice: spoken })).json();
@@ -939,7 +939,7 @@ let tape = null;
 function startTape() {
   if (!sttReady || !window.MediaRecorder || !micStream || tape) return;
   const { mime, opts } = recOptions();
-  const t = { chunks: [], mime, started: Date.now(), wake: false, rec: new MediaRecorder(cleanStream || micStream, opts) };
+  const t = { chunks: [], mime, started: Date.now(), wake: false, rec: new MediaRecorder(micStream, opts) };
   t.rec.ondataavailable = (e) => { if (e.data.size) t.chunks.push(e.data); };
   t.rec.start(250); tape = t;
 }
@@ -959,7 +959,8 @@ function finishTape() {
     try {
       const said = await transcribeClip(blob);
       const m = said.match(WAKE);
-      const rest = (m ? said.slice(m.index + m[0].length) : said).trim();
+      // A wake-detector hit alone must not submit preceding room conversation.
+      const rest = m ? said.slice(m.index + m[0].length).trim() : "";
       transcribing = false;
       if (rest.length > 2) { ask(rest, true); }
       else { setActivity(null); setState("idle"); startListening(); }   // just "Hey MAX": listen for the command
@@ -971,7 +972,11 @@ async function startWake() {
   if (!SR || !wakeOn || !authed || listening || busy || transcribing || speechRun || wakeRec) return;
   wakeWanted = true;
   if (sttReady && window.MediaRecorder) { await startMicLevel(); startTape(); }
-  if (!wakeWanted || wakeRec || speechRun || busy || listening || transcribing) return;
+  if (!wakeWanted || speechRun || busy || listening || transcribing) {
+    if (!listening) { dropTape(); stopMicLevel(); }
+    return;
+  }
+  if (wakeRec) return;
   wakeRec = new SR(); wakeRec.lang = navigator.language || "en-US";
   wakeRec.continuous = true; wakeRec.interimResults = true;
   wakeRec.onresult = (e) => {

@@ -47,4 +47,41 @@ vm.runInContext(block, ctx);
   await old;
   assert.equal(spoken.length, count, "stale synthesis must not play");
   assert.equal(shown.at(-1), "new");
+  // Media may accept play() but never emit playing/ended. The watchdog must
+  // release it and use the same exact text with the fallback voice.
+  const fallback = [];
+  ctx.window.speechSynthesis = ctx.speechSynthesis = {
+    getVoices: () => [{name: "Samantha", lang: "en-US", localService: true}],
+    cancel() {},
+    speak(u) { fallback.push(u.text); queueMicrotask(() => { u.onstart(); u.onend(); }); },
+  };
+  ctx.window.SpeechSynthesisUtterance = ctx.SpeechSynthesisUtterance = class {
+    constructor(text) { this.text = text; }
+  };
+  ctx.Audio = class { pause() {} play() { return Promise.resolve(); } };
+  vm.runInContext("VOICE_TIMEOUTS.start = 10", ctx);
+  await ctx.say("No silent playback");
+  assert.deepEqual(fallback, ["No silent playback"]);
+  // Verify clean silence ends a turn rapidly and resumed speech extends it.
+  const gate = source.slice(source.indexOf("function speechGate("), source.indexOf("async function transcribeClip("));
+  let now = 0, tick = null, completed = [];
+  const vad = vm.createContext({
+    Date: {now: () => now}, voiceLevel: 0, level: 0, voiceAnalyser: true, noiseFloor: 0.025,
+    setInterval(fn) { tick = fn; return 1; }, clearInterval() { tick = null; },
+  });
+  vm.runInContext(gate, vad);
+  const advance = (ms, volume) => {
+    vad.voiceLevel = volume;
+    for (let i = 0; i < ms / 50; i++) { now += 50; if (tick) tick(); }
+  };
+  vad.speechGate(heard => completed.push(heard));
+  advance(200, 0.2); advance(350, 0);
+  assert.equal(completed.length, 0);
+  advance(50, 0);
+  assert.deepEqual(completed, [true]);
+  completed = [];
+  vad.speechGate(heard => completed.push(heard));
+  advance(200, 0.2); advance(200, 0); advance(200, 0.2);
+  advance(400, 0); assert.equal(completed.length, 0);
+  advance(200, 0); assert.deepEqual(completed, [true]);
 })().catch(err => { console.error(err); process.exitCode = 1; });
