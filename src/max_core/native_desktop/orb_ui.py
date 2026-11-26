@@ -1,5 +1,5 @@
 # mypy: ignore-errors
-"""MAX orb interface: a black window with one living glass orb.
+"""MAX orb interface: a black window with one living particle orb.
 
 Interaction is deliberately minimal:
   * start typing anywhere -> a faint input line appears; Enter sends it
@@ -23,6 +23,7 @@ from urllib.parse import urlsplit
 from PySide6.QtCore import (
     QObject,
     QPointF,
+    QRectF,
     QRunnable,
     Qt,
     QThreadPool,
@@ -31,11 +32,9 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QColor,
-    QConicalGradient,
     QFont,
     QPainter,
-    QPainterPath,
-    QPen,
+    QPixmap,
     QRadialGradient,
 )
 from PySide6.QtWidgets import (
@@ -60,8 +59,52 @@ IDLE, THINKING, SPEAKING, ERROR = "idle", "thinking", "speaking", "error"
 LISTENING = "listening"
 
 
+# Particle-sphere orb, the same animation as the web client (src/max_core/web/static/orb.js).
+# Adapted from "Speaking Orb" by aqualang89 (21st.dev), MIT licence.
+_ORB_STATES = (LISTENING, THINKING, SPEAKING, ERROR)
+_ORB_COLORS = ((255, 185, 105), (178, 151, 255), (255, 150, 214), (255, 90, 90))
+_TAU = math.tau
+_ORB_N = 1400
+
+
+def _rnd(v: float) -> float:
+    q = math.sin(v * 12.9898) * 43758.5453
+    return q - math.floor(q)
+
+
+def _sphere() -> list[tuple[float, float, float, float, float, float]]:
+    jit = (1 - 1000 / _ORB_N) * 1.6 / math.sqrt(_ORB_N)
+    pts = []
+    for i in range(_ORB_N):
+        y = max(-1.0, min(1.0, 1 - 2 * (i + 0.5) / _ORB_N + (_rnd(i + 0.37) - 0.5) * jit))
+        a = i * 2.399963229728653 + (_rnd(i) - 0.5) * jit * 6
+        s = math.sqrt(1 - y * y)
+        pts.append((math.cos(a) * s, y, math.sin(a) * s, a, i / _ORB_N, math.sin(a)))
+    return pts
+
+
+_SPHERE = _sphere()
+
+
+def _sprite(rgb: tuple[int, int, int], core: float) -> QPixmap:
+    pix = QPixmap(64, 64)
+    pix.fill(Qt.GlobalColor.transparent)
+    g = QRadialGradient(QPointF(32, 32), 32)
+    r, gr, b = rgb
+    g.setColorAt(0.0, QColor(r, gr, b, 255))
+    g.setColorAt(core, QColor(r, gr, b, 255))
+    g.setColorAt(core + 0.03, QColor(r, gr, b, 17))
+    g.setColorAt(0.94, QColor(r, gr, b, 17))
+    g.setColorAt(1.0, QColor(r, gr, b, 0))
+    p = QPainter(pix)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.fillRect(0, 0, 64, 64, g)
+    p.end()
+    return pix
+
+
 class OrbView(QWidget):
-    """Painted glass sphere with drifting inner currents and a cyan rim glow."""
+    """Particle sphere: ripples while listening, knots while thinking, rings on syllables."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -69,156 +112,127 @@ class OrbView(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.t = 0.0
         self.state = IDLE
-        self.energy = 0.0  # smoothed 0..1, drives speed and brightness
+        self.level = 0.0  # 0..1 live audio level, when a caller can measure one
+        self.weights = [1.0, 0.0, 0.0, 0.0]
+        self.env = 0.0
+        self.onsets: list[float] = []
+        self._sprite_key: tuple[int, int, int] | None = None
+        self._sprite = QPixmap()
+        self._spark = _sprite((255, 255, 255), 0.5)
         self._timer = QTimer(self)
-        self._timer.setInterval(33)  # bounded redraw rate while MAX is idle
+        self._timer.setInterval(16)
         self._timer.timeout.connect(self._tick)
         self._timer.start()
 
     def set_state(self, state: str) -> None:
         self.state = state
 
+    def set_level(self, level: float) -> None:
+        self.level = max(0.0, min(1.0, float(level)))
+
     def _tick(self) -> None:
-        target = {IDLE: 0.0, THINKING: 1.0, SPEAKING: 0.6, ERROR: 0.2, LISTENING: 0.75}[self.state]
-        self.energy += (target - self.energy) * 0.05
-        self.t += 0.016 * (1.0 + 2.2 * self.energy)
+        dt = 0.016
+        self.t += dt
+        key = LISTENING if self.state == IDLE else self.state
+        k = 1 - math.exp(-dt * 7)
+        self.weights = [
+            w + ((1.0 if s == key else 0.0) - w) * k
+            for w, s in zip(self.weights, _ORB_STATES, strict=True)
+        ]
+        # Speech envelope: fast attack, soft release. Without a measurable level,
+        # follow a syllable-like rhythm (about 5 per second), as the web orb does.
+        ph = (self.t * 4.6) % 1
+        pulse = 0.55 + 0.45 * math.sin(math.pi * ph) * (0.6 + 0.4 * math.sin(self.t * 1.7))
+        synth = pulse * (1.0 if ph < 0.7 else 0.3)
+        target = (self.level if self.level > 0.04 else synth) if self.state == SPEAKING else 0.0
+        prev = self.env
+        self.env += (target - self.env) * (0.55 if target > self.env else 0.18)
+        if self.env - prev > 0.06 and self.t - (self.onsets[-1] if self.onsets else -1) > 0.12:
+            self.onsets.append(self.t)
+        self.onsets = [o for o in self.onsets if self.t - o < 1.2]
         self.update()
 
     def paintEvent(self, event: Any) -> None:
         del event
         p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        w, h = self.width(), self.height()
-        breathe = 1.0 + 0.012 * math.sin(self.t * 1.3) + 0.02 * self.energy * math.sin(self.t * 6)
-        r = min(w, h) * 0.30 * breathe
-        c = QPointF(w / 2, h / 2)
-        err = self.state == ERROR
-        rim = QColor(255, 90, 90) if err else QColor(90, 230, 255)
-        p.setPen(Qt.PenStyle.NoPen)
-
-        # 1. Outer glow halo
-        glow = QRadialGradient(c, r * 1.28)
-        a = int(110 + 90 * self.energy)
-        glow.setColorAt(0.74, QColor(rim.red(), rim.green(), rim.blue(), a))
-        glow.setColorAt(0.84, QColor(rim.red(), rim.green(), rim.blue(), a // 3))
-        glow.setColorAt(1.0, QColor(0, 0, 0, 0))
-        p.setBrush(glow)
-        p.drawEllipse(c, r * 1.28, r * 1.28)
-
-        # 2. Sphere body: black core, deep-blue mid, cyan near the edge
-        sphere = QPainterPath()
-        sphere.addEllipse(c, r, r)
-        body = QRadialGradient(QPointF(c.x() - r * 0.08, c.y() + r * 0.05), r)
-        body.setColorAt(0.0, QColor(0, 0, 0))
-        body.setColorAt(0.6, QColor(0, 1, 8))
-        body.setColorAt(0.84, QColor(3, 14, 90) if not err else QColor(60, 6, 12))
-        body.setColorAt(0.95, QColor(30, 150, 220) if not err else QColor(160, 40, 40))
-        body.setColorAt(1.0, QColor(150, 245, 255) if not err else QColor(255, 150, 150))
-        p.setBrush(body)
-        p.drawPath(sphere)
-
-        # 3. Inner currents: translucent blue ribbons rotating inside, clipped to sphere
-        p.save()
-        p.setClipPath(sphere)
-        p.translate(c)
-        for i, (speed, hue, alpha, scale) in enumerate(
-            (
-                (0.21, QColor(20, 50, 255), 150, 1.0),
-                (-0.15, QColor(10, 90, 255), 110, 0.9),
-                (0.11, QColor(40, 20, 200), 120, 0.8),
-                (-0.27, QColor(30, 200, 255), 60, 0.95),
-            )
-        ):
-            if err:
-                hue = QColor(200, 30, 50)
-            p.save()
-            p.rotate(math.degrees(self.t * speed) + i * 70)
-            wob = 0.18 * math.sin(self.t * (0.7 + 0.2 * i) + i)
-            ribbon = QPainterPath()
-            ribbon.moveTo(-r * 0.95, r * (0.10 + wob))
-            ribbon.cubicTo(
-                -r * 0.35,
-                -r * (0.95 - wob) * scale,
-                r * 0.35,
-                -r * (0.70 + wob) * scale,
-                r * 0.95,
-                -r * 0.05,
-            )
-            ribbon.cubicTo(
-                r * 0.45,
-                -r * (0.25 - wob) * scale,
-                -r * 0.25,
-                -r * (0.15 + wob) * scale,
-                -r * 0.95,
-                r * (0.10 + wob),
-            )
-            grad = QRadialGradient(QPointF(0, -r * 0.4), r * 1.1)
-            col = QColor(hue)
-            col.setAlpha(int(alpha * (0.75 + 0.35 * self.energy)))
-            grad.setColorAt(0.0, col)
-            grad.setColorAt(1.0, QColor(hue.red(), hue.green(), hue.blue(), 0))
-            p.setBrush(grad)
-            p.drawPath(ribbon)
-            edge = QPen(QColor(90, 160, 255, int(25 + 70 * self.energy)))
-            edge.setWidthF(1.0)
-            p.strokePath(ribbon, edge)
-            p.restore()
-        # dark centre keeps depth
-        core = QRadialGradient(QPointF(0, r * 0.05), r * 0.7)
-        core.setColorAt(0.0, QColor(0, 0, 0, 235))
-        core.setColorAt(1.0, QColor(0, 0, 0, 0))
-        p.setBrush(core)
-        p.drawEllipse(QPointF(0, r * 0.05), r * 0.72, r * 0.72)
-        p.restore()
-
-        # 4. Glass rim: conical gradient ring, slowly rotating
-        cone = QConicalGradient(c, math.degrees(self.t * 0.25))
-        stops = (
-            (0.0, QColor(230, 255, 255)),
-            (0.18, rim),
-            (0.42, QColor(60, 200, 170) if not err else rim),
-            (0.62, rim),
-            (0.82, QColor(170, 250, 255)),
-            (1.0, QColor(230, 255, 255)),
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        w, hh = self.width(), self.height()
+        scale = min(w, hh) * 0.86 / 720
+        p.translate(w / 2 - 360 * scale, hh / 2 - 360 * scale)
+        p.scale(scale, scale)
+        h, env, weights = self.t, self.env, self.weights
+        col = tuple(
+            round(sum(c[i] * wt for c, wt in zip(_ORB_COLORS, weights, strict=True)))
+            for i in range(3)
         )
-        for pos, col in stops:
-            cone.setColorAt(pos, col)
-        pen = QPen(cone, max(2.0, r * 0.045))
-        p.setPen(pen)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawEllipse(c, r * 0.975, r * 0.975)
-        thin = QPen(QColor(200, 255, 255, 70), 1.0)
-        p.setPen(thin)
-        p.drawEllipse(c, r * 0.9, r * 0.9)
+        if col != self._sprite_key:
+            self._sprite_key = col
+            self._sprite = _sprite(col, 0.2)  # type: ignore[arg-type]
+        wl, wt, wsp, we = weights
+        ga = 0.075 + 0.05 * env * wsp
+        glow = QRadialGradient(QPointF(360, 360), 305 + 25 * env * wsp, QPointF(360, 360))
+        glow.setColorAt(0.0, QColor(*col, int(255 * ga)))
+        glow.setColorAt(0.57, QColor(*col, int(255 * ga * 0.47)))
+        glow.setColorAt(1.0, QColor(*col, 0))
+        p.fillRect(0, 0, 720, 720, glow)
 
-        # 4b. Listening: soft rings ripple outward from the rim
-        if self.state == LISTENING:
-            for k in range(3):
-                phase = (self.t * 0.9 + k / 3) % 1.0
-                ring = QPen(QColor(150, 240, 255, int(150 * (1 - phase))), 1.6)
-                p.setPen(ring)
-                p.drawEllipse(c, r * (1.0 + 0.35 * phase), r * (1.0 + 0.35 * phase))
-
-        # 5. Specular highlights: white crescent top-right, cyan sheen bottom
-        p.setPen(Qt.PenStyle.NoPen)
-        p.save()
-        p.setClipPath(sphere)
-        spec = QPainterPath()
-        spec.addEllipse(c, r * 0.96, r * 0.96)
-        cut = QPainterPath()
-        cut.addEllipse(QPointF(c.x() - r * 0.09, c.y() + r * 0.09), r * 0.93, r * 0.93)
-        crescent = spec.subtracted(cut)
-        hl = QRadialGradient(QPointF(c.x() + r * 0.5, c.y() - r * 0.6), r * 0.9)
-        hl.setColorAt(0.0, QColor(255, 255, 255, 240))
-        hl.setColorAt(1.0, QColor(255, 255, 255, 0))
-        p.setBrush(hl)
-        p.drawPath(crescent)
-        sheen = QRadialGradient(QPointF(c.x() - r * 0.15, c.y() + r * 0.95), r * 0.55)
-        sheen.setColorAt(0.0, QColor(rim.red(), rim.green(), rim.blue(), 200))
-        sheen.setColorAt(1.0, QColor(0, 0, 0, 0))
-        p.setBrush(sheen)
-        p.drawEllipse(QPointF(c.x() - r * 0.15, c.y() + r * 0.95), r * 0.6, r * 0.35)
-        p.restore()
+        cos, sin = math.cos(h * 0.23), math.sin(h * 0.23)
+        mic = self.level if self.state == LISTENING else 0.0
+        amp = 8 + mic * 22
+        rings = [(-1.15 + (h - o) * 2.1, (1 - (h - o) / 1.2) ** 2) for o in self.onsets]
+        calm = wl + we
+        sprite, spark = self._sprite, self._spark
+        p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
+        msin, mcos, mexp = math.sin, math.cos, math.exp
+        for x0, y0, z0, a, u, sa in _SPHERE:
+            x = y = z = lit = 0.0
+            rx, rz = x0 * cos + z0 * sin, z0 * cos - x0 * sin
+            if calm > 0.001:
+                r = (
+                    192 + msin(y0 * 11 - h * 3 + a * 0.03) * amp + msin(a * 0.17 + h * 2) * 5
+                ) * calm
+                x += rx * r
+                y += y0 * r
+                z += rz * r  # noqa: E702
+            if wt > 0.001:
+                b, l2 = u * _TAU * 3 + h * 0.57, u * _TAU * 8 - h * 0.48
+                q = 137 + 41 * mcos(l2) + 24 * sa
+                ax, ay, d = q * mcos(b), q * msin(b), 65 * msin(l2) + 17 * y0
+                x += ax * wt
+                y += (d * 0.77 - ay * 0.52) * wt
+                z += (d * 0.52 + ay * 0.77) * wt  # noqa: E702
+            if wsp > 0.001:
+                n = msin(rx * 2.3 + h * 1.4) * msin(y0 * 2.9 - h * 1.1) * mcos(rz * 2.1 + h * 0.8)
+                r = 184 + 16 * env + n * (5 + 19 * env) + msin(y0 * 7 - h * 2.2) * 3 * env
+                for ry, rg in rings:
+                    e = mexp(-(((y0 - ry) / 0.15) ** 2)) * rg
+                    r += 7 * e
+                    lit += e
+                x += rx * r * wsp
+                y += y0 * r * wsp
+                z += rz * r * wsp
+                lit *= wsp  # noqa: E702
+            depth, persp = (z + 240) / 480, 850 / (850 - z)
+            alpha = min(1.0, 0.22 + 0.72 * depth + 0.35 * env * wsp + 1.2 * lit)
+            size = (
+                (0.8 + depth * 1.35)
+                * (0.75 + 0.25 * msin(a + h * 1.6))
+                * (1 + 0.5 * min(1.0, lit))
+                * 9
+            )
+            px, py = 360 + x * persp, 360 + y * persp
+            p.setOpacity(alpha)
+            p.drawPixmap(
+                QRectF(px - size / 2, py - size / 2, size, size), sprite, QRectF(0, 0, 64, 64)
+            )
+            if z > 75 or lit > 0.25:
+                s_a = (max(alpha - 0.5, 0.0) + lit * 0.8) * 0.75
+                if s_a > 0:
+                    s2 = size * 0.2
+                    p.setOpacity(min(1.0, s_a))
+                    p.drawPixmap(
+                        QRectF(px - s2 / 2, py - s2 / 2, s2, s2), spark, QRectF(0, 0, 64, 64)
+                    )
         p.end()
 
 
