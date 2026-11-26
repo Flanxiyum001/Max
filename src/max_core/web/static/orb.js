@@ -262,6 +262,10 @@ function rememberJob(job) {
 }
 async function ask(text, spoken) {
   if (busy || !text.trim()) return;
+  if (rememberedJob()) {
+    show("A previous job may still be running. Reload this tab to reconnect before sending another request.");
+    return;
+  }
   githubAuth.classList.add("hidden");
   sandboxLink.classList.add("hidden");
   pendingConnectService = null;
