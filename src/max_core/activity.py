@@ -38,6 +38,7 @@ _LABELS = {
 }
 
 _SERVICES = {
+    "playwright": "Browser",
     "github": "GitHub",
     "cloudflare": "Cloudflare",
     "railway": "Railway",

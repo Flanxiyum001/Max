@@ -178,3 +178,25 @@ def test_stdio_schema_drift_denies_dispatch(store: TaskStore, tmp_path: Path) ->
     denied = executor.execute(proposal, approval_id=approval_id)
     assert denied.status == "denied"
     assert denied.output == "schema_drifted"
+
+
+def test_stateful_stdio_keeps_one_server_and_preserves_approval_gate(
+    store: TaskStore, tmp_path: Path
+) -> None:
+    server = write_stdio_fixture_server(tmp_path)
+    base = _connection(tmp_path, server, mode="counter")
+    connection = StdioMCPConnection(base.connection_id, base.command, base.args, True, True)
+    executor = make_stdio_executor(store, connection)
+    try:
+        for index in (1, 2):
+            proposal = ToolProposal(f"call-{index}", "mcp.fixture.probe", {})
+            pending = executor.execute(proposal)
+            assert pending.status == "awaiting_approval"
+            assert pending.approval_id is not None
+            executor.trust_service.decide("owner", pending.approval_id, True)
+            done = executor.execute(proposal, approval_id=pending.approval_id)
+            assert done.status == "completed"
+            assert isinstance(done.output, dict)
+            assert json.loads(done.output["result"])["calls"] == index
+    finally:
+        executor.close()

@@ -113,6 +113,7 @@ The trusted local tool registry contains 17 typed allowlisted tools, validated a
 ### Remote MCP connections (`max_core.mcp_desktop`)
 - Add trusted HTTPS MCP servers via the System tab; explicitly discover schemas and enable individual tools. Never inherits ChatGPT connector tokens. Credential values remain outside the profile and the repository.
 - Every invocation is Trust-gated with a single-use approval and live schema-drift checks. See [configuration, GitHub setup and limitations](docs/MCP_DESKTOP.md).
+- An optional, locally installed **Playwright MCP** server adds an isolated headless Chrome browser for page navigation and snapshots. Setup, discovery, and each tool require owner action; see [Playwright setup](docs/MCP_DESKTOP.md#playwright-browser-for-local-max).
 
 ### MAX MCP Connections Hub (Render web orb)
 - Say or type “MAX, connect to Cloudflare”, “connect to Railway”, “connect to Figma”, and other supported apps. Or open **Apps** in the orb to manage connections.
