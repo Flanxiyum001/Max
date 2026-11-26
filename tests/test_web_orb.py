@@ -470,3 +470,21 @@ def test_orb_js_exposes_voice_isolation_dsp_chain(web) -> None:  # type: ignore[
     assert "buildVoiceChain" in js
     assert "createDynamicsCompressor" in js
     assert "createMediaStreamDestination" in js
+
+def test_authenticated_refresh_recovers_active_job_without_replay(web) -> None:  # type: ignore[no-untyped-def]
+    client, session = web
+    login(client)
+    job = client.post("/api/ask", json={"text": "remind me"}).json()["job"]
+    pending = wait(client, job, {"approval"})
+    assert client.get("/api/state").json()["active_job"] == job
+    assert client.get(f"/api/job/{job}").json()["approval"] == pending["approval"]
+    assert session.asked == ["remind me"]
+    assert session.decision is None
+    assert client.post("/api/ask", json={"text": "remind me"}).status_code == 409
+    client.post(f"/api/job/{job}/approve", json={"allow": False})
+    assert wait(client, job, {"done"})["answer"] == "not added"
+    assert client.get("/api/state").json()["active_job"] is None
+    assert session.asked == ["remind me"]
+    client.post("/api/logout")
+    assert client.get("/api/state").json() == {"authed": False}
+    assert client.get(f"/api/job/{job}").status_code == 401
