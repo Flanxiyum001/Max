@@ -166,7 +166,7 @@ async function api(path, body) {
     credentials: "same-origin",
   });
   if (res.status === 401) { showLogin(); throw new Error("login_required"); }
-  if (!res.ok) { let d = "error"; try { d = (await res.json()).detail; } catch {} throw new Error(d); }
+  if (!res.ok) { let d = "error"; try { d = (await res.json()).detail; } catch {} const error = new Error(d); error.status = res.status; throw error; }
   return res;
 }
 const ERRORS = {
@@ -236,9 +236,30 @@ async function boot() {
   if (mcp === "denied") show("App authorization cancelled.", 6000);
   if (outcome || mcp) history.replaceState({}, "", "/");
   saveWake();
+  const job = rememberedJob();
+  if (job && !busy) {
+    stopWake();
+    busy = true; pendingJob = job; setState("thinking"); setActivity("Reconnecting to MAX");
+    await pollJob(job, false);
+  }
 }
 
 // ---------------------------------------------------------------- conversation
+// Keep only the opaque job identifier in this tab; never store prompts, answers,
+// approvals or credentials. A reload reconnects to the existing server job.
+const JOB_STORAGE_KEY = "max.activeJob";
+function rememberedJob() {
+  try {
+    const job = sessionStorage.getItem(JOB_STORAGE_KEY);
+    return /^[a-f0-9]{32}$/.test(job || "") ? job : null;
+  } catch { return null; }
+}
+function rememberJob(job) {
+  try {
+    if (job) sessionStorage.setItem(JOB_STORAGE_KEY, job);
+    else sessionStorage.removeItem(JOB_STORAGE_KEY);
+  } catch {} // Private browsing/storage policies must not break chat.
+}
 async function ask(text, spoken) {
   if (busy || !text.trim()) return;
   githubAuth.classList.add("hidden");
@@ -248,6 +269,16 @@ async function ask(text, spoken) {
   try {
     const { job } = await (await api("/api/ask", { text, voice: spoken })).json();
     pendingJob = job;
+    rememberJob(job);
+    await pollJob(job, spoken);
+  } catch (err) {
+    busy = false; pendingJob = null; setActivity(null); choices.classList.add("hidden");
+    if (err.message !== "login_required") { setState("error", 2500); show(ERRORS[err.message] || ERRORS.model_unavailable); }
+  }
+}
+
+async function pollJob(job, spoken) {
+  try {
     for (;;) {
       await new Promise((r) => setTimeout(r, 700));
       const j = await (await api(`/api/job/${job}`)).json();
@@ -258,7 +289,7 @@ async function ask(text, spoken) {
         setActivity(j.activity || "Thinking");
         continue;
       }
-      busy = false; pendingJob = null; setActivity(null);
+      busy = false; pendingJob = null; rememberJob(null); setActivity(null);
       if (j.status === "done") {
         if (j.sandbox?.run_url) {
           try {
@@ -294,7 +325,15 @@ async function ask(text, spoken) {
     }
   } catch (err) {
     busy = false; pendingJob = null; setActivity(null); choices.classList.add("hidden");
-    if (err.message !== "login_required") { setState("error", 2500); show(ERRORS[err.message] || ERRORS.model_unavailable); }
+    approvalShown = false; activeApprovalId = null;
+    if (err.status === 404) {
+      rememberJob(null);
+      setState("error", 2500);
+      show("This background job is no longer available. MAX may have restarted. Check any external action before retrying.");
+    } else if (err.message !== "login_required") {
+      setState("error", 2500);
+      show("Connection lost. Reload this tab to reconnect to the existing job. Do not repeat the request yet.");
+    }
   }
 }
 
