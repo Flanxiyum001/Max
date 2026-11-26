@@ -448,6 +448,8 @@ def assistant_registry(
     http: HttpFactory | None = None,
     resolve_hosts: bool = True,
     host_tools: bool = True,
+    files_root: Path | None = None,
+    vision: bool = False,
 ) -> ToolRegistry:
     """Built-ins + assistant tools.
 
@@ -580,6 +582,10 @@ def assistant_registry(
                 web.weather,
             ),
         ]
+    if host_tools and not cloud and files_root is not None:
+        from max_core.screen_vision import vision_tools
+
+        tools.extend(vision_tools(files_root, vision=vision, screen=sys.platform == "win32"))
     if host_tools and not cloud and sys.platform == "win32":
         from max_core.desktop_awareness import desktop_tools
 

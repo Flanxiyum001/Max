@@ -28,6 +28,7 @@ from max_core.local_config import load_dotenv_into_mapping
 from max_core.magnitude import PROVIDER_ID as MAGNITUDE_PROVIDER
 from max_core.magnitude import magnitude_settings
 from max_core.persona import persona_message
+from max_core.screen_vision import files_dir
 from max_core.task_routing import TaskKind, classify, route_table
 from max_core.tool_loop import LoopResult, ToolLoop, ToolStep
 from max_core.tools import Tool, ToolError, ToolParam, ToolRegistry, ToolRisk, builtin_registry
@@ -76,6 +77,7 @@ class SessionOptions:
     enable_shell: bool
     enable_web: bool
     host_tools: bool = True
+    files_root: Path | None = None  # MAX_FILES_DIR (default ~/MAX): screenshots, documents
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> SessionOptions:
@@ -86,6 +88,7 @@ class SessionOptions:
             cloud_personal_tools=_yes(env, "MAX_CLOUD_PERSONAL_TOOLS"),
             enable_shell=_yes(env, "MAX_ENABLE_SHELL"),
             enable_web=_yes(env, "MAX_ENABLE_WEB", default=True),
+            files_root=files_dir(env),
         )
 
 
@@ -133,6 +136,8 @@ class AssistantSession:
                 enable_web=options.enable_web,
                 http=tool_http,
                 host_tools=options.host_tools,
+                files_root=options.files_root,
+                vision="vision" in settings.spec.capabilities,
             )
             if mcp_core is not None:
                 self._register_mcp_tools(mcp_core)

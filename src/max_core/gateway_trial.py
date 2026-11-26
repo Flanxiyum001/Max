@@ -80,6 +80,7 @@ class TrialSettings:
                 input_usd_per_million=Decimal(input_rate) if input_rate is not None else None,
                 output_usd_per_million=Decimal(output_rate) if output_rate is not None else None,
                 api_key=env.get("MAX_TRIAL_API_KEY") or None,
+                capabilities=_capabilities(env, destination),
             )
             if spec.context_tokens < 1024:
                 raise TrialConfigurationError("context_too_small_for_trial")
@@ -95,6 +96,16 @@ class TrialSettings:
             if isinstance(exc, TrialConfigurationError):
                 raise
             raise TrialConfigurationError("invalid_trial_configuration") from None
+
+
+def _capabilities(env: Mapping[str, str], destination: InferenceDestination) -> frozenset[str]:
+    """MAX_TRIAL_VISION=yes marks a local model as able to read screenshots."""
+    vision = env.get("MAX_TRIAL_VISION", "no")
+    if vision not in {"yes", "no"}:
+        raise TrialConfigurationError("invalid_vision_toggle")
+    if vision == "yes" and destination != InferenceDestination.VERIFIED_LOCAL:
+        raise TrialConfigurationError("vision_requires_local_model")
+    return frozenset({"text", "vision"} if vision == "yes" else {"text"})
 
 
 async def ask_once(
