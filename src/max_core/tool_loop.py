@@ -23,6 +23,7 @@ from typing import Any, Literal
 
 from max_core.agent_harness import CompletionGateway
 from max_core.gateway.contracts import ChatMessage, GatewayRequest, GatewayResponse
+from max_core.tool_recovery import ToolFailureGuard, safe_error_code
 from max_core.tools import MAX_RESULT_CHARS, ToolError, ToolRegistry, ToolRisk
 
 _CALL = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.DOTALL)
@@ -136,8 +137,9 @@ class ToolLoop:
         try:
             clean = tool.validate(arguments)
         except ToolError as exc:
-            self._record(result, ToolStep(name, "failed", exc.code))
-            return json.dumps({"error": exc.code})
+            code = safe_error_code(exc.code)
+            self._record(result, ToolStep(name, "failed", code))
+            return json.dumps({"error": code})
         self._record(result, ToolStep(name, "proposed"))
         if monotonic() >= deadline_at:
             self._record(result, ToolStep(name, "denied", "turn_deadline_exceeded"))
@@ -172,8 +174,9 @@ class ToolLoop:
                     timeout=min(self._tool_timeout, remaining),
                 )
         except ToolError as exc:
-            self._record(result, ToolStep(name, "failed", exc.code))
-            return json.dumps({"error": exc.code})
+            code = safe_error_code(exc.code)
+            self._record(result, ToolStep(name, "failed", code))
+            return json.dumps({"error": code})
         except TimeoutError:
             self._record(result, ToolStep(name, "failed", "tool_timeout"))
             return json.dumps({"error": "tool_timeout"})
@@ -217,6 +220,7 @@ class ToolLoop:
                 if group:
                     system.append(ChatMessage("system", group))
         scratch: list[ChatMessage] = []
+        failures = ToolFailureGuard()
         for _ in range(self._max_steps):
             if monotonic() >= deadline_at:
                 result.stopped_reason = "step_limit"
@@ -240,7 +244,47 @@ class ToolLoop:
                 return result
             outputs = []
             for name, arguments in calls[: self._max_calls]:
+                if failures.blocked(name, arguments):
+                    result.stopped_reason = "step_limit"
+                    result.error_code = "repeated_tool_failure"
+                    result.answer = (
+                        "I stopped repeating a failing or denied tool call. "
+                        "Review the recorded error and choose a different approach."
+                    )
+                    return result
+                before = len(result.steps)
                 payload = await self._execute(name, arguments, result, deadline_at)
+                failure = json.loads(payload).get("error")
+                tool = self._registry.get(name)
+                if (
+                    failure is not None
+                    and tool is not None
+                    and tool.risk == ToolRisk.EFFECTFUL
+                    and len(result.steps) > before + 1
+                    and result.steps[-1].status == "failed"
+                ):
+                    result.stopped_reason = "step_limit"
+                    result.error_code = "effectful_outcome_uncertain"
+                    result.answer = (
+                        "An approved action reported an error. Its outcome may be uncertain. "
+                        "I stopped without retrying it; verify the external state before retrying."
+                    )
+                    return result
+                if failure is not None:
+                    hint = failures.failed(
+                        name,
+                        arguments,
+                        safe_error_code(failure),
+                        denied=failure in {"owner_denied", "turn_deadline_exceeded"},
+                        can_search=self._registry.get("web.search") is not None,
+                    )
+                    outputs.append(
+                        '<tool_result name="recovery_hint">'
+                        + json.dumps({"hint": hint})
+                        + "</tool_result>"
+                    )
+                else:
+                    failures.success(name, arguments)
                 # Untrusted tool names must not break out of an XML-like attribute.
                 registered = self._registry.get(name)
                 label = registered.name if registered is not None else "unrecognized"

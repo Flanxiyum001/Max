@@ -22,6 +22,7 @@ def respond(identifier, result):
 
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "normal"
+    calls = 0
     schema = {"type": "object", "properties": {}, "additionalProperties": False}
     if mode == "drift":
         schema = {
@@ -57,7 +58,8 @@ def main():
                 "annotations": {"readOnlyHint": True},
             }]})
         elif method == "tools/call":
-            payload = json.dumps({"env": sorted(os.environ)})
+            calls += 1
+            payload = json.dumps({"env": sorted(os.environ), "calls": calls})
             respond(message["id"], {
                 "content": [{"type": "text", "text": payload}],
                 "isError": False,

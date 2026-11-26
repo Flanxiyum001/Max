@@ -312,6 +312,58 @@ def test_harness_detects_repeated_failing_tool_loop() -> None:
     assert "Repeated failing tool call detected" in gw.requests[-1].messages[-1].content
 
 
+def test_harness_stops_exact_failure_replay_and_sanitizes_diagnosis() -> None:
+    executions = 0
+    secret = "private-path-user-token"
+
+    def broken(_args: object) -> str:
+        nonlocal executions
+        executions += 1
+        raise RuntimeError(secret)
+
+    reg = ToolRegistry((Tool("test.read", "Read", ToolRisk.READ_ONLY, (), broken),))
+    proposal = '<tool_call>{"name": "test.read", "arguments": {}}</tool_call>'
+    gw = FakeGateway([proposal] * 5)
+    report = asyncio.run(MaxHarness(gw, reg).run([ChatMessage("user", "read")], _make_request))
+    assert report.error_code == "repeated_tool_failure"
+    # The harness may retry read-only calls once within each of two distinct proposals.
+    assert executions == 4
+    assert len(gw.requests) == 3
+    assert all(secret not in str(request.messages) for request in gw.requests)
+
+
+def test_harness_can_research_public_error_then_report_blocker() -> None:
+    reg = ToolRegistry(
+        (
+            Tool(
+                "test.read",
+                "Read",
+                ToolRisk.READ_ONLY,
+                (),
+                lambda _: (_ for _ in ()).throw(ToolError("network_error")),
+            ),
+            Tool(
+                "web.search",
+                "Public search",
+                ToolRisk.READ_ONLY,
+                (ToolParam("query", str, "Search"),),
+                lambda args: "Official service docs for " + args["query"],
+            ),
+        )
+    )
+    gw = FakeGateway(
+        [
+            '<tool_call>{"name": "test.read", "arguments": {}}</tool_call>',
+            '<tool_call>{"name": "web.search", "arguments": {"query": "network_error tool service documentation"}}</tool_call>',
+            "The service is unavailable; check its status before trying again.",
+        ]
+    )
+    report = asyncio.run(MaxHarness(gw, reg).run([ChatMessage("user", "read")], _make_request))
+    assert report.stopped_reason == "answered"
+    assert [step.tool_name for step in report.steps if step.status == "executed"] == ["web.search"]
+    assert "generic error terms" in gw.requests[1].messages[-1].content
+
+
 def test_compact_scratch_preserves_plan_and_recent_turns() -> None:
     plan = ExecutionPlan()
     plan.update('[{"id": "1", "title": "Fix bug", "status": "in_progress"}]')

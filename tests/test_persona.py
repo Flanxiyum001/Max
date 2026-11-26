@@ -35,6 +35,9 @@ def test_persona_is_original_and_evidence_cautious_in_all_modes() -> None:
         assert "Never claim a tool was used" in message.content
         assert "do not grant computer access" in message.content
         assert "consequential actions" in message.content
+        assert "Good morning" not in message.content  # Greetings depend on trusted runtime context.
+        assert "Use short acknowledgements" in message.content
+        assert "Never repeat greetings mid-session" in message.content
         assert len(message.content) < 2500
         for forbidden in ("JARVIS", "FRIDAY", "ULTRON", "Tony Stark", "Hello, sir"):
             assert forbidden not in message.content

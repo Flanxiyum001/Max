@@ -594,7 +594,7 @@ def assistant_registry(
 
         tools.extend(desktop_tools())
         tools.extend(pc_control_tools())
-    if host_tools and tv_env:
+    if host_tools and not cloud and tv_env:
         from max_core.tv_control import make_tv, tv_tools
 
         tv = make_tv(tv_env)

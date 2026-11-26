@@ -12,11 +12,13 @@ transport used by discovery.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
 import threading
 from collections.abc import Callable, Sequence
+from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Literal
@@ -99,6 +101,72 @@ class _LiveEntry:
     observation: ObservedTool
     policy: ReviewedToolPolicy
     dotted_name: str
+
+
+class _PersistentStdioSession:
+    """Keep one stdio server alive on its owning event-loop thread.
+
+    This is opt-in for stateful servers such as Playwright. The subprocess is
+    created only after an approved call, never when tools are discovered.
+    """
+
+    def __init__(self, connection: StdioMCPConnection) -> None:
+        self.connection = connection
+        self.loop: asyncio.AbstractEventLoop | None = None
+        self.session: ClientSession | None = None
+        self._stop: asyncio.Event | None = None
+        self._ready = threading.Event()
+        self._error: Exception | None = None
+        self._lock = threading.Lock()
+        self._thread = threading.Thread(target=self._serve, name="max-mcp-stdio", daemon=True)
+        self._thread.start()
+
+    def _serve(self) -> None:
+        try:
+            asyncio.run(self._main())
+        except Exception:
+            self._error = McpExecuteError("mcp_call_failed")
+        finally:
+            self._ready.set()
+
+    async def _main(self) -> None:
+        self.loop = asyncio.get_running_loop()
+        self._stop = asyncio.Event()
+        async with stdio_client(stdio_parameters(self.connection)) as (reader, writer):
+            async with ClientSession(
+                reader, writer, read_timeout_seconds=timedelta(seconds=10)
+            ) as session:
+                await session.initialize()
+                self.session = session
+                self._ready.set()
+                await self._stop.wait()
+
+    def dispatch(self, action: Callable[[ClientSession], Any]) -> str:
+        with self._lock:
+            if not self._ready.wait(_CALL_TIMEOUT_SECONDS):
+                self.close()
+                raise McpExecuteError("mcp_call_timeout")
+            if self._error is not None or self.loop is None or self.session is None:
+                raise McpExecuteError("mcp_call_failed")
+            try:
+                future = asyncio.run_coroutine_threadsafe(action(self.session), self.loop)
+                return str(future.result(timeout=_CALL_TIMEOUT_SECONDS))
+            except FutureTimeout:
+                future.cancel()
+                self.close()
+                raise McpExecuteError("mcp_call_timeout") from None
+            except McpExecuteError:
+                self.close()
+                raise
+            except Exception:
+                self.close()
+                raise McpExecuteError("mcp_call_failed") from None
+
+    def close(self) -> None:
+        if self.loop is not None and self._stop is not None and self._thread.is_alive():
+            self.loop.call_soon_threadsafe(self._stop.set)
+            if threading.current_thread() is not self._thread:
+                self._thread.join(timeout=2)
 
 
 def _build_live_entries(
@@ -257,6 +325,8 @@ class MCPToolExecutor:
             tuple(_live_policy(entry) for entry in self._entries.values())
         )
         self._transport = transport
+        self._persistent_stdio: dict[str, _PersistentStdioSession] = {}
+        self._persistent_lock = threading.Lock()
         self._owner_id = owner_id
         self._actor_id = actor_id
         self._session_id = session_id
@@ -581,6 +651,8 @@ class MCPToolExecutor:
 
     def _dispatch_remote(self, entry: _LiveEntry, arguments: dict[str, object]) -> str:
         try:
+            if isinstance(entry.connection, StdioMCPConnection) and entry.connection.persistent:
+                return self._dispatch_persistent(entry, arguments)
             return _run_in_fresh_thread(
                 anyio.run,
                 self._dispatch_remote_async,
@@ -613,6 +685,35 @@ class MCPToolExecutor:
         if not isinstance(entry.connection, MCPConnection):
             raise McpExecuteError("invalid_mcp_connection", status="denied")
         return await self._dispatch_https(entry.connection, entry, arguments)
+
+    def _dispatch_persistent(self, entry: _LiveEntry, arguments: dict[str, object]) -> str:
+        connection = entry.connection
+        assert isinstance(connection, StdioMCPConnection)
+        with self._persistent_lock:
+            bridge = self._persistent_stdio.get(connection.connection_id)
+            if bridge is None:
+                bridge = _PersistentStdioSession(connection)
+                self._persistent_stdio[connection.connection_id] = bridge
+
+        async def action(session: ClientSession) -> str:
+            return await self._dispatch_over_session_initialized(session, entry, arguments)
+
+        return bridge.dispatch(action)
+
+    async def _dispatch_over_session_initialized(
+        self, session: ClientSession, entry: _LiveEntry, arguments: dict[str, object]
+    ) -> str:
+        await self._assert_no_schema_drift(session, entry)
+        result = await session.call_tool(entry.observation.name, arguments=arguments)
+        return _extract_tool_output(result)
+
+    def close(self) -> None:
+        """Stop stateful child servers on revoke or desktop shutdown."""
+        with self._persistent_lock:
+            bridges = list(self._persistent_stdio.values())
+            self._persistent_stdio.clear()
+        for bridge in bridges:
+            bridge.close()
 
     async def _dispatch_https(
         self, connection: MCPConnection, entry: _LiveEntry, arguments: dict[str, object]

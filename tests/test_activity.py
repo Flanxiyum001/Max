@@ -13,6 +13,7 @@ def test_mcp_tools_name_the_service_and_action() -> None:
     assert describe("mcp.github.list_pull_requests") == "GitHub: list pull requests"
     assert describe("mcp.notion.search") == "Notion: search"
     assert describe("mcp.acme.do_thing") == "Acme: do thing"
+    assert describe("mcp.playwright.browser_navigate") == "Browser: browser navigate"
 
 
 def test_unknown_tools_fall_back_safely() -> None:

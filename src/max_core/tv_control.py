@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+import shlex
 import shutil
 import subprocess
 from collections.abc import Callable, Mapping
@@ -60,18 +61,20 @@ KEYS: dict[str, tuple[str, str]] = {
 
 Runner = Callable[[list[str]], str]
 _TITLE = re.compile(r"[\w .,:'!?&()-]{1,120}", re.UNICODE)
+_LAN = tuple(ipaddress.IPv4Network(x) for x in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"))
+_TV_TOOLS = frozenset({"tv.play", "tv.open_app", "tv.press"})
 
 
 def tv_auto_approved(name: str, env: Mapping[str, str]) -> bool:
-    return env.get("MAX_TV_CONTROL", "").strip().lower() == "auto" and name.startswith("tv.")
+    return env.get("MAX_TV_CONTROL", "").strip().lower() == "auto" and name in _TV_TOOLS
 
 
 def _lan_host(host: str) -> str:
     try:
-        ip = ipaddress.ip_address(host.strip())
+        ip = ipaddress.IPv4Address(host.strip())
     except ValueError:
         raise ToolError("tv_host_not_ip") from None
-    if not ip.is_private or ip.is_loopback:
+    if not any(ip in network for network in _LAN):
         raise ToolError("tv_host_not_lan")
     return str(ip)
 
@@ -112,12 +115,13 @@ class AndroidTV:
         out = self._run([self.adb, "connect", self.target])
         if "unable" in out.lower() or "failed" in out.lower():
             raise ToolError("tv_unreachable")
-        return self._run([self.adb, "-s", self.target, "shell", *args])
+        # ADB joins arguments into a remote shell command. Quote each token for that shell.
+        return self._run([self.adb, "-s", self.target, "shell", shlex.join(args)])
 
     def launch(self, app: str) -> str:
         name, (pkg, _) = _app(app)
         self._shell("monkey", "-p", pkg, "-c", "android.intent.category.LAUNCHER", "1")
-        return f"opened {name} on the TV"
+        return f"sent request to open {name} on the TV; launch not confirmed"
 
     def play(self, app: str, title: str) -> str:
         name, (pkg, _) = _app(app)
@@ -133,7 +137,7 @@ class AndroidTV:
         else:
             self._shell("am", "start", "-a", "android.search.action.GLOBAL_SEARCH",
                         "--es", "query", title)  # fmt: skip
-        return f"searching {name} on the TV for '{title}' - use tv.press ok to start it"
+        return f"sent search request for '{title}' on the TV; check the screen before pressing OK"
 
     def press(self, key: str, times: int) -> str:
         code = KEYS[key][0]
@@ -147,7 +151,7 @@ class RokuTV:
 
     def __init__(self, host: str, http: Callable[[], httpx.Client] | None = None) -> None:
         self.base = f"http://{_lan_host(host)}:8060"
-        self._http = http or (lambda: httpx.Client(timeout=5))
+        self._http = http or (lambda: httpx.Client(timeout=5, trust_env=False))
 
     def _post(self, path: str) -> None:
         try:
@@ -159,13 +163,13 @@ class RokuTV:
     def launch(self, app: str) -> str:
         name, (_, channel) = _app(app)
         self._post(f"/launch/{channel}")
-        return f"opened {name} on the TV"
+        return f"sent request to open {name} on the TV; launch not confirmed"
 
     def play(self, app: str, title: str) -> str:
         name, (_, channel) = _app(app)
         title = _title(title)
         self._post(f"/search/browse?keyword={quote(title)}&provider-id={channel}&launch=true")
-        return f"playing '{title}' on {name} on the TV"
+        return f"sent search/launch request for '{title}' on {name}; playback not confirmed"
 
     def press(self, key: str, times: int) -> str:
         for _ in range(times):
@@ -200,7 +204,7 @@ def tv_tools(tv: AndroidTV | RokuTV) -> tuple[Tool, ...]:
     return (
         Tool(
             "tv.play",
-            f"Play a show/movie/video on the living-room TV. Apps: {apps}.",
+            f"Request a search/launch on the living-room TV; playback is unverified. Apps: {apps}.",
             ToolRisk.EFFECTFUL,
             (
                 ToolParam("app", str, "streaming app, e.g. netflix", max_length=20),

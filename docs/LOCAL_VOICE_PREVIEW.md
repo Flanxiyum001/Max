@@ -29,12 +29,51 @@ The model packages are optional and separately installed. Qwen3-TTS and
 Faster Whisper are Apache-2.0 and MIT respectively; review upstream model
 and dependency licenses before distribution.
 
+## Use Qwen only for speech output
+
+To preserve your existing chat and microphone setup, run
+`start-max-local.cmd --tts-only` instead. It starts the orb without checking
+Ollama or downloading any model weights. Initial setup can still install the
+optional Python dependencies in the existing isolated environment.
+
+1. Place the official **Qwen3-TTS-12Hz-1.7B-Base** checkpoint under
+   `%USERPROFILE%\Models\Qwen3-TTS-12Hz-1.7B-Base`, or set
+   `MAX_QWEN_MODEL_DIR` to the folder containing `config.json`.
+2. If you previously generated the original MAX voice, it is reused. Otherwise,
+   use a local recording you own or have permission to use and its exact text:
+   set `MAX_QWEN_REFERENCE_WAV` to the WAV file and
+   `MAX_QWEN_REFERENCE_TEXT_FILE` to its UTF-8 transcript. If you already
+   have local VoiceDesign weights, you can generate the original with
+   `python -m max_core.voice.local_runtime prepare-reference <folder>` from
+   the local-voice environment instead.
+3. Run the launcher from the same shell so it sees the paths. It reports if the
+   required files are missing. No chat routing or remote microphone consent is
+   changed. The existing desktop voice handles speech when Qwen is unavailable
+   or fails before audio is ready. Use `start-max.cmd` for the standard setup.
+
+The first utterance loads the model; subsequent sentences reuse one local
+worker. Interrupting removes that worker and stops playback or synthesis
+without waiting on the UI thread. The next utterance starts fresh. The worker
+is also removed when the microphone is revoked or the orb closes. Speech input
+and synthesized WAV audio are not written to disk by the worker.
+
+## Measure on your Windows PC
+
+After setup, run this in PowerShell from the checkout:
+
+    .\.venv-local-voice\Scripts\python.exe -m max_core.voice.local_runtime benchmark-tts
+
+This reports one cold and three warm audio-ready timings using a fixed phrase
+and the generated original voice. It excludes speaker-device latency. To check
+playback, use the orb, press Esc during synthesis and during playback, then
+type `continue`. No model benchmarks or physical audio verification are
+claimed from the software-only checks.
+
 ## Limitations / acceptance
 
 Windows hardware acceptance is pending. Verify first launch, restart without
 re-downloading, microphone capture, local conversation, voice consistency,
-and interruption during synthesis and playback. The preview starts one
-CPU synthesis child per reply; response latency may be high and streaming,
-wake word, persistent TTS workers, gaming profiles, and spoken execution
-progress are not implemented by this milestone. No claim of real-time voice
-or actor likeness. The default launcher remains the rollback path.
+and interruption during synthesis and playback. Inference is CPU-first and
+prepares each full sentence before playback; it is not streaming TTS.
+No claim of real-time voice or actor likeness. The default launcher remains
+the rollback path.

@@ -37,8 +37,17 @@ services:
         sync: false
       - key: MAX_TRIAL_API_KEY
         sync: false
+      # Tools + persona + chat history need more than 8k (prompt size is counted in bytes).
       - key: MAX_TRIAL_CONTEXT_TOKENS
-        value: "8192"
+        value: "32768"
+      # Memory, reminders and notes on the web orb (sent to the cloud model).
+      - key: MAX_CLOUD_PERSONAL_TOOLS
+        value: "yes"
+      # Keep memory/jobs/contacts across restarts in the private Max-memory repo.
+      - key: MAX_MEMORY_REPO
+        value: Flanxiyum001/Max-memory
+      - key: MAX_MEMORY_GITHUB_TOKEN
+        sync: false
       - key: MAX_TRIAL_MAX_COST_USD
         value: "0"
       - key: MAX_TRIAL_INPUT_USD_PER_MILLION

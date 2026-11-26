@@ -325,6 +325,17 @@ def create_app(
     sandbox = sandbox_runner if sandbox_runner is not None else GitHubPRSandbox(hub.github)
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    try:
+        from max_core.assistant_session import default_data_dir
+        from max_core.memory_repo import MemoryRepoSync
+
+        memory_sync = MemoryRepoSync.from_env(env, default_data_dir(env))
+        if memory_sync is not None:
+            log.info("memory repo: restored %d files", memory_sync.pull())
+            memory_sync.start()
+            app.router.on_shutdown.append(memory_sync.stop)
+    except Exception as exc:
+        log.warning("memory repo unavailable: %s", type(exc).__name__)
     login_limit = RateLimiter(8, 600)
     stt_limit = RateLimiter(30, 60)
     ask_limit = RateLimiter(30, 60)
@@ -426,6 +437,10 @@ def create_app(
             "error": state["error"],
             "tools": sorted(t.name for t in sess.registry) if sess is not None else [],
             "stt_ready": stt is not None,
+            "active_job": next(
+                (j.id for j in list(jobs.values()) if j.status in {"running", "approval"}),
+                None,
+            ),
             "github": github.status(),
             "connections": hub.status(),
         }
@@ -701,6 +716,7 @@ def create_app(
                     job.error, job.status = "model_unavailable", "failed"
                     job.detail = getattr(result, "error_code", None)
                 else:
+                    job.detail = getattr(result, "error_code", None)
                     job.answer, job.status = result.answer.strip() or "…", "done"
             except Exception as exc:
                 log.warning("turn failed: %s", type(exc).__name__)
@@ -825,6 +841,14 @@ def create_app(
         kind = "audio/wav" if audio[:4] == b"RIFF" else "audio/mpeg"
         return Response(audio, media_type=kind)
 
+    try:
+        from max_core.assistant_session import default_data_dir
+        from max_core.comms import CommsStore
+        from max_core.comms.webhooks import comms_router
+
+        app.include_router(comms_router(CommsStore(default_data_dir(env) / "comms.sqlite3"), env))
+    except Exception:
+        logging.getLogger(__name__).warning("comms webhooks unavailable", exc_info=True)
     return app
 
 
@@ -842,6 +866,7 @@ def _default_session(
         enable_shell=False,
         enable_web=options.enable_web,
         host_tools=False,
+        comms_env=options.comms_env,  # email / WhatsApp Cloud API work from the web
     )
     return AssistantSession(TrialSettings.from_env(env), options, github_connector=github_connector)
 

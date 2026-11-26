@@ -1,3 +1,5 @@
+import shlex
+
 import httpx
 import pytest
 
@@ -12,8 +14,8 @@ def test_android_netflix_play_sends_deep_link():
     out = tv.play("Netflix", "Stranger Things")
     assert "Stranger Things" in out
     assert calls[0] == ["adb", "connect", "192.168.1.50:5555"]
-    assert "https://www.netflix.com/search?q=Stranger%20Things" in calls[1]
-    assert "com.netflix.ninja" in calls[1]
+    assert "https://www.netflix.com/search?q=Stranger%20Things" in shlex.split(calls[1][-1])
+    assert "com.netflix.ninja" in shlex.split(calls[1][-1])
 
 
 def test_roku_play_uses_ecp_search():
@@ -30,7 +32,9 @@ def test_roku_play_uses_ecp_search():
     assert seen[1:] == ["http://10.0.0.7:8060/keypress/VolumeUp"] * 2
 
 
-@pytest.mark.parametrize("host", ["8.8.8.8", "127.0.0.1", "tv.example.com"])
+@pytest.mark.parametrize(
+    "host", ["8.8.8.8", "127.0.0.1", "tv.example.com", "169.254.169.254", "0.0.0.0", "::1"]
+)
 def test_rejects_non_lan_hosts(host):
     with pytest.raises(ToolError):
         AndroidTV(host, run=lambda c: "")
@@ -52,3 +56,20 @@ def test_registry_and_auto_approval(tmp_path):
     assert not tv_auto_approved("tv.play", env)
     assert tv_auto_approved("tv.play", {**env, "MAX_TV_CONTROL": "auto"})
     assert not tv_auto_approved("shell.run", {"MAX_TV_CONTROL": "auto"})
+    assert not tv_auto_approved("tv.unreviewed", {**env, "MAX_TV_CONTROL": "auto"})
+    for options in ({"host_tools": False}, {"cloud": True}):
+        names = {
+            t.name
+            for t in assistant_registry(
+                data_dir=tmp_path, enable_web=False, tv_env=env, **options
+            )
+        }
+        assert not any(name.startswith("tv.") for name in names)
+
+
+def test_remote_shell_preserves_title_as_single_argument():
+    calls: list[list[str]] = []
+    tv = AndroidTV("192.168.1.50", run=lambda c: calls.append(c) or "connected", adb="adb")
+    title = "Rock & Roll (Live)"
+    tv.play("prime video", title)
+    assert shlex.split(calls[-1][-1])[-1] == title

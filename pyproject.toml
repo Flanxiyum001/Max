@@ -34,9 +34,16 @@ web = [
     "edge-tts>=7,<8",
     "piper-tts>=1.5,<2",
 ]
+calls = [
+    "soundcard>=0.4,<1",
+    "numpy>=1.26,<3",
+    "faster-whisper==1.2.1",
+    "piper-tts>=1.5,<2",
+]
 desktop = [
     "PySide6>=6.8,<7",
 ]
+tv = ["androidtvremote2==0.3.3"]
 local-voice = [
     "faster-whisper==1.2.1",
     "qwen-tts==0.1.1",

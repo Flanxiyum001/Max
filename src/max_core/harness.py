@@ -33,6 +33,7 @@ from max_core.tool_loop import (
     parse_tool_calls,
     tool_system_prompt,
 )
+from max_core.tool_recovery import ToolFailureGuard, safe_error_code
 from max_core.tools import (
     MAX_RESULT_CHARS,
     Tool,
@@ -46,7 +47,8 @@ from max_core.tools import (
 _TOOL_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]{0,99}")
 _CODE_RE = re.compile(r"[a-z][a-z0-9_.-]{0,63}")
 _MAX_MESSAGE = 30_000
-_RETRYABLE_CODES = frozenset({"tool_timeout", "tool_failed"})
+# A timed-out thread may still be running; repeating it can overlap executions.
+_RETRYABLE_CODES = frozenset({"tool_failed"})
 
 PlanStatus = Literal["pending", "in_progress", "completed", "failed", "skipped"]
 
@@ -393,7 +395,7 @@ class MaxHarness:
                 self._pending_images = output.images[-1:]
             return str(output)[:MAX_RESULT_CHARS], None
         except ToolError as exc:
-            return None, exc.code
+            return None, safe_error_code(exc.code)
         except TimeoutError:
             return None, "tool_timeout"
         except Exception:
@@ -415,11 +417,12 @@ class MaxHarness:
         try:
             clean = tool.validate(arguments)
         except ToolError as exc:
-            self._record_step(report, ToolStep(name, "failed", exc.code))
+            code = safe_error_code(exc.code)
+            self._record_step(report, ToolStep(name, "failed", code))
             self._emit(
-                report, HarnessPhase.OBSERVE, "tool.failed", tool_name=name, detail_code=exc.code
+                report, HarnessPhase.OBSERVE, "tool.failed", tool_name=name, detail_code=code
             )
-            return json.dumps({"error": exc.code})
+            return json.dumps({"error": code})
 
         self._record_step(report, ToolStep(name, "proposed"))
         self._emit(report, HarnessPhase.EXECUTE, "tool.proposed", tool_name=name)
@@ -639,7 +642,7 @@ class MaxHarness:
         self._emit(report, HarnessPhase.PLAN, "plan.ready")
 
         total_tool_calls = 0
-        last_failed_sig: str | None = None
+        failures = ToolFailureGuard()
         for _ in range(self._budget.max_steps):
             if monotonic() >= deadline_at:
                 report.stopped_reason = "step_limit"
@@ -723,24 +726,65 @@ class MaxHarness:
                         f'<tool_result name="{name}">{{"error": "plan_and_self_prompt_required", "hint": "Call plan.update and prompt.set before executing effectful tools."}}</tool_result>'
                     )
                     continue
-                sig = f"{name}:{json.dumps(arguments, sort_keys=True, default=str)}"
+                if failures.blocked(name, arguments):
+                    report.stopped_reason = "tool_budget"
+                    report.error_code = "repeated_tool_failure"
+                    report.answer = (
+                        "I stopped repeating a failing or denied tool call. "
+                        "Review the recorded error and choose a different approach."
+                    )
+                    self._emit(report, HarnessPhase.RECOVER, "loop.blocked")
+                    return report
+                before = len(report.steps)
                 payload = await self._execute_tool(name, arguments, report, deadline_at)
-                if name.startswith("web.") and '"error":' not in payload:
+                failure = json.loads(payload).get("error")
+                if (
+                    failure is not None
+                    and tool_obj is not None
+                    and tool_obj.risk == ToolRisk.EFFECTFUL
+                    and len(report.steps) > before + 1
+                    and report.steps[-1].status == "failed"
+                ):
+                    report.stopped_reason = "tool_budget"
+                    report.error_code = "effectful_outcome_uncertain"
+                    report.answer = (
+                        "An approved action reported an error. Its outcome may be uncertain. "
+                        "I stopped without retrying it; verify the external state before retrying."
+                    )
+                    self._emit(
+                        report,
+                        HarnessPhase.RECOVER,
+                        "tool.outcome_uncertain",
+                        tool_name=name,
+                        detail_code=safe_error_code(failure),
+                    )
+                    return report
+                if name.startswith("web.") and failure is None:
                     self._emit(report, HarnessPhase.RESEARCH, "web.researched", tool_name=name)
-                if '"error":' in payload:
-                    if sig == last_failed_sig:
+                if failure is not None:
+                    code = safe_error_code(failure)
+                    hint = failures.failed(
+                        name,
+                        arguments,
+                        code,
+                        denied=code in {"owner_denied", "turn_deadline_exceeded"},
+                        can_search=run_registry.get("web.search") is not None,
+                    )
+                    if failures.blocked(name, arguments):
                         self._emit(
                             report,
                             HarnessPhase.RECOVER,
                             "loop.detected",
                             tool_name=name[:100] if name != "<malformed>" else None,
                         )
-                        outputs.append(
-                            '<tool_result name="harness_hint">{"hint": "Repeated failing tool call detected. Inspect the error or read the relevant file before trying a different approach."}</tool_result>'
-                        )
-                    last_failed_sig = sig
+                        hint = "Repeated failing tool call detected. " + hint
+                    outputs.append(
+                        '<tool_result name="recovery_hint">'
+                        + json.dumps({"hint": hint})
+                        + "</tool_result>"
+                    )
                 else:
-                    last_failed_sig = None
+                    failures.success(name, arguments)
                 registered = run_registry.get(name)
                 label = registered.name if registered is not None else "unrecognized"
                 outputs.append(f'<tool_result name="{label}">{payload}</tool_result>')

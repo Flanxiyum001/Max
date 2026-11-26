@@ -34,3 +34,46 @@ jobs:
           python -m max_core.native_desktop --dashboard --smoke-test
       - name: Native backend and window tests
         run: python -m pytest -q tests/test_native_desktop_backend.py tests/test_native_desktop_qt.py tests/test_native_orb.py tests/e2e
+
+  windows-launcher:
+    runs-on: windows-latest
+    timeout-minutes: 18
+    env:
+      QT_QPA_PLATFORM: offscreen
+      MAX_NO_PAUSE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Cold start through the real Windows launcher
+        shell: cmd
+        run: call start-max.cmd --smoke-test
+      - name: Warm start without reinstalling
+        shell: pwsh
+        run: |
+          $stamp = Get-Item .venv\.max-desktop-installed
+          $previous = $stamp.LastWriteTimeUtc
+          cmd /d /c "call start-max.cmd --dashboard --smoke-test"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ((Get-Item $stamp.FullName).LastWriteTimeUtc -ne $previous) {
+            throw 'A warm launch unexpectedly reinstalled dependencies.'
+          }
+      - name: Install and launch the Windows Python package outside the checkout
+        shell: pwsh
+        run: |
+          $wheelhouse = Join-Path $env:RUNNER_TEMP 'max-wheelhouse'
+          python -m pip wheel --no-deps --wheel-dir $wheelhouse .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $target = Join-Path $env:RUNNER_TEMP 'max-installed'
+          python -m venv $target
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $python = Join-Path $target 'Scripts\python.exe'
+          $wheel = Get-ChildItem $wheelhouse -Filter 'max_personal_core-*.whl' | Select-Object -First 1
+          if (-not $wheel) { throw 'MAX wheel not created.' }
+          & $python -m pip install "$($wheel.FullName)[desktop]"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Set-Location $env:RUNNER_TEMP
+          & $python -m max_core.native_desktop --smoke-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
