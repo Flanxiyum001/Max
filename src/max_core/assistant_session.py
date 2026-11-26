@@ -12,7 +12,7 @@ import datetime as _dt
 import logging
 import os
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -98,8 +98,8 @@ class SessionOptions:
             comms_env={
                 k: v
                 for k, v in env.items()
-                if k.startswith(("MAX_EMAIL_", "MAX_WHATSAPP_", "MAX_EXOTEL_"))
-                or k in ("MAX_OWNER_PHONE", "MAX_PUBLIC_URL")
+                if k.startswith(("MAX_EMAIL_", "MAX_WHATSAPP_", "MAX_EXOTEL_", "MAX_CALL_"))
+                or k in ("MAX_OWNER_PHONE", "MAX_PUBLIC_URL", "MAX_OWNER_NAME", "MAX_PIPER_VOICE")
             },
         )
 
@@ -163,12 +163,25 @@ class AssistantSession:
 
                 comms_env = options.comms_env or {}
                 # Only when a channel is configured: tool text costs model context.
-                if any(
+                calls_on = _yes(comms_env, "MAX_WHATSAPP_CALLS") and options.host_tools
+                if calls_on or any(
                     comms_env.get(k)
                     for k in ("MAX_EMAIL_USERNAME", "MAX_WHATSAPP_TOKEN", "MAX_EXOTEL_SID")
                 ):
                     comms_store = CommsStore(options.data_dir / "comms.sqlite3")
-                    for tool in comms_tools(comms_store, comms_env):
+                    manager = None
+                    if calls_on:
+                        from max_core.comms.voice_call import whatsapp_call_manager
+
+                        def store_summary(record: Any, store: Any = comms_store) -> None:
+                            store.receive(
+                                "call", record.contact, f"Call summary: {record.summary}", None
+                            )
+
+                        manager = whatsapp_call_manager(
+                            comms_env, options.data_dir, self.complete, store_summary
+                        )
+                    for tool in comms_tools(comms_store, comms_env, calls=manager):
                         self.registry.register(tool)
             except Exception:
                 logging.getLogger(__name__).warning("comms tools unavailable", exc_info=True)
@@ -359,6 +372,14 @@ class AssistantSession:
                     )
                 )
         return messages
+
+    def complete(self, messages: Sequence[tuple[str, str]]) -> str:
+        """Plain model reply, no tools and no chat history (used on voice calls)."""
+        chat = tuple(ChatMessage(role, text) for role, text in messages)  # type: ignore[arg-type]
+        spec = self.settings.spec
+        gateway = Gateway((spec,), HTTPAdapter(self._client))
+        future = asyncio.run_coroutine_threadsafe(gateway.complete(self._make(chat)), self._loop)
+        return future.result(timeout=60).content
 
     def ask(
         self,

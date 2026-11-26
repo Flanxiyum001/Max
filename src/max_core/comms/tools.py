@@ -16,6 +16,7 @@ from max_core.comms.providers import (
     WhatsAppConfig,
 )
 from max_core.comms.store import CommsStore
+from max_core.comms.voice_call import CallManager
 from max_core.tools import Tool, ToolError, ToolParam, ToolRisk
 
 UNTRUSTED = (
@@ -37,6 +38,7 @@ def comms_tools(
     email: EmailChannel | None = None,
     whatsapp: WhatsAppChannel | None = None,
     phone: PhoneChannel | None = None,
+    calls: CallManager | None = None,
 ) -> list[Tool]:
     if email is None and (cfg := EmailConfig.from_env(env)) is not None:
         email = EmailChannel(cfg)
@@ -199,4 +201,50 @@ def comms_tools(
                 call,
             )
         )
+    if calls is not None:
+        manager = calls
+
+        def whatsapp_call(args: Mapping[str, Any]) -> str:
+            contact = store.contact(args["to"])
+            if not contact.phone:
+                raise ToolError("contact_has_no_phone")
+            manager.start(contact.name, contact.phone, args["message"])
+            return (
+                f"Calling {contact.name} on WhatsApp now. MAX will talk with them and "
+                "put a summary in the inbox when the call ends."
+            )
+
+        def call_status(_: Mapping[str, Any]) -> str:
+            if manager.current is not None:
+                return f"On a call with {manager.current.contact}."
+            if manager.last is None:
+                return "No calls yet."
+            last = manager.last
+            return f"Last call to {last.contact}: {last.state}. {last.summary}"
+
+        tools += [
+            Tool(
+                "comms.whatsapp_call",
+                "Voice-call a saved contact on WhatsApp (free) and have MAX speak with them, "
+                "e.g. to say the owner is running late, and chat about it.",
+                ToolRisk.EFFECTFUL,
+                (
+                    ToolParam("to", str, "saved contact name", max_length=60),
+                    ToolParam(
+                        "message",
+                        str,
+                        "what MAX should tell them / goal of the call",
+                        max_length=1_000,
+                    ),
+                ),
+                whatsapp_call,
+            ),
+            Tool(
+                "comms.call_status",
+                "Status and summary of the current or last call.",
+                ToolRisk.READ_ONLY,
+                (),
+                call_status,
+            ),
+        ]
     return tools
