@@ -37,6 +37,7 @@ web = [
 desktop = [
     "PySide6>=6.8,<7",
 ]
+tv = ["androidtvremote2==0.3.3"]
 local-voice = [
     "faster-whisper==1.2.1",
     "qwen-tts==0.1.1",

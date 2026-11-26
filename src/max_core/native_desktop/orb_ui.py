@@ -50,11 +50,13 @@ from PySide6.QtWidgets import (
 )
 
 from max_core.activity import activity_line
+from max_core.assistant_session import default_data_dir, merged_environment
 from max_core.native_desktop.backend import (
     LocalModelReply,
     NativeDesktopCore,
     NativeDesktopError,
 )
+from max_core.tv_remote import parse_command, run_command
 from max_core.voice.turn_resume import SpeechCursor, is_resume_request
 
 IDLE, THINKING, SPEAKING, ERROR = "idle", "thinking", "speaking", "error"
@@ -260,12 +262,18 @@ class _Ask(QRunnable):
     """Runs one assistant turn (model + tools) off the GUI thread."""
 
     def __init__(
-        self, window: OrbWindow, prompt: str, transcribe: Any = None, can_resume: bool = False
+        self,
+        window: OrbWindow,
+        prompt: str,
+        transcribe: Any = None,
+        can_resume: bool = False,
+        background_tv: bool = False,
     ) -> None:
         super().__init__()
         self.window, self.prompt, self.signals = window, prompt, _Signals()
         self.transcribe = transcribe  # voice turn: callable returning text or None
         self.can_resume = can_resume
+        self.background_tv = background_tv
 
     def _approve(self, name: str, arguments: dict[str, Any]) -> bool:
         request = _Approval()
@@ -281,10 +289,22 @@ class _Ask(QRunnable):
                     self.signals.failed.emit("voice:" + (self.window.voice_error() or "no_speech"))
                     return
                 self.prompt = heard
-                self.signals.heard.emit(heard)
-                if self.can_resume and is_resume_request(heard):
+                if not self.background_tv:
+                    self.signals.heard.emit(heard)
+                if self.can_resume and not self.background_tv and is_resume_request(heard):
                     self.signals.resume.emit()
                     return
+            tv_command = parse_command(self.prompt)
+            if tv_command is not None:
+                self.signals.step.emit("android_tv", "running")
+                answer = run_command(default_data_dir(merged_environment()) / "tv", tv_command)
+                self.signals.done.emit(LocalModelReply("tv", answer))
+                return
+            if self.background_tv:
+                self.signals.done.emit(
+                    LocalModelReply("tv", "That hotkey only accepts TV commands.")
+                )
+                return
             session = self.window.ensure_session()
             if session is None:
                 self.signals.failed.emit(self.window.session_error or "local_model_not_configured")
@@ -630,9 +650,14 @@ class OrbWindow(QWidget):
         if self._is_speaking():
             self._voice.interrupt_speech()
 
-    def toggle_listening(self) -> None:
+    _tv_hotkey_registered = False
+    _background_tv_recording = False
+
+    def toggle_listening(self, *, background_tv: bool = False) -> None:
         """Space: start listening, Space again: stop and answer."""
         if self._closing:
+            return
+        if background_tv and self._pending_approval is not None:
             return
         voice = self.ensure_voice()
         if voice is None:
@@ -641,8 +666,12 @@ class OrbWindow(QWidget):
             self._show_answer(_voice_message(self._voice_failed or "voice_unavailable"))
             return
         if voice.is_recording:
+            if background_tv and not self._background_tv_recording:
+                return
+            background_tv = self._background_tv_recording
+            self._background_tv_recording = False
             self._busy = True
-            self._voice_turn = True
+            self._voice_turn = not background_tv
             self.orb.set_state(THINKING)
             self._show_answer(None)
             self._set_activity("Transcribing")
@@ -652,6 +681,7 @@ class OrbWindow(QWidget):
                     "",
                     transcribe=voice.stop_push_to_talk_and_transcribe,
                     can_resume=bool(self._speech_cursor.current),
+                    background_tv=background_tv,
                 )
             )
             return
@@ -666,6 +696,9 @@ class OrbWindow(QWidget):
         ):
             if getattr(self, "_always_allow_remote_stt", False):
                 voice.grant_remote_stt_consent()
+            elif background_tv:
+                self._show_answer("Set up and approve speech recognition in the MAX orb first.")
+                return
             else:
                 host = urlsplit(getattr(stt, "endpoint", "")).hostname or "the speech service"
                 self._ask_consent(
@@ -675,6 +708,18 @@ class OrbWindow(QWidget):
                 )
                 return
         self._begin_listening()
+        self._background_tv_recording = background_tv and voice.is_recording
+        if self._background_tv_recording:
+            self._show_answer("Listening for a TV command. Press Ctrl+Alt+F10 again to send.")
+
+    def nativeEvent(self, event_type: Any, message: Any) -> Any:
+        if self._tv_hotkey_registered and event_type == b"windows_generic_MSG":
+            from max_core.native_desktop.tv_hotkey import is_tv_hotkey
+
+            if is_tv_hotkey(int(message)):
+                self.toggle_listening(background_tv=True)
+                return True, 0
+        return super().nativeEvent(event_type, message)
 
     def _ask_consent(self, text: str, callback: Any) -> None:
         self._pending_approval = _Approval(on_answer=callback)
@@ -787,6 +832,15 @@ class OrbWindow(QWidget):
             self.orb.set_state(SPEAKING)
             self._show_answer(text)
             if self._voice_turn and self._speak(text):
+                self._speak_poll.start()
+            else:
+                self._state_timer.start(2500)
+            self._voice_turn = False
+            return
+        if reply.state == "tv":
+            self.orb.set_state(SPEAKING)
+            self._show_answer(reply.text)
+            if self._voice_turn and self._speak(reply.text):
                 self._speak_poll.start()
             else:
                 self._state_timer.start(2500)
@@ -949,7 +1003,7 @@ class OrbWindow(QWidget):
         super().closeEvent(event)
 
 
-def launch_orb(*, smoke_test: bool = False) -> int:
+def launch_orb(*, smoke_test: bool = False, tv_hotkey: bool = False) -> int:
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setApplicationName("MAX")
     try:
@@ -976,6 +1030,15 @@ def launch_orb(*, smoke_test: bool = False) -> int:
         healthy = window.isVisible() and window.orb.state == IDLE
         window.close()
         return 0 if healthy else 1
+    if tv_hotkey:
+        from max_core.native_desktop.tv_hotkey import register, unregister
+
+        hwnd = int(window.winId())
+        window._tv_hotkey_registered = register(hwnd)
+        if window._tv_hotkey_registered:
+            app.aboutToQuit.connect(lambda: unregister(hwnd))
+        else:
+            print("[MAX] Ctrl+Alt+F10 unavailable; use Space in the orb.", file=sys.stderr)
     app.setQuitOnLastWindowClosed(False)
     window.destroyed.connect(app.quit)
     window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
