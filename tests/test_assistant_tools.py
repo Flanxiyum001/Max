@@ -220,6 +220,31 @@ def test_effectful_tools_need_approval(tmp_path: Path) -> None:
             "apps.open", "shell.run"} <= effectful  # fmt: skip
 
 
+def test_hosted_notes_are_bounded_and_require_cloud_opt_in(tmp_path: Path) -> None:
+    registry = assistant_registry(
+        data_dir=tmp_path, host_tools=False, cloud=True, cloud_personal_tools=True
+    )
+    write = registry.get("notes.write")
+    read = registry.get("notes.read")
+    listing = registry.get("notes.list")
+    assert write is not None and read is not None and listing is not None
+    assert write.risk.value == "effectful"
+    assert read.risk.value == listing.risk.value == "read_only"
+    assert write.handler(write.validate({"name": "Plan", "content": "hello"})) == "saved note Plan"
+    assert read.handler({"name": "plan"}) == "hello"
+    assert listing.handler({}) == "Plan"
+    with pytest.raises(ToolError, match="invalid_note_name"):
+        write.handler({"name": "../secret", "content": "no"})
+    with pytest.raises(ToolError, match="note_exists"):
+        write.handler({"name": "plan", "content": "overwrite"})
+    assert not (tmp_path.parent / "secret.json").exists()
+    assert not names(data_dir=tmp_path, host_tools=False, cloud=True) & {
+        "notes.write",
+        "notes.list",
+        "notes.read",
+    }
+
+
 # --- session -------------------------------------------------------------------
 
 

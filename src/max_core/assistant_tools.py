@@ -111,6 +111,35 @@ class AssistantStore:
             self._save("memory", kept)
         return "forgotten"
 
+    # Hosted notes: fixed application storage, not arbitrary host paths.
+    def write_note(self, name: str, content: str) -> str:
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _-]{0,60}", name):
+            raise ToolError("invalid_note_name")
+        if len(content) > 4_000:
+            raise ToolError("argument_too_long")
+        with self._lock:
+            items = self._load("notes")
+            if any(item.get("name", "").casefold() == name.casefold() for item in items):
+                raise ToolError("note_exists")
+            if len(items) >= 50:
+                raise ToolError("notes_full")
+            items.append({"name": name, "content": content})
+            self._save("notes", items)
+        return f"saved note {name}"
+
+    def list_notes(self) -> str:
+        with self._lock:
+            items = self._load("notes")
+        return "\n".join(str(item["name"]) for item in items) or "no notes"
+
+    def read_note(self, name: str) -> str:
+        with self._lock:
+            items = self._load("notes")
+        for item in items:
+            if item.get("name", "").casefold() == name.casefold():
+                return str(item["content"])[:MAX_RESULT_CHARS]
+        raise ToolError("not_found")
+
     # reminders ------------------------------------------------------------
     def add_reminder(self, text: str, due: _dt.datetime | None) -> dict[str, Any]:
         text = " ".join(text.split())
@@ -524,6 +553,35 @@ def assistant_registry(
                 lambda a: store.complete(a["id"]),
             ),
         ]
+        if not host_tools:
+            tools.extend(
+                (
+                    Tool(
+                        "notes.write",
+                        "Save a new note in MAX's hosted personal store, never overwrite.",
+                        ToolRisk.EFFECTFUL,
+                        (
+                            ToolParam("name", str, "note name", max_length=61),
+                            ToolParam("content", str, "note content", max_length=4_000),
+                        ),
+                        lambda a: store.write_note(a["name"], a["content"]),
+                    ),
+                    Tool(
+                        "notes.list",
+                        "List names of notes saved in MAX's hosted personal store.",
+                        ToolRisk.READ_ONLY,
+                        (),
+                        lambda _: store.list_notes(),
+                    ),
+                    Tool(
+                        "notes.read",
+                        "Read a saved MAX note by name, not a filesystem path.",
+                        ToolRisk.READ_ONLY,
+                        (ToolParam("name", str, "note name", max_length=61),),
+                        lambda a: store.read_note(a["name"]),
+                    ),
+                )
+            )
         if host_tools:
             tools.append(
                 Tool(
