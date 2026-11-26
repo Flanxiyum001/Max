@@ -16,6 +16,10 @@ voice ID is selected in this milestone. The exact voice is awaiting the
 owner's later choice. A British-English locale is a preference, not a
 functioning accent guarantee.
 
+## Personal-assistant operating behavior
+
+The persona guides MAX to produce source-grounded briefings, use task tools for explicit commitments when available, report task state without overstating completion, rely only on owner-approved relevant memory, respect host-controlled voice activation and the selected licensed voice, and apply the owner’s stated priorities only when relevant. These rules guide presentation and tool use; they do not create calendar access, scheduling, task execution, memory controls, microphone access or permissions.
+
 ## Code delivered
 
 - `max_core.persona.persona_message()` returns a fixed, reusable system
