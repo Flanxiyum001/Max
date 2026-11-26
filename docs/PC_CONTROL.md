@@ -21,6 +21,7 @@ without asking first:
 | `pc.press_keys` | shortcuts such as `ctrl+l`, `alt+tab`, `win+d`, `enter`, media and volume keys |
 | `pc.click`, `pc.move_mouse`, `pc.scroll` | mouse at screen pixel positions |
 | `pc.screen_size` | screen size and pointer position |
+| `pc.screenshot`, `files.save_document` | see the screen; save documents to the MAX folder (see [SCREEN_VISION.md](SCREEN_VISION.md)) |
 
 Without the setting, the tools are still offered but each action asks first,
 as before.

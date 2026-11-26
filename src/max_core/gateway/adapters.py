@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 from collections.abc import AsyncIterator, Sequence
@@ -414,6 +415,14 @@ def _messages(request: GatewayRequest, dialect: Dialect) -> dict[str, Any]:
                         "tool_calls": serialized_calls,
                     }
                 )
+            elif message.images:
+                parts: list[dict[str, Any]] = [{"type": "text", "text": message.content}]
+                for image in message.images:
+                    data = base64.b64encode(image).decode("ascii")
+                    parts.append(
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{data}"}}
+                    )
+                openai_messages.append({"role": message.role, "content": parts})
             else:
                 openai_messages.append({"role": message.role, "content": message.content})
         return {"messages": openai_messages}
@@ -463,6 +472,21 @@ def _messages(request: GatewayRequest, dialect: Dialect) -> dict[str, Any]:
             if message.content:
                 regular[-1]["content"].append({"type": "text", "text": message.content})
             last_was_tool_result = False
+        elif message.images:
+            image_blocks: list[dict[str, Any]] = [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": base64.b64encode(image).decode("ascii"),
+                    },
+                }
+                for image in message.images
+            ]
+            image_blocks.append({"type": "text", "text": message.content or "(screenshot)"})
+            regular.append({"role": message.role, "content": image_blocks})
+            last_was_tool_result = False
         else:
             regular.append({"role": message.role, "content": message.content})
             last_was_tool_result = False
@@ -476,6 +500,10 @@ def _messages(request: GatewayRequest, dialect: Dialect) -> dict[str, Any]:
 
 def _params(spec: ModelSpec, request: GatewayRequest, *, stream: bool) -> dict[str, Any]:
     if request.tools and "tools" not in spec.capabilities:
+        raise GatewayError("unsupported_capability")
+    if any(m.images for m in request.messages) and (
+        "vision" not in spec.capabilities or not spec.is_local
+    ):
         raise GatewayError("unsupported_capability")
     data = _messages(request, spec.dialect)
     data["model"] = spec.model_id

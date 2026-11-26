@@ -31,6 +31,21 @@ class ToolRisk(StrEnum):
     EFFECTFUL = "effectful"
 
 
+class ToolImage(str):
+    """Tool text output that also carries PNG images for a vision model.
+
+    Behaves as the plain text everywhere else; the harness attaches ``images``
+    to the next model message only for local vision models.
+    """
+
+    images: tuple[bytes, ...]
+
+    def __new__(cls, text: str, images: tuple[bytes, ...]) -> ToolImage:
+        obj = super().__new__(cls, text)
+        obj.images = images
+        return obj
+
+
 class ToolError(Exception):
     """Fixed, display-safe failure code. Never wraps provider or OS messages."""
 

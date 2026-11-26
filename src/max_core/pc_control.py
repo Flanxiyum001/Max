@@ -35,6 +35,8 @@ AUTO_APPROVED = frozenset(
         "pc.click",
         "pc.move_mouse",
         "pc.scroll",
+        "pc.screenshot",
+        "files.save_document",
     }
 )
 
