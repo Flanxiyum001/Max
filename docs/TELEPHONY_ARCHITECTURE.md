@@ -1,6 +1,6 @@
 # MAX telephony and communications architecture
 
-**Status:** Future interface contract only. No phone provider or number is provisioned; no live call, WhatsApp or email functionality is claimed.
+**Status:** M40 adds email (SMTP/IMAP), WhatsApp (Meta Cloud API) and Exotel call adapters — see [M40](M40_SELF_HEALING_EVOLUTION_JOBS_COMMS.md). Not yet tested against live providers.
 
 ## Scope and priorities
 

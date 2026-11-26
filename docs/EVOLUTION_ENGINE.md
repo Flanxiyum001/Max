@@ -1,6 +1,6 @@
 # MAX evolution and recovery engine
 
-**Status:** Proposed design.
+**Status:** First slice implemented in M40 (outcome ledger, owner-approved lessons, supervisor) — see [M40](M40_SELF_HEALING_EVOLUTION_JOBS_COMMS.md).
 
 Learn through owner-approved memory corrections, evaluated reusable workflows, and validated capability upgrades. Distinguish candidate improvements from deployed changes.
 

@@ -13,7 +13,7 @@ import logging
 import os
 import sqlite3
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -22,9 +22,11 @@ import httpx
 
 from max_core.assistant_tools import AssistantStore, assistant_registry
 from max_core.chat import request_factory
+from max_core.evolution import OutcomeLedger, evolution_tools, step_recorder
 from max_core.gateway import ChatMessage, Gateway, GatewayError, HTTPAdapter, InferenceDestination
 from max_core.gateway_trial import TrialSettings
 from max_core.harness import HarnessReport, MaxHarness
+from max_core.jobs import JobRunner, JobStore, job_tools
 from max_core.local_config import load_dotenv_into_mapping
 from max_core.magnitude import PROVIDER_ID as MAGNITUDE_PROVIDER
 from max_core.magnitude import magnitude_settings
@@ -82,6 +84,7 @@ class SessionOptions:
     host_tools: bool = True
     pc_control: bool = False  # MAX_PC_CONTROL=full: run PC-control tools without asking
     files_root: Path | None = None  # MAX_FILES_DIR (default ~/MAX): screenshots, documents
+    comms_env: Mapping[str, str] | None = None  # MAX_EMAIL_*, MAX_WHATSAPP_*, MAX_EXOTEL_*
     archive_sessions: bool = False
 
     @classmethod
@@ -95,6 +98,12 @@ class SessionOptions:
             enable_web=_yes(env, "MAX_ENABLE_WEB", default=True),
             pc_control=full_control_enabled(env),
             files_root=files_dir(env),
+            comms_env={
+                k: v
+                for k, v in env.items()
+                if k.startswith(("MAX_EMAIL_", "MAX_WHATSAPP_", "MAX_EXOTEL_", "MAX_CALL_"))
+                or k in ("MAX_OWNER_PHONE", "MAX_PUBLIC_URL", "MAX_OWNER_NAME", "MAX_PIPER_VOICE")
+            },
             archive_sessions=_yes(env, "MAX_ARCHIVE_SESSIONS"),
         )
 
@@ -146,6 +155,52 @@ class AssistantSession:
                 files_root=options.files_root,
                 vision="vision" in settings.spec.capabilities,
             )
+            self.evolution: OutcomeLedger | None = None
+            try:
+                self.evolution = OutcomeLedger(options.data_dir / "evolution.sqlite3")
+                for tool in evolution_tools(self.evolution):
+                    self.registry.register(tool)
+            except Exception:
+                self.evolution = None  # learning is optional; never blocks startup
+            try:
+                from max_core.comms import CommsStore, comms_tools
+
+                comms_env = options.comms_env or {}
+                # Only when a channel is configured: tool text costs model context.
+                calls_on = _yes(comms_env, "MAX_WHATSAPP_CALLS") and options.host_tools
+                if calls_on or any(
+                    comms_env.get(k)
+                    for k in ("MAX_EMAIL_USERNAME", "MAX_WHATSAPP_TOKEN", "MAX_EXOTEL_SID")
+                ):
+                    comms_store = CommsStore(options.data_dir / "comms.sqlite3")
+                    manager = None
+                    if calls_on:
+                        from max_core.comms.voice_call import whatsapp_call_manager
+
+                        def store_summary(record: Any, store: Any = comms_store) -> None:
+                            store.receive(
+                                "call", record.contact, f"Call summary: {record.summary}", None
+                            )
+
+                        manager = whatsapp_call_manager(
+                            comms_env, options.data_dir, self.complete, store_summary
+                        )
+                    for tool in comms_tools(comms_store, comms_env, calls=manager):
+                        self.registry.register(tool)
+            except Exception:
+                logging.getLogger(__name__).warning("comms tools unavailable", exc_info=True)
+            self.jobs: JobRunner | None = None
+            if os.environ.get("MAX_BACKGROUND_JOBS", "yes").strip().lower() != "no":
+                job_store = JobStore(options.data_dir / "jobs.sqlite3")
+                for tool in job_tools(job_store, lambda: self.registry):
+                    self.registry.register(tool)
+                ledger = self.evolution
+                self.jobs = JobRunner(
+                    job_store,
+                    lambda: self.registry,
+                    on_outcome=ledger.record if ledger is not None else None,
+                )
+                self.jobs.start()
             if mcp_core is not None:
                 self._register_mcp_tools(mcp_core)
             if github_connector is not None:
@@ -323,6 +378,14 @@ class AssistantSession:
                 )
         return messages
 
+    def complete(self, messages: Sequence[tuple[str, str]]) -> str:
+        """Plain model reply, no tools and no chat history (used on voice calls)."""
+        chat = tuple(ChatMessage(role, text) for role, text in messages)  # type: ignore[arg-type]
+        spec = self.settings.spec
+        gateway = Gateway((spec,), HTTPAdapter(self._client))
+        future = asyncio.run_coroutine_threadsafe(gateway.complete(self._make(chat)), self._loop)
+        return future.result(timeout=60).content
+
     def ask(
         self,
         text: str,
@@ -394,6 +457,15 @@ class AssistantSession:
     ) -> LoopResult:
         spec = dataclasses.replace(self.settings.spec, model_id=model)
         gateway = Gateway((spec,), HTTPAdapter(self._client))
+        ledger = getattr(self, "evolution", None)
+        if ledger is not None:
+            on_step = step_recorder(ledger, on_step)
+            try:
+                guidance = ledger.guidance()
+            except Exception:
+                guidance = ""
+            if guidance:
+                messages = [ChatMessage(role="system", content=guidance), *messages]
         if self._magnitude:
             if len(self.registry):
                 turn = ToolLoop(gateway, self.registry, approve=approve, on_step=on_step)
@@ -463,6 +535,9 @@ class AssistantSession:
     def close(self) -> None:
         if self._loop.is_closed():
             return
+        jobs = getattr(self, "jobs", None)
+        if jobs is not None:
+            jobs.stop()
         asyncio.run_coroutine_threadsafe(self._client.aclose(), self._loop).result(timeout=5)
         self._loop.call_soon_threadsafe(self._loop.stop)
         self._thread.join(timeout=5)
