@@ -2,11 +2,32 @@ html, body { margin: 0; height: 100%; background: #000; overflow: hidden;
   font-family: "Segoe UI", system-ui, -apple-system, sans-serif; color: #bfefff; }
 canvas { position: fixed; inset: 0; width: 100%; height: 100%; }
 .hidden { display: none !important; }
-#answer { position: fixed; left: 8%; right: 8%; bottom: 17%; text-align: center;
-  font-size: clamp(15px, 2.2vw, 19px); line-height: 1.45; opacity: 0;
-  transition: opacity .45s ease; white-space: pre-wrap; overflow-wrap: anywhere;
-  max-height: 30vh; overflow-y: auto; }
-#answer.show { opacity: 1; }
+/* A dedicated transcript lane, below the orb and activity indicator. */
+#answer { position: fixed; top: 53%; bottom: 17%; left: 50%; transform: translateX(-50%);
+  width: min(720px, calc(100% - 40px)); box-sizing: border-box; padding: 4px 16px;
+  color-scheme: dark; text-align: center; font-size: clamp(15px, 1.25vw, 18px);
+  line-height: 1.65; opacity: 0; visibility: hidden; transition: opacity .2s ease;
+  white-space: pre-wrap; overflow-wrap: anywhere; overflow-y: auto; overscroll-behavior: contain;
+  scrollbar-width: thin; scrollbar-color: transparent transparent; scrollbar-gutter: stable both-edges; }
+#answer.show { opacity: 1; visibility: visible; }
+#answer.long { text-align: left; }
+#answer.caption { text-align: center; font-size: clamp(16px, 1.6vw, 21px); line-height: 1.6;
+  scrollbar-gutter: auto; }
+#answer:hover, #answer:focus-visible { scrollbar-color: #285060 transparent; }
+#answer::-webkit-scrollbar { width: 5px; }
+#answer::-webkit-scrollbar-track { background: transparent; }
+#answer::-webkit-scrollbar-thumb { background: transparent; border-radius: 6px; }
+#answer:hover::-webkit-scrollbar-thumb, #answer:focus-visible::-webkit-scrollbar-thumb { background: #285060; }
+#answer:focus-visible { outline: 1px solid #285060; outline-offset: 3px; border-radius: 8px; }
+@media (max-width: 600px) {
+  #answer { width: calc(100% - 24px); padding-inline: 10px; bottom: 19%; }
+}
+@media (max-height: 450px) {
+  #answer { bottom: 22%; font-size: 14px; line-height: 1.5; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #answer { transition: none; }
+}
 #input, #passcode { position: fixed; left: 50%; bottom: 9%; transform: translateX(-50%);
   width: min(620px, 84vw); background: transparent; border: none;
   border-bottom: 1px solid #0f3a48; color: #7fdfff; font-size: 17px; text-align: center;
@@ -52,7 +73,7 @@ canvas { position: fixed; inset: 0; width: 100%; height: 100%; }
 #wake { position: fixed; top: 18px; right: 18px; background: transparent; color: #2f5966;
   border: 1px solid #0d2a33; border-radius: 14px; padding: 6px 12px; font-size: 12px; cursor: pointer; }
 #wake.on { color: #9feaff; border-color: #1f6c80; box-shadow: 0 0 12px rgba(90,230,255,.25); }
-#activity { position: fixed; left: 50%; bottom: 24%; transform: translateX(-50%);
+#activity { position: fixed; left: 50%; top: 48%; transform: translateX(-50%);
   display: flex; align-items: center; gap: 12px; max-width: 84vw;
   color: #9a9a9a; font-size: clamp(14px, 1.9vw, 17px); white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; opacity: 1; transition: opacity .3s ease; }
@@ -65,3 +86,8 @@ canvas { position: fixed; inset: 0; width: 100%; height: 100%; }
 #replay-voice { position: fixed; right: 18px; top: 56px; z-index: 4; background: #031a22;
   color: #9feaff; border: 1px solid #1f6c80; border-radius: 14px; padding: 7px 12px;
   font-size: 12px; cursor: pointer; }
+
+#toggle-transcript { position: fixed; right: 18px; top: 94px; z-index: 4;
+  background: transparent; color: #7fdfff; border: 1px solid #1f6c80;
+  border-radius: 14px; padding: 7px 12px; font-size: 12px; cursor: pointer; }
+#toggle-transcript:hover, #toggle-transcript[aria-pressed="true"] { background: #031a22; }
