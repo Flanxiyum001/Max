@@ -460,7 +460,8 @@ def test_clean_transcript_keeps_real_speech() -> None:
     )
 
 
-def test_transcribe_sends_last_reply_as_context() -> None:
+@pytest.mark.parametrize("use_context", [False, True])
+def test_transcribe_sends_last_reply_as_context_only_when_enabled(use_context: bool) -> None:
     from max_core.gateway import ChatMessage
 
     seen: list[str] = []
@@ -473,13 +474,18 @@ def test_transcribe_sends_last_reply_as_context() -> None:
         history = [ChatMessage("user", "hi"), ChatMessage("assistant", "Want me to email Asha?")]
 
     sess = Sess()
-    env = {**BACKUP_ENV, "MAX_STT_VOCAB": "Asha"}
+    env = {
+        **BACKUP_ENV,
+        "MAX_STT_VOCAB": "Asha",
+        "MAX_STT_REPLY_CONTEXT": "yes" if use_context else "no",
+    }
     client = TestClient(create_app(env, session_factory=lambda: sess, transcriber=fake_stt))
     login(client)
     client.get("/api/state")  # creates the session
     res = client.post("/api/transcribe", content=b"x" * 500, headers={"content-type": "audio/webm"})
     assert res.json() == {"text": "yes please"}
-    assert "Want me to email Asha?" in seen[0] and "Words that may come up: Asha." in seen[0]
+    assert ("Want me to email Asha?" in seen[0]) is use_context
+    assert "Words that may come up: Asha." in seen[0]
 
 
 @pytest.mark.parametrize(
@@ -529,3 +535,14 @@ def test_authenticated_refresh_recovers_active_job_without_replay(web) -> None: 
     client.post("/api/logout")
     assert client.get("/api/state").json() == {"authed": False}
     assert client.get(f"/api/job/{job}").status_code == 401
+
+
+def test_web_speech_browser_regressions() -> None:
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for browser speech regression checks")
+    script = Path(__file__).with_name("web_speech_regression.cjs")
+    subprocess.run([node, str(script)], check=True, timeout=15)
