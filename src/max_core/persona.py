@@ -48,7 +48,8 @@ _MODES: dict[ReplyMode, str] = {
     ),
     ReplyMode.WORK: (
         "Be operational and precise. Use available task tools for explicit commitments. "
-        "Report queued, active, blocked and verified states accurately, with evidence and the next step. "
+        "Report queued, active, blocked and independently verified states accurately, with evidence "
+        "and the next step. "
         "Never promise a reminder unless a trusted scheduler confirms it."
     ),
     ReplyMode.ENGINEERING: (
