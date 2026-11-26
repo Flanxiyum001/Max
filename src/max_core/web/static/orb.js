@@ -3,6 +3,7 @@
 const $ = (id) => document.getElementById(id);
 const canvas = $("orb"), ctx = canvas.getContext("2d");
 const answerEl = $("answer"), input = $("input"), hint = $("hint");
+const replayBtn = $("replay-voice");
 const loginForm = $("login"), passcode = $("passcode"), choices = $("choices");
 const githubAuth = $("github-auth");
 const sandboxLink = $("sandbox-link");
@@ -190,7 +191,7 @@ const DETAILS = {
 
 // ---------------------------------------------------------------- login
 function showLogin() {
-  authed = false; loginForm.classList.remove("hidden"); input.classList.add("hidden");
+  authed = false; stopSpeaking(); lastVoiceText = ""; replayBtn.classList.add("hidden"); loginForm.classList.remove("hidden"); input.classList.add("hidden");
   githubAuth.classList.add("hidden");
   sandboxLink.classList.add("hidden");
   appsToggle.classList.add("hidden"); appsPanel.classList.add("hidden");
@@ -271,7 +272,7 @@ async function ask(text, spoken) {
   githubAuth.classList.add("hidden");
   sandboxLink.classList.add("hidden");
   pendingConnectService = null;
-  stopSpeaking(); stopWake();
+  stopSpeaking(); stopWake(); lastVoiceText = ""; replayBtn.classList.add("hidden");
   busy = true; setState("thinking"); show(spoken ? `“${text}”` : "", 0); setActivity("Thinking");
   try {
     const { job } = await (await api("/api/ask", { text, voice: spoken })).json();
@@ -332,7 +333,8 @@ async function pollJob(job, spoken) {
         if (spoken) {
           await say(j.answer, { follow: !j.connect });
         } else {
-          show(j.answer); setState("speaking", 2500); resumeWake();
+          lastVoiceText = j.answer; replayBtn.classList.remove("hidden");
+          show(j.answer, 0); setState("speaking", 2500); resumeWake();
         }
       } else { setState("error", 2500); show(DETAILS[j.detail] || ERRORS[j.error] || ERRORS.model_unavailable); resumeWake(); }
       return;
@@ -615,7 +617,7 @@ function chime(up) {
 // ---------------------------------------------------------------- voice out
 // Browsers keep page audio locked until the first tap/keypress. Unlock once, on
 // that gesture, and reuse ONE player element so later replies may play by themselves.
-let player = null, playerSrc = null;
+let player = null;
 function silentWav() {
   const b = new Uint8Array(44 + 800), v = new DataView(b.buffer);
   const w = (o, t) => [...t].forEach((c, i) => b[o + i] = c.charCodeAt(0));
@@ -629,7 +631,9 @@ function unlockAudio() {
   try { ensureAudio(); } catch {}
   if (!player) {
     player = new Audio(); player.preload = "auto";
-    player.src = silentWav(); player.play().catch(() => {});
+    const url = silentWav();
+    player.src = url;
+    player.play().catch(() => {}).finally(() => URL.revokeObjectURL(url));
   }
   if (window.speechSynthesis && !unlockAudio.tts) {   // also prime the browser voice
     unlockAudio.tts = true;
@@ -638,13 +642,6 @@ function unlockAudio() {
 }
 ["pointerdown", "keydown", "touchend"].forEach((ev) =>
   document.addEventListener(ev, unlockAudio, { capture: true, passive: true }));
-async function audioRunning() {
-  if (!audioCtx) return false;
-  if (audioCtx.state !== "running") {
-    try { await Promise.race([audioCtx.resume(), new Promise((r) => setTimeout(r, 400))]); } catch {}
-  }
-  return audioCtx.state === "running";
-}
 // Speak the very same answer shown on screen. Keep the first request short,
 // then prepare one following chunk during playback. No discarded text.
 function speechChunks(text) {
@@ -652,12 +649,16 @@ function speechChunks(text) {
   const chunks = [];
   let offset = 0;
   while (offset < chars.length) {
-    const limit = chunks.length ? 900 : 240;
+    const limit = chunks.length ? 600 : 140;
     let end = Math.min(offset + limit, chars.length);
     if (end < chars.length) {
       const floor = offset + Math.floor(limit / 2);
       let boundary = end;
-      while (boundary > floor && !/\s/u.test(chars[boundary - 1])) boundary--;
+      while (boundary > floor && !/[.!?;\n]/u.test(chars[boundary - 1])) boundary--;
+      if (boundary <= floor) {
+        boundary = end;
+        while (boundary > floor && !/\s/u.test(chars[boundary - 1])) boundary--;
+      }
       if (boundary > floor) end = boundary;
     }
     chunks.push(chars.slice(offset, end).join(""));
@@ -665,70 +666,89 @@ function speechChunks(text) {
   }
   return chunks;
 }
-let speechRun = null;
-async function fetchSpeech(text, run) {
+let speechRun = null, lastVoiceText = "";
+const VOICE_TIMEOUTS = { fastFetch: 2200, fetch: 18000, start: 2500, stall: 8000 };
+async function fetchSpeech(text, run, timeout = VOICE_TIMEOUTS.fetch) {
   if (run.controller.signal.aborted) return null;
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  run.controller.signal.addEventListener("abort", abort, { once: true });
+  const timer = setTimeout(abort, timeout);
   try {
-    const res = await api("/api/speak", { text }, run.controller.signal);
-    return await res.blob();
+    const res = await api("/api/speak", { text }, controller.signal);
+    const blob = await res.blob();
+    return blob.size ? blob : null;
   } catch { return null; }
+  finally {
+    clearTimeout(timer);
+    run.controller.signal.removeEventListener("abort", abort);
+  }
 }
 async function playSpeech(blob, run) {
   if (!blob || speechRun !== run) return false;
-  const running = await audioRunning();
-  if (speechRun !== run) return false;
-  let el = player && (playerSrc || running) ? player : new Audio();
-  if (el === player && !playerSrc && running) {
-    try { playerSrc = audioCtx.createMediaElementSource(player); playerSrc.connect(audioCtx.destination); } catch {}
-  }
-  if (el === player && playerSrc && !running) el = new Audio();
-  if (el === player && playerSrc) connectLevel(playerSrc);
+  // Reuse the gesture-unlocked player and send audio directly to the speakers.
+  // A suspended Web Audio context must never mute the reply.
+  const el = player || new Audio();
   const url = URL.createObjectURL(blob);
   return new Promise((resolve) => {
-    let started = false, finished = false;
+    let started = false, finished = false, timer;
     const finish = (ok) => {
       if (finished) return;
-      finished = true;
-      el.onended = null; el.onerror = null; el.onplaying = null;
+      finished = true; clearTimeout(timer);
+      el.onended = null; el.onerror = null; el.onplaying = null; el.ontimeupdate = null;
       el.pause(); URL.revokeObjectURL(url);
       if (audio === el) audio = null;
       run.cancel = null;
       resolve(ok);
     };
     run.cancel = () => finish(true);
-    el.src = url; audio = el;
-    el.onplaying = () => { started = true; };
-    el.onended = () => finish(true);
+    const watchdog = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => finish(started ? "partial" : false),
+        started ? VOICE_TIMEOUTS.stall : VOICE_TIMEOUTS.start);
+    };
+    el.src = url; audio = el; el.muted = false; el.volume = 1;
+    el.onplaying = () => { started = true; setActivity(null); watchdog(); };
+    el.ontimeupdate = () => { if (started) watchdog(); };
+    el.onended = () => finish(started ? true : false);
     // Do not repeat a chunk that may already have been heard.
     el.onerror = () => finish(started ? "partial" : false);
-    el.play().catch(() => finish(started ? "partial" : false));
+    watchdog();
+    try { el.play().catch(() => finish(started ? "partial" : false)); }
+    catch { finish(started ? "partial" : false); }
   });
 }
-function pickVoice() {
-  const vs = window.speechSynthesis ? speechSynthesis.getVoices() : [];
+function pickVoice(localOnly = false) {
+  const vs = window.speechSynthesis ? speechSynthesis.getVoices().filter(v => !localOnly || v.localService) : [];
   const en = vs.filter((v) => /^en/i.test(v.lang));
   const prefer = /(natural|neural|online).*(female|emily|aria|jenny|sonia|libby|natasha)|emily|aria|jenny|sonia|libby|samantha|karen|moira|tessa|serena|google uk english female|google us english|zira/i;
-  return en.find((v) => prefer.test(v.name)) || en[0] || vs[0] || null;
+  return en.find((v) => prefer.test(v.name)) || en[0] || (localOnly ? null : vs[0]) || null;
 }
-function browserSay(text, run) {
+function browserSay(text, run, voice = null) {
   return new Promise((resolve) => {
     if (speechRun !== run || !window.speechSynthesis || !window.SpeechSynthesisUtterance) {
       resolve(false); return;
     }
     try {
       const u = new SpeechSynthesisUtterance(text);
-      const v = pickVoice(); if (v) { u.voice = v; u.lang = v.lang; }
+      const v = voice || pickVoice(); if (v) { u.voice = v; u.lang = v.lang; }
       u.rate = 1.02; u.pitch = 1.05;
-      let finished = false;
+      let finished = false, started = false, timer;
       const finish = (ok) => {
         if (finished) return;
-        finished = true; run.cancel = null; resolve(ok);
+        finished = true; clearTimeout(timer); run.cancel = null; resolve(ok);
       };
+      const timeout = () => { finish(started ? "partial" : false); speechSynthesis.cancel(); };
       run.cancel = () => { finish(false); speechSynthesis.cancel(); };
-      u.onend = () => finish(true);
-      u.onerror = () => finish(false);
+      u.onstart = () => {
+        started = true; setActivity(null); clearTimeout(timer);
+        timer = setTimeout(timeout, Math.max(12000, text.length * 180));
+      };
+      u.onend = () => finish(started);
+      u.onerror = () => finish(started ? "partial" : false);
+      timer = setTimeout(timeout, VOICE_TIMEOUTS.start);
       speechSynthesis.speak(u);
-    } catch { run.cancel = null; resolve(false); }
+    } catch { if (run.cancel) run.cancel(); else resolve(false); }
   });
 }
 if (window.speechSynthesis) { speechSynthesis.getVoices(); speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices(); }
@@ -743,10 +763,14 @@ async function say(text, { follow = false } = {}) {
   stopSpeaking(); stopWake(); stopMicLevel();
   const run = { controller: new AbortController(), cancel: null };
   speechRun = run;
-  show(text, 0); setState("speaking");
+  lastVoiceText = text;
+  if (typeof replayBtn !== "undefined") replayBtn.classList.remove("hidden");
+  show(text, 0); setState("speaking"); setActivity("Preparing voice");
   const chunks = speechChunks(text);
+  const localVoice = pickVoice(true);
   let complete = true, serverFailed = false;
-  let pending = chunks.length ? fetchSpeech(chunks[0], run) : null;
+  let pending = chunks.length ? fetchSpeech(chunks[0], run,
+    localVoice ? VOICE_TIMEOUTS.fastFetch : VOICE_TIMEOUTS.fetch) : null;
   for (let i = 0; i < chunks.length && speechRun === run; i++) {
     const blob = pending ? await pending : null;
     if (speechRun !== run) return;
@@ -756,17 +780,26 @@ async function say(text, { follow = false } = {}) {
     const outcome = await playSpeech(blob, run);
     if (speechRun !== run) return;
     if (outcome === "partial") { complete = false; break; }
-    if (!outcome && !(await browserSay(chunks[i], run))) { complete = false; break; }
+    if (!outcome) {
+      serverFailed = true; pending = null;
+      const fallback = await browserSay(chunks[i], run, localVoice);
+      if (speechRun !== run) return;
+      if (fallback === "partial" || !fallback) { complete = false; break; }
+    }
   }
   if (speechRun !== run) return;
   run.controller.abort(); speechRun = null;
   setState("idle");
-  if (!complete) setActivity("Voice unavailable — full reply is on screen");
+  setActivity(complete ? null : "Voice interrupted — tap Replay voice to retry");
   if (follow && complete) setTimeout(() => {
     if (!busy && !speechRun && !listening && !transcribing) startListening({ followUp: true });
-  }, 300);
+  }, 120);
   else resumeWake();
 }
+
+replayBtn.addEventListener("click", () => {
+  if (authed && !busy && !listening && !transcribing && lastVoiceText) say(lastVoiceText);
+});
 
 // ---------------------------------------------------------------- voice in (Siri-style)
 // • tap / Space: listen once; sends by itself when you stop talking
@@ -789,23 +822,28 @@ function recOptions() {
 // doesn't hold the gate open, and requires sustained speech before locking on.
 function speechGate(onDone, { spoke = false, maxWaitMs = 8000, maxMs = 30000 } = {}) {
   const started = Date.now(); let quietSince = null, speechMs = spoke ? 200 : 0;
+  let resumed = false;
   const timer = setInterval(() => {
     const now = Date.now();
-    const v = voiceLevel || level;
+    const v = voiceAnalyser ? voiceLevel : level;
     if (!spoke) noiseFloor += (Math.min(v, 0.18) - noiseFloor) * 0.05;
     const on = Math.max(0.085, noiseFloor * 2.8), off = Math.max(0.045, noiseFloor * 1.7);
     if (v > on) {
-      speechMs += 100;
-      if (speechMs >= 150) { spoke = true; quietSince = null; }
+      speechMs += 50;
+      if (speechMs >= 100) {
+        if (quietSince !== null && now - quietSince >= 150) resumed = true;
+        spoke = true; quietSince = null;
+      }
     } else {
-      if (!spoke) speechMs = Math.max(0, speechMs - 50);
-      if (spoke) quietSince = v < off ? (quietSince || now) : null;
+      if (!spoke) speechMs = Math.max(0, speechMs - 25);
+      if (spoke) quietSince = v < off ? (quietSince ?? now) : null;
     }
-    if (!spoke && now - started > maxWaitMs) { clearInterval(timer); onDone(false); }
-    else if ((spoke && quietSince && now - quietSince > 850) || now - started > maxMs) {
-      clearInterval(timer); onDone(true);
+    const silenceMs = resumed || noiseFloor > 0.055 ? 550 : 350;
+    if (!spoke && now - started >= maxWaitMs) { clearInterval(timer); onDone(false); }
+    else if ((spoke && quietSince !== null && now - quietSince >= silenceMs) || now - started >= maxMs) {
+      clearInterval(timer); onDone(spoke);
     }
-  }, 100);
+  }, 50);
   return () => clearInterval(timer);
 }
 async function transcribeClip(blob) {
@@ -823,7 +861,9 @@ async function startRecording(opts = {}) {
   if (!micStream) { listening = false; setState("error", 2500); show("Microphone permission was denied.", 3500); return; }
   const { mime, opts: ropts } = recOptions();
   const chunks = [];
-  recorder = new MediaRecorder(cleanStream || micStream, ropts);
+  // Record the browser's echo-cancelled microphone without the hard VAD gain gate.
+  // The gate can suppress the beginning/end of quiet words.
+  recorder = new MediaRecorder(micStream, ropts);
   recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
   let cancelled = false;
   const stopGate = speechGate((heard) => {
@@ -931,7 +971,7 @@ async function startWake() {
   if (!SR || !wakeOn || !authed || listening || busy || transcribing || speechRun || wakeRec) return;
   wakeWanted = true;
   if (sttReady && window.MediaRecorder) { await startMicLevel(); startTape(); }
-  if (!wakeWanted || wakeRec) return;
+  if (!wakeWanted || wakeRec || speechRun || busy || listening || transcribing) return;
   wakeRec = new SR(); wakeRec.lang = navigator.language || "en-US";
   wakeRec.continuous = true; wakeRec.interimResults = true;
   wakeRec.onresult = (e) => {
@@ -987,6 +1027,7 @@ document.addEventListener("keydown", (e) => {
     else if (e.key === "Escape") { input.value = ""; input.classList.add("hidden"); input.blur(); }
     return;
   }
+  if (e.target instanceof HTMLButtonElement && (e.key === " " || e.key === "Enter")) return;
   if (e.key === " " && !e.repeat) { e.preventDefault(); toggleListening(); return; }
   if (e.key === "Escape") { if (speechRun) { stopSpeaking(); resumeWake(); } else show(""); return; }
   if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {

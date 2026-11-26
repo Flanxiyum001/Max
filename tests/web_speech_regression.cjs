@@ -6,13 +6,12 @@ const vm = require("node:vm");
 const path = require("node:path");
 const source = fs.readFileSync(path.join(__dirname, "../src/max_core/web/static/orb.js"), "utf8");
 new vm.Script(source); // Entire browser script must parse.
-const block = source.slice(source.indexOf("function speechChunks("), source.indexOf("// ---------------------------------------------------------------- voice in"));
+const block = source.slice(source.indexOf("function speechChunks("), source.indexOf('replayBtn.addEventListener("click"'));
 const calls = [], spoken = [], shown = [];
 let releaseOld;
 const ctx = vm.createContext({
-  AbortController, URL, Blob, setTimeout,
-  window: {}, player: null, playerSrc: null, audio: null,
-  audioRunning: async () => false,
+  AbortController, URL, Blob, setTimeout, clearTimeout,
+  window: {}, player: null, audio: null,
   busy: false, listening: false, transcribing: false,
   stopWake() {}, stopMicLevel() {}, resumeWake() {}, setState() {}, setActivity() {},
   show(text) { shown.push(text); },
@@ -35,8 +34,8 @@ vm.runInContext(block, ctx);
   const original = "A short sentence. ".repeat(160) + "😀".repeat(1000);
   const chunks = ctx.speechChunks(original);
   assert.equal(chunks.join(""), original);
-  assert.ok(Array.from(chunks[0]).length <= 240);
-  assert.ok(chunks.every(x => Array.from(x).length <= 900));
+  assert.ok(Array.from(chunks[0]).length <= 140);
+  assert.ok(chunks.every(x => Array.from(x).length <= 600));
   await ctx.say(original);
   assert.equal(calls.join(""), original);
   assert.equal(spoken.length, chunks.length);
