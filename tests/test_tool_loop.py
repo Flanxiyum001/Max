@@ -124,6 +124,39 @@ def test_step_limit_stops_loop() -> None:
     assert result.stopped_reason == "step_limit" and len(gw.requests) == 3
 
 
+def test_repeated_failure_is_diagnosed_then_blocked_without_third_execution() -> None:
+    attempts = 0
+
+    def broken(_args: object) -> str:
+        nonlocal attempts
+        attempts += 1
+        raise ToolError("network_error")
+
+    registry = ToolRegistry((Tool("test.read", "Read", ToolRisk.READ_ONLY, (), broken),))
+    gw = ScriptedGateway([call("test.read")] * 4)
+    result = run(ToolLoop(gw, registry, max_steps=5))
+    assert attempts == 2
+    assert result.error_code == "repeated_tool_failure"
+    assert len(gw.requests) == 3
+    assert "network_error" in gw.requests[1].messages[-1].content
+    assert "failed twice" in gw.requests[2].messages[-1].content
+
+
+def test_denied_effectful_call_does_not_request_approval_twice() -> None:
+    approvals = 0
+
+    def deny(_name: str, _args: dict[str, object]) -> bool:
+        nonlocal approvals
+        approvals += 1
+        return False
+
+    registry = ToolRegistry((Tool("test.write", "Write", ToolRisk.EFFECTFUL, (), lambda _: "ok"),))
+    gw = ScriptedGateway([call("test.write")] * 3)
+    result = run(ToolLoop(gw, registry, approve=deny))
+    assert approvals == 1
+    assert result.error_code == "repeated_tool_failure"
+
+
 def test_model_failure_is_sanitized() -> None:
     class Broken:
         async def complete(self, request: GatewayRequest) -> GatewayResponse:
