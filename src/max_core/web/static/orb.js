@@ -3,7 +3,7 @@
 const $ = (id) => document.getElementById(id);
 const canvas = $("orb"), ctx = canvas.getContext("2d");
 const answerEl = $("answer"), input = $("input"), hint = $("hint");
-const replayBtn = $("replay-voice");
+const replayBtn = $("replay-voice"), transcriptBtn = $("toggle-transcript");
 const loginForm = $("login"), passcode = $("passcode"), choices = $("choices");
 const githubAuth = $("github-auth");
 const sandboxLink = $("sandbox-link");
@@ -150,6 +150,7 @@ function setActivity(text) {
 }
 function show(text, ms) {
   clearTimeout(hideTimer);
+  answerEl.classList.remove("caption");
   if (!text) { answerEl.classList.remove("show"); return; }
   if (answerEl.textContent !== text) {
     answerEl.textContent = text;
@@ -196,7 +197,7 @@ const DETAILS = {
 
 // ---------------------------------------------------------------- login
 function showLogin() {
-  authed = false; stopSpeaking(); lastVoiceText = ""; replayBtn.classList.add("hidden"); loginForm.classList.remove("hidden"); input.classList.add("hidden");
+  authed = false; stopSpeaking(); resetVoiceTranscript(); replayBtn.classList.add("hidden"); loginForm.classList.remove("hidden"); input.classList.add("hidden");
   githubAuth.classList.add("hidden");
   sandboxLink.classList.add("hidden");
   appsToggle.classList.add("hidden"); appsPanel.classList.add("hidden");
@@ -277,7 +278,7 @@ async function ask(text, spoken) {
   githubAuth.classList.add("hidden");
   sandboxLink.classList.add("hidden");
   pendingConnectService = null;
-  stopSpeaking(); stopWake(); stopMicLevel(); lastVoiceText = ""; replayBtn.classList.add("hidden");
+  stopSpeaking(); stopWake(); stopMicLevel(); resetVoiceTranscript(); replayBtn.classList.add("hidden");
   busy = true; setState("thinking"); show(spoken ? `“${text}”` : "", 0); setActivity("Thinking");
   try {
     const { job } = await (await api("/api/ask", { text, voice: spoken })).json();
@@ -647,31 +648,64 @@ function unlockAudio() {
 }
 ["pointerdown", "keydown", "touchend"].forEach((ev) =>
   document.addEventListener(ev, unlockAudio, { capture: true, passive: true }));
-// Speak the very same answer shown on screen. Keep the first request short,
-// then prepare one following chunk during playback. No discarded text.
+// Speak short, exact phrases and reveal them only when their audio starts.
+// Keep a single bounded prefetch. No discarded or independently generated text.
 function speechChunks(text) {
   const chars = Array.from(text);
   const chunks = [];
   let offset = 0;
   while (offset < chars.length) {
-    const limit = chunks.length ? 600 : 140;
+    const limit = 140;
     let end = Math.min(offset + limit, chars.length);
-    if (end < chars.length) {
-      const floor = offset + Math.floor(limit / 2);
-      let boundary = end;
-      while (boundary > floor && !/[.!?;\n]/u.test(chars[boundary - 1])) boundary--;
-      if (boundary <= floor) {
-        boundary = end;
-        while (boundary > floor && !/\s/u.test(chars[boundary - 1])) boundary--;
-      }
+    // Prefer a real phrase boundary, including for the final short segment.
+    // Ignore decimal points and abbreviations not followed by whitespace.
+    const floor = offset + Math.min(30, Math.floor(limit / 2));
+    let boundary = end;
+    while (boundary > floor && !(
+      /[.!?;\n]/u.test(chars[boundary - 1]) &&
+      (chars[boundary - 1] === "\n" || boundary === chars.length || /\s/u.test(chars[boundary]))
+    )) boundary--;
+    if (boundary > floor) end = boundary;
+    else if (end < chars.length) {
+      boundary = end;
+      while (boundary > floor && !/\s/u.test(chars[boundary - 1])) boundary--;
       if (boundary > floor) end = boundary;
     }
+    // Carry boundary whitespace with its phrase, without exceeding the cap.
+    while (end < chars.length && end - offset < limit && /\s/u.test(chars[end])) end++;
     chunks.push(chars.slice(offset, end).join(""));
     offset = end;
   }
   return chunks;
 }
-let speechRun = null, lastVoiceText = "";
+let speechRun = null, lastVoiceText = "", lastCaption = "", transcriptExpanded = false;
+function resetVoiceTranscript() {
+  lastVoiceText = ""; lastCaption = ""; transcriptExpanded = false;
+  if (typeof transcriptBtn !== "undefined") {
+    transcriptBtn.classList.add("hidden");
+    transcriptBtn.textContent = "Full reply";
+    transcriptBtn.setAttribute("aria-pressed", "false");
+  }
+}
+function renderCaption() {
+  show(lastCaption, 0);
+  if (typeof answerEl !== "undefined") answerEl.classList.add("caption");
+}
+function revealSpokenPhrase(text, run) {
+  if (speechRun !== run) return;
+  lastCaption = text;
+  if (!transcriptExpanded) renderCaption();
+}
+function toggleTranscript() {
+  if (!lastVoiceText) return;
+  transcriptExpanded = !transcriptExpanded;
+  if (typeof transcriptBtn !== "undefined") {
+    transcriptBtn.textContent = transcriptExpanded ? "Live captions" : "Full reply";
+    transcriptBtn.setAttribute("aria-pressed", String(transcriptExpanded));
+  }
+  if (transcriptExpanded) show(lastVoiceText, 0);
+  else renderCaption();
+}
 const VOICE_TIMEOUTS = { fastFetch: 2200, fetch: 18000, start: 2500, stall: 8000 };
 async function fetchSpeech(text, run, timeout = VOICE_TIMEOUTS.fetch) {
   if (run.controller.signal.aborted) return null;
@@ -689,7 +723,7 @@ async function fetchSpeech(text, run, timeout = VOICE_TIMEOUTS.fetch) {
     run.controller.signal.removeEventListener("abort", abort);
   }
 }
-async function playSpeech(blob, run) {
+async function playSpeech(blob, run, text) {
   if (!blob || speechRun !== run) return false;
   // Reuse the gesture-unlocked player and send audio directly to the speakers.
   // A suspended Web Audio context must never mute the reply.
@@ -713,7 +747,10 @@ async function playSpeech(blob, run) {
         started ? VOICE_TIMEOUTS.stall : VOICE_TIMEOUTS.start);
     };
     el.src = url; audio = el; el.muted = false; el.volume = 1;
-    el.onplaying = () => { started = true; setActivity(null); watchdog(); };
+    el.onplaying = () => {
+      if (finished || speechRun !== run) return;
+      started = true; revealSpokenPhrase(text, run); setActivity(null); watchdog();
+    };
     el.ontimeupdate = () => { if (started) watchdog(); };
     el.onended = () => finish(started ? true : false);
     // Do not repeat a chunk that may already have been heard.
@@ -746,7 +783,8 @@ function browserSay(text, run, voice = null) {
       const timeout = () => { finish(started ? "partial" : false); speechSynthesis.cancel(); };
       run.cancel = () => { finish(false); speechSynthesis.cancel(); };
       u.onstart = () => {
-        started = true; setActivity(null); clearTimeout(timer);
+        if (finished || speechRun !== run) return;
+        started = true; revealSpokenPhrase(text, run); setActivity(null); clearTimeout(timer);
         timer = setTimeout(timeout, Math.max(12000, text.length * 180));
       };
       u.onend = () => finish(started);
@@ -768,9 +806,10 @@ async function say(text, { follow = false } = {}) {
   stopSpeaking(); stopWake(); stopMicLevel();
   const run = { controller: new AbortController(), cancel: null };
   speechRun = run;
-  lastVoiceText = text;
+  resetVoiceTranscript(); lastVoiceText = text;
   if (typeof replayBtn !== "undefined") replayBtn.classList.remove("hidden");
-  show(text, 0); setState("speaking"); setActivity("Preparing voice");
+  if (typeof transcriptBtn !== "undefined") transcriptBtn.classList.remove("hidden");
+  renderCaption(); setState("speaking"); setActivity("Preparing voice");
   const chunks = speechChunks(text);
   const localVoice = pickVoice(true);
   let complete = true, serverFailed = false;
@@ -782,7 +821,7 @@ async function say(text, { follow = false } = {}) {
     if (!blob) serverFailed = true;
     // One bounded prefetch, not a burst of parallel TTS requests.
     pending = !serverFailed && i + 1 < chunks.length ? fetchSpeech(chunks[i + 1], run) : null;
-    const outcome = await playSpeech(blob, run);
+    const outcome = await playSpeech(blob, run, chunks[i]);
     if (speechRun !== run) return;
     if (outcome === "partial") { complete = false; break; }
     if (!outcome) {
@@ -795,13 +834,14 @@ async function say(text, { follow = false } = {}) {
   if (speechRun !== run) return;
   run.controller.abort(); speechRun = null;
   setState("idle");
-  setActivity(complete ? null : "Voice interrupted — tap Replay voice to retry");
+  setActivity(complete ? null : "Voice interrupted — use Replay voice or Full reply");
   if (follow && complete) setTimeout(() => {
     if (!busy && !speechRun && !listening && !transcribing) startListening({ followUp: true });
   }, 120);
   else resumeWake();
 }
 
+transcriptBtn.addEventListener("click", toggleTranscript);
 replayBtn.addEventListener("click", () => {
   if (authed && !busy && !listening && !transcribing && lastVoiceText) say(lastVoiceText);
 });

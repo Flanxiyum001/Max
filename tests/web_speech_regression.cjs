@@ -6,7 +6,7 @@ const vm = require("node:vm");
 const path = require("node:path");
 const source = fs.readFileSync(path.join(__dirname, "../src/max_core/web/static/orb.js"), "utf8");
 new vm.Script(source); // Entire browser script must parse.
-const block = source.slice(source.indexOf("function speechChunks("), source.indexOf('replayBtn.addEventListener("click"'));
+const block = source.slice(source.indexOf("function speechChunks("), source.indexOf('transcriptBtn.addEventListener("click"'));
 const calls = [], spoken = [], shown = [];
 let releaseOld;
 const ctx = vm.createContext({
@@ -35,12 +35,19 @@ vm.runInContext(block, ctx);
   const chunks = ctx.speechChunks(original);
   assert.equal(chunks.join(""), original);
   assert.ok(Array.from(chunks[0]).length <= 140);
-  assert.ok(chunks.every(x => Array.from(x).length <= 600));
+  assert.ok(chunks.every(x => Array.from(x).length <= 140));
   await ctx.say(original);
   assert.equal(calls.join(""), original);
   assert.equal(spoken.length, chunks.length);
+  assert.equal(shown.at(-1), chunks.at(-1));
+  assert.deepEqual(shown.filter(Boolean), Array.from(chunks));
+  assert.ok(!shown.includes(original), "voice must not reveal the entire reply in advance");
+  ctx.toggleTranscript();
   assert.equal(shown.at(-1), original);
+  ctx.toggleTranscript();
+  assert.equal(shown.at(-1), chunks.at(-1));
   const old = ctx.say("old");
+  assert.notEqual(shown.at(-1), "old", "pending synthesis must not show unsounded captions");
   await ctx.say("new");
   const count = spoken.length;
   releaseOld({blob: async () => new Blob(["old"])});
@@ -62,6 +69,8 @@ vm.runInContext(block, ctx);
   vm.runInContext("VOICE_TIMEOUTS.start = 10", ctx);
   await ctx.say("No silent playback");
   assert.deepEqual(fallback, ["No silent playback"]);
+  assert.equal(shown.at(-1), "No silent playback");
+  assert.equal(shown.filter(x => x === "No silent playback").length, 1);
   // Verify clean silence ends a turn rapidly and resumed speech extends it.
   const gate = source.slice(source.indexOf("function speechGate("), source.indexOf("async function transcribeClip("));
   let now = 0, tick = null, completed = [];
