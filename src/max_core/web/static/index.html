@@ -20,6 +20,21 @@
 <button id="toggle-transcript" class="hidden" type="button" aria-pressed="false">Full reply</button>
 <a id="sandbox-link" class="hidden" target="_blank" rel="noopener noreferrer">Open PR sandbox run</a>
 <button id="github-auth" class="hidden" type="button">Authorize app</button>
+<section id="github-setup" class="hidden" aria-label="GitHub authorization setup">
+  <div class="connections-heading"><strong>Connect GitHub to MAX</strong><button id="github-close-setup" type="button" aria-label="Close setup">×</button></div>
+  <p>GitHub requires your own OAuth application before MAX can request authorization.</p>
+  <ol>
+    <li><a href="https://github.com/settings/applications/new" target="_blank" rel="noopener noreferrer">Register a GitHub OAuth app</a> named MAX. Use this callback URL:<code id="github-callback"></code></li>
+    <li>In <a href="https://dashboard.render.com/" target="_blank" rel="noopener noreferrer">Render Environment settings</a>, set these three keys:
+      <code>MAX_GITHUB_OAUTH_CLIENT_ID</code>
+      <code>MAX_GITHUB_OAUTH_CLIENT_SECRET</code>
+      <code>MAX_GITHUB_OAUTH_CALLBACK_URL</code>
+    </li>
+    <li>Save and redeploy. Never paste the client secret in MAX chat.</li>
+  </ol>
+  <p id="github-setup-status" role="status" aria-live="polite"></p>
+  <button id="github-check-setup" type="button">Check configuration</button>
+</section>
 <button id="connections-toggle" class="hidden" type="button">Tools &amp; apps</button>
 <form id="keybox" class="hidden" autocomplete="off">
   <a id="key-link" target="_blank" rel="noopener noreferrer">Create key</a>

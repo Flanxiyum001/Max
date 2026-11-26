@@ -5,7 +5,8 @@ const canvas = $("orb"), ctx = canvas.getContext("2d");
 const answerEl = $("answer"), input = $("input"), hint = $("hint");
 const replayBtn = $("replay-voice"), transcriptBtn = $("toggle-transcript");
 const loginForm = $("login"), passcode = $("passcode"), choices = $("choices");
-const githubAuth = $("github-auth");
+const githubAuth = $("github-auth"), githubSetup = $("github-setup");
+const githubSetupStatus = $("github-setup-status"), githubCallback = $("github-callback");
 const sandboxLink = $("sandbox-link");
 const appsToggle = $("connections-toggle"), appsPanel = $("connections-panel");
 const appsList = $("connections-list"), toolList = $("tool-list");
@@ -37,7 +38,7 @@ keybox.addEventListener("submit", async (e) => {
   }
   keyService = null;
 });
-let pendingConnectService = null;
+let pendingConnectService = null, pendingConnectAction = null;
 
 let state = "idle";            // idle | thinking | speaking | listening | error
 let energy = 0, t = 0;
@@ -198,7 +199,7 @@ const DETAILS = {
 // ---------------------------------------------------------------- login
 function showLogin() {
   authed = false; stopSpeaking(); resetVoiceTranscript(); replayBtn.classList.add("hidden"); loginForm.classList.remove("hidden"); input.classList.add("hidden");
-  githubAuth.classList.add("hidden");
+  clearConnectionAction();
   sandboxLink.classList.add("hidden");
   appsToggle.classList.add("hidden"); appsPanel.classList.add("hidden");
   hint.textContent = "enter passcode"; passcode.focus();
@@ -275,9 +276,8 @@ async function ask(text, spoken) {
     show("A previous job may still be running. Reload this tab to reconnect before sending another request.");
     return;
   }
-  githubAuth.classList.add("hidden");
+  clearConnectionAction();
   sandboxLink.classList.add("hidden");
-  pendingConnectService = null;
   stopSpeaking(); stopWake(); stopMicLevel(); resetVoiceTranscript(); replayBtn.classList.add("hidden");
   busy = true; setState("thinking"); show(spoken ? `“${text}”` : "", 0); setActivity("Thinking");
   try {
@@ -330,17 +330,13 @@ async function pollJob(job, spoken) {
             }
           } catch {}
         }
-        if (j.connect?.action === "authorize" && MCP_APPS[j.connect.service]) {
-          pendingConnectService = j.connect.service;
-          githubAuth.textContent = "Authorize " + MCP_APPS[pendingConnectService][0];
-          githubAuth.classList.remove("hidden");
-          stopWake();
-        }
+        presentConnectionAction(j.connect);
         if (spoken) {
           await say(j.answer, { follow: !j.connect });
         } else {
           lastVoiceText = j.answer; replayBtn.classList.remove("hidden");
-          show(j.answer, 0); setState("speaking", 2500); resumeWake();
+          show(j.answer, 0); setState("speaking", 2500);
+          if (!pendingConnectAction) resumeWake();
         }
       } else { setState("error", 2500); show(DETAILS[j.detail] || ERRORS[j.error] || ERRORS.model_unavailable); resumeWake(); }
       return;
@@ -392,6 +388,50 @@ function appAuthorizationURL(service, url) {
   return destination.href;
 }
 
+function clearConnectionAction() {
+  pendingConnectService = null; pendingConnectAction = null;
+  githubAuth.classList.add("hidden"); githubAuth.disabled = false;
+  githubSetup.classList.add("hidden");
+}
+
+function presentConnectionAction(connection) {
+  const action = connection?.action, service = connection?.service;
+  if (!MCP_APPS[service]) return false;
+  if (action !== "authorize" && !(service === "github" && action === "needs_configuration")) return false;
+  pendingConnectService = service; pendingConnectAction = action;
+  githubAuth.disabled = false;
+  githubAuth.textContent = action === "authorize" ? "Authorize " + MCP_APPS[service][0] : "Set up GitHub";
+  githubAuth.classList.remove("hidden");
+  githubSetup.classList.toggle("hidden", action !== "needs_configuration");
+  if (action === "needs_configuration") {
+    githubCallback.textContent = location.origin + "/api/connect/github/callback";
+    githubSetupStatus.textContent = "One-time OAuth app registration required.";
+  }
+  stopWake();
+  return true;
+}
+
+async function refreshGithubSetup() {
+  if (pendingConnectService !== "github" || pendingConnectAction !== "needs_configuration") return;
+  const button = $("github-check-setup");
+  button.disabled = true;
+  githubSetupStatus.textContent = "Checking server configuration…";
+  try {
+    const snapshot = await (await api("/api/state")).json();
+    if (pendingConnectService !== "github" || pendingConnectAction !== "needs_configuration") return;
+    if (snapshot.github?.connected) {
+      clearConnectionAction(); show("GitHub is already connected.", 0); resumeWake();
+    } else if (snapshot.github?.configured) {
+      presentConnectionAction({service: "github", action: "authorize"});
+      show("GitHub setup is ready. Tap Authorize GitHub to continue.", 0);
+    } else {
+      githubSetupStatus.textContent = "Not configured yet. Save all three environment variables and redeploy MAX, then check again.";
+    }
+  } catch {
+    githubSetupStatus.textContent = "Couldn't check configuration. Try again.";
+  } finally { button.disabled = false; }
+}
+
 async function authorizeApp(service) {
   if (!MCP_APPS[service]) return;
   githubAuth.disabled = true;
@@ -400,9 +440,12 @@ async function authorizeApp(service) {
     window.location.assign(appAuthorizationURL(service, url));
   } catch (err) {
     githubAuth.disabled = false;
-    const message = err.message === "github_oauth_not_configured"
-      ? "GitHub requires a one-time OAuth App registration for MAX."
-      : err.message === "mcp_public_url_missing"
+    if (service === "github" && err.message === "github_oauth_not_configured") {
+      presentConnectionAction({service, action: "needs_configuration"});
+      show("GitHub needs one-time setup. Follow the setup panel, then check again.", 0);
+      return;
+    }
+    const message = err.message === "mcp_public_url_missing"
       ? "MAX needs a stable HTTPS URL for OAuth."
       : err.message === "mcp_oauth_registration_not_supported"
       ? "This provider requires its own OAuth App registration. MAX can't register automatically."
@@ -412,8 +455,14 @@ async function authorizeApp(service) {
 }
 
 githubAuth.addEventListener("click", () => {
-  if (pendingConnectService) authorizeApp(pendingConnectService);
+  if (pendingConnectAction === "needs_configuration") {
+    githubSetup.classList.toggle("hidden");
+  } else if (pendingConnectAction === "authorize" && pendingConnectService) {
+    stopSpeaking(); authorizeApp(pendingConnectService);
+  }
 });
+$("github-check-setup").addEventListener("click", refreshGithubSetup);
+$("github-close-setup").addEventListener("click", () => githubSetup.classList.add("hidden"));
 
 async function renderApps() {
   if (!authed) return;
@@ -457,7 +506,8 @@ async function renderApps() {
     label.append(title, description);
     const button = document.createElement("button");
     button.type = "button";
-    button.textContent = current.connected ? "Disconnect" : "Connect";
+    button.textContent = current.connected ? "Disconnect" :
+      service === "github" && !current.configured ? "Set up" : "Connect";
     button.onclick = async () => {
       if (current.connected) {
         if (!confirm("Disconnect " + config[0] + " from MAX?")) return;
@@ -1014,10 +1064,10 @@ function finishTape() {
   };
 }
 async function startWake() {
-  if (!SR || !wakeOn || !authed || listening || busy || transcribing || speechRun || wakeRec) return;
+  if (!SR || !wakeOn || !authed || listening || busy || transcribing || speechRun || wakeRec || pendingConnectAction) return;
   wakeWanted = true;
   if (sttReady && window.MediaRecorder) { await startMicLevel(); startTape(); }
-  if (!wakeWanted || speechRun || busy || listening || transcribing) {
+  if (!wakeWanted || speechRun || busy || listening || transcribing || pendingConnectAction) {
     if (!listening) { dropTape(); stopMicLevel(); }
     return;
   }
