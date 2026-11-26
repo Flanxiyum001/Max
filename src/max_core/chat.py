@@ -31,6 +31,8 @@ from max_core.tool_loop import ToolLoop, ToolStep
 from max_core.tools import ToolRegistry, builtin_registry
 
 MAX_HISTORY = 30
+# Rough per-screenshot input budget for local vision models.
+_IMAGE_TOKEN_ESTIMATE = 1_600
 
 
 def request_factory(
@@ -41,7 +43,11 @@ def request_factory(
     output = min(1024, max(256, spec.context_tokens // 4))
 
     def make(messages: tuple[ChatMessage, ...]) -> GatewayRequest:
-        envelope = sum(len(m.content.encode("utf-8")) + 32 for m in messages)
+        envelope = sum(
+            len(m.content.encode("utf-8")) + 32 + _IMAGE_TOKEN_ESTIMATE * len(m.images)
+            for m in messages
+        )
+        has_images = any(m.images for m in messages)
         return GatewayRequest(
             request_id=uuid4().hex,
             messages=messages,
@@ -54,6 +60,7 @@ def request_factory(
             local_only=not is_cloud,
             allow_fallback=False,
             timeout_seconds=60.0,
+            required_capabilities=frozenset({"text", "vision"} if has_images else {"text"}),
         )
 
     return make

@@ -144,6 +144,11 @@ def request_envelope_bytes(
     return total
 
 
+MAX_MESSAGE_IMAGES = 2
+MAX_IMAGE_BYTES = 8 * 1024 * 1024
+_CAPABILITIES = frozenset({"text", "tools", "vision"})
+
+
 @dataclass(frozen=True, slots=True, repr=False)
 class ChatMessage:
     role: Role
@@ -151,10 +156,23 @@ class ChatMessage:
     tool_calls: tuple[ToolProposal, ...] = ()
     tool_call_id: str | None = None
     is_error: bool = False
+    # PNG screenshots for vision models; local-only (see GatewayRequest).
+    images: tuple[bytes, ...] = ()
 
     def __post_init__(self) -> None:
         if self.role not in {"system", "user", "assistant", "tool"}:
             raise ValueError("Unsupported role")
+        if not isinstance(self.images, tuple) or len(self.images) > MAX_MESSAGE_IMAGES:
+            raise ValueError("images must be a tuple of at most 2 PNG images")
+        for image in self.images:
+            if (
+                not isinstance(image, bytes)
+                or not image.startswith(b"\x89PNG\r\n\x1a\n")
+                or len(image) > MAX_IMAGE_BYTES
+            ):
+                raise ValueError("images must be PNG data of at most 8 MB")
+        if self.images and self.role != "user":
+            raise ValueError("Only user messages may include images")
         if not isinstance(self.content, str) or len(self.content) > 32_000:
             raise ValueError("Message must be text of at most 32,000 characters")
         _require_utf8(self.content, "Message must be valid UTF-8 text")
@@ -236,8 +254,8 @@ class ModelSpec:
             raise ValueError("Invalid inference destination classification")
         if self.inference_destination == InferenceDestination.VERIFIED_LOCAL and not self.is_local:
             raise ValueError("Verified local inference requires an explicit loopback endpoint")
-        if not self.capabilities or not self.capabilities <= {"text", "tools"}:
-            raise ValueError("Only text and inert tool proposals are supported in milestone 3")
+        if not self.capabilities or not self.capabilities <= _CAPABILITIES:
+            raise ValueError("Only text, inert tool proposals and vision are supported")
         if self.api_key is not None and (
             not self.api_key or "\n" in self.api_key or "\r" in self.api_key
         ):
@@ -307,8 +325,15 @@ class GatewayRequest:
             or not 1 <= self.max_output_tokens <= 1_000_000
         ):
             raise ValueError("Invalid token ceilings")
-        if not self.required_capabilities or not self.required_capabilities <= {"text", "tools"}:
+        if not self.required_capabilities or not self.required_capabilities <= _CAPABILITIES:
             raise ValueError("Unsupported requested capabilities")
+        if any(m.images for m in self.messages if isinstance(m, ChatMessage)):
+            # Screenshots never leave the machine: images need a local-only request
+            # to a vision-capable model.
+            if not self.local_only or self.cloud_allowed:
+                raise ValueError("Images are only allowed in local-only requests")
+            if "vision" not in self.required_capabilities:
+                raise ValueError("Images require the vision capability")
         if self.max_cost_usd is not None and (
             not isinstance(self.max_cost_usd, Decimal)
             or not self.max_cost_usd.is_finite()
