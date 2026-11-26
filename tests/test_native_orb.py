@@ -423,3 +423,43 @@ def test_escape_then_typed_continue_resumes_without_microphone(
         app.processEvents()
     finally:
         window.close()
+
+
+def test_tv_push_to_talk_uses_owner_path_without_model(
+    orb, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, window = orb
+    from max_core.native_desktop import orb_ui
+
+    class FakeVoice:
+        is_recording = False
+        remote_stt_consent = False
+        stt = type("LocalSTT", (), {"available": True, "requires_remote_upload": False})()
+
+        def start_push_to_talk(self, *, direct_user_gesture: bool) -> bool:
+            assert direct_user_gesture
+            self.is_recording = True
+            return True
+
+        def stop_push_to_talk_and_transcribe(self) -> str:
+            self.is_recording = False
+            return "Max, open Netflix on Dad's TV"
+
+    calls = []
+    monkeypatch.setattr(window, "ensure_voice", lambda: window._voice)
+    monkeypatch.setattr(window, "_pause_speech", lambda: None)
+    monkeypatch.setattr(window, "ensure_session", lambda: pytest.fail("TV command invoked a model"))
+    monkeypatch.setattr(
+        orb_ui,
+        "run_command",
+        lambda root, command: calls.append(command.action) or "TV fixture sent",
+    )
+    window._voice = FakeVoice()
+    window.toggle_listening(background_tv=True)
+    window.toggle_listening(background_tv=True)
+    assert window._pool.waitForDone(5000)
+    for _ in range(20):
+        app.processEvents()
+    assert calls == ["netflix"]
+    assert window.answer.text() == "TV fixture sent"
+    window._voice = None

@@ -8,17 +8,24 @@ import sys
 
 def main() -> int:
     args = sys.argv[1:]
-    allowed = {"--smoke-test", "--dashboard", "--magnitude", "--check-magnitude"}
+    if args[:1] == ["--pair-tv"]:
+        from max_core.assistant_session import default_data_dir, merged_environment
+        from max_core.tv_remote import pair_main
+
+        return pair_main(default_data_dir(merged_environment()) / "tv", args[1:])
+    allowed = {"--smoke-test", "--dashboard", "--magnitude", "--check-magnitude", "--tv-hotkey"}
     if (
         set(args) - allowed
         or len(set(args)) != len(args)
         or ("--check-magnitude" in args and len(args) != 1)
-        or ("--magnitude" in args and "--dashboard" in args)
+        or ("--dashboard" in args and ({"--magnitude", "--tv-hotkey"} & set(args)))
     ):
         print(
             "Usage: python -m max_core.native_desktop [--dashboard] [--smoke-test]\n"
+            "       python -m max_core.native_desktop --tv-hotkey [--smoke-test]\n"
             "       python -m max_core.native_desktop --magnitude [--smoke-test]\n"
-            "       python -m max_core.native_desktop --check-magnitude",
+            "       python -m max_core.native_desktop --check-magnitude\n"
+            "       python -m max_core.native_desktop --pair-tv <TV IP>",
             file=sys.stderr,
         )
         return 2
@@ -54,7 +61,7 @@ def main() -> int:
     smoke = "--smoke-test" in args
     if "--dashboard" in args:
         return launch(smoke_test=smoke)
-    return launch_orb(smoke_test=smoke)
+    return launch_orb(smoke_test=smoke, tv_hotkey="--tv-hotkey" in args)
 
 
 if __name__ == "__main__":
