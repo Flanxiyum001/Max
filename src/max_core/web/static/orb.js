@@ -7,7 +7,7 @@ const loginForm = $("login"), passcode = $("passcode"), choices = $("choices");
 const githubAuth = $("github-auth");
 const sandboxLink = $("sandbox-link");
 const appsToggle = $("connections-toggle"), appsPanel = $("connections-panel");
-const appsList = $("connections-list");
+const appsList = $("connections-list"), toolList = $("tool-list");
 const MCP_APPS = Object.freeze({
   github: ["GitHub", ["github.com"]],
   cloudflare: ["Cloudflare", ["cloudflare.com"]],
@@ -210,7 +210,7 @@ async function boot() {
   const s = await (await fetch("/api/state", { credentials: "same-origin" })).json();
   if (!s.authed) return showLogin();
   authed = true; sttReady = !!s.stt_ready;
-  // Apps panel removed: connect apps by asking MAX ("MAX, connect to Cloudflare").
+  appsToggle.classList.remove("hidden");
   hint.textContent = "type to talk · space or tap the orb to speak";
   if (!s.model_ready) { setState("error", 3000); show(ERRORS.model_not_configured); }
   else show("Hello. I'm here.", 4000);
@@ -406,9 +406,30 @@ githubAuth.addEventListener("click", () => {
 
 async function renderApps() {
   if (!authed) return;
-  let info;
-  try { info = (await (await api("/api/state")).json()).connections; }
+  let snapshot;
+  try { snapshot = await (await api("/api/state")).json(); }
   catch { return; }
+  if (!snapshot.authed) return showLogin();
+  const info = snapshot.connections;
+  toolList.replaceChildren();
+  for (const tool of snapshot.tool_catalogue || []) {
+    const row = document.createElement("div");
+    row.className = "connection-row";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = tool.name;
+    button.onclick = () => {
+      appsPanel.classList.add("hidden");
+      input.classList.remove("hidden");
+      input.value = "Use " + tool.name + " to ";
+      input.focus();
+    };
+    const detail = document.createElement("small");
+    detail.textContent = (tool.approval_required ? "Approval required · " : "Read only · ") + tool.description;
+    row.append(button, detail);
+    toolList.append(row);
+  }
+  if (!toolList.childElementCount) toolList.textContent = "No model tools available.";
   appsList.replaceChildren();
   for (const [service, config] of Object.entries(MCP_APPS)) {
     const current = info?.services?.[service] || {};
@@ -434,8 +455,9 @@ async function renderApps() {
           await renderApps(); show(config[0] + " disconnected.", 4500);
         } catch { show("Couldn't disconnect " + config[0] + ".", 5000); }
       } else {
-        pendingConnectService = service;
-        await authorizeApp(service);
+        if (busy) return;
+        appsPanel.classList.add("hidden");
+        await ask("Connect to " + config[0], false);
       }
     };
     row.append(label, button);

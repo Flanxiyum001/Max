@@ -29,7 +29,9 @@ canvas { position: fixed; inset: 0; width: 100%; height: 100%; }
   color: #b6efff; cursor: pointer; border-radius: 9px; padding: 6px 10px; }
 .connection-row { border-top: 1px solid #153642; padding: 10px 0; font-size: 13px; }
 .connection-row small { display: block; color: #719cac; padding-top: 3px; font-size: 11px; }
-#connections-toggle, #connections-panel { display: none !important; }  /* the orb is the whole UI */
+#tool-list button { width: 100%; text-align: left; overflow-wrap: anywhere; }
+#tool-list .connection-row { display: block; }
+#tool-list small { line-height: 1.4; }
 #keybox { position: fixed; left: 50%; bottom: 9%; transform: translateX(-50%); z-index: 4;
   display: flex; gap: 10px; align-items: center; }
 #keybox.hidden { display: none; }

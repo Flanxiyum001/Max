@@ -431,11 +431,27 @@ def create_app(
         if not authed(request):
             return {"authed": False}
         sess = session()
+        tools = (
+            tuple(sess.available_tools())
+            if sess is not None and hasattr(sess, "available_tools")
+            else tuple(sess.registry)
+            if sess is not None
+            else ()
+        )
         return {
             "authed": True,
             "model_ready": sess is not None,
             "error": state["error"],
-            "tools": sorted(t.name for t in sess.registry) if sess is not None else [],
+            "tools": sorted(t.name for t in tools),
+            "tool_catalogue": [
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "approval_required": tool.risk.value == "effectful",
+                }
+                for tool in sorted(tools, key=lambda item: item.name)
+            ],
+            "host_tools_available": False,
             "stt_ready": stt is not None,
             "active_job": next(
                 (j.id for j in list(jobs.values()) if j.status in {"running", "approval"}),
@@ -681,22 +697,21 @@ def create_app(
         def approve(tool: str, arguments: dict[str, Any]) -> bool:
             # Remote operation approvals must show EXACT arguments. Never silently
             # truncate the values the owner is asked to authorize.
-            if tool.startswith("mcp."):
-                try:
-                    encoded = json.dumps(arguments, sort_keys=True, ensure_ascii=True)
-                except (TypeError, ValueError):
-                    return False
-                if len(encoded) > 8192:
-                    return False
-                safe_arguments = dict(arguments)
-            else:
-                safe_arguments = {k: str(v)[:300] for k, v in arguments.items()}
+            try:
+                encoded = json.dumps(arguments, sort_keys=True, ensure_ascii=True, allow_nan=False)
+            except (TypeError, ValueError, OverflowError, RecursionError):
+                return False
+            if len(encoded) > (8192 if tool.startswith("mcp.") else 32_768):
+                return False
+            safe_arguments = json.loads(encoded)
             with job._approval_lock:
                 job._event.clear()
                 job._allowed = False
-                job.approval = {"tool": tool, "arguments": safe_arguments}
-                if tool.startswith("mcp.github."):
-                    job.approval["id"] = secrets.token_hex(16)
+                job.approval = {
+                    "tool": tool,
+                    "arguments": safe_arguments,
+                    "id": secrets.token_hex(16),
+                }
                 job.status = "approval"
             answered = job._event.wait(120)
             with job._approval_lock:

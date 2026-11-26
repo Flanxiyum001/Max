@@ -359,6 +359,16 @@ class AssistantSession:
         for tool in self._github_connector.tools_for_session():
             self.registry.register(tool)
 
+    def available_tools(self) -> tuple[Tool, ...]:
+        """Read-only live catalogue; do not mutate the registry of an active turn."""
+        snapshot = tuple(self.registry)
+        if self._github_connector is None:
+            return snapshot
+        return (
+            *(tool for tool in snapshot if not tool.name.startswith("mcp.")),
+            *self._github_connector.tools_for_session(),
+        )
+
     def _system(self) -> list[ChatMessage]:
         now = _dt.datetime.now().astimezone().strftime("%A %d %B %Y, %H:%M %Z")
         intro = (
