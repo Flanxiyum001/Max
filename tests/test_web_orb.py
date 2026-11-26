@@ -112,10 +112,45 @@ def test_effectful_tool_waits_for_owner(web, allow: bool) -> None:  # type: igno
     pending = wait(client, job, {"approval"})
     assert pending["approval"]["tool"] == "reminders.add"
     assert client.post("/api/ask", json={"text": "other"}).status_code == 409  # one at a time
-    client.post(f"/api/job/{job}/approve", json={"allow": allow})
+    approval_id = pending["approval"]["id"]
+    assert client.post(f"/api/job/{job}/approve", json={"allow": allow}).status_code == 409
+    assert (
+        client.post(
+            f"/api/job/{job}/approve", json={"allow": allow, "approval_id": "stale"}
+        ).status_code
+        == 409
+    )
+    assert (
+        client.post(
+            f"/api/job/{job}/approve", json={"allow": allow, "approval_id": approval_id}
+        ).status_code
+        == 200
+    )
     assert wait(client, job, {"done"})["answer"] == ("added" if allow else "not added")
     assert session.decision is allow
     assert client.post(f"/api/job/{job}/approve", json={"allow": True}).status_code == 409
+
+
+def test_approval_displays_full_arguments() -> None:
+    class LongSession(FakeSession):
+        def ask(self, text, *, approve=None, on_step=None):  # type: ignore[no-untyped-def]
+            allowed = approve("notes.write", {"name": "note", "content": "x" * 1_000})
+            return LoopResult(answer="saved" if allowed else "denied")
+
+    app = create_app(
+        {"MAX_WEB_PASSCODE": PASS, "MAX_WEB_INSECURE_COOKIE": "yes"},
+        session_factory=LongSession,
+    )
+    client = TestClient(app)
+    login(client)
+    job = client.post("/api/ask", json={"text": "save"}).json()["job"]
+    approval = wait(client, job, {"approval"})["approval"]
+    assert approval["arguments"]["content"] == "x" * 1_000
+    client.post(
+        f"/api/job/{job}/approve",
+        json={"allow": False, "approval_id": approval["id"]},
+    )
+    assert wait(client, job, {"done"})["answer"] == "denied"
 
 
 def test_reminders_and_speech(web) -> None:  # type: ignore[no-untyped-def]
@@ -162,6 +197,8 @@ def test_hosted_session_has_no_host_tools(tmp_path: Path) -> None:
         names = {t.name for t in session.registry}
         assert not names & {"shell.run", "apps.open", "system.status", "workspace.read"}
         assert {"memory.remember", "reminders.add", "web.search", "weather.current"} <= names
+        assert {"notes.write", "notes.read", "notes.list"} <= names
+        assert {tool.name for tool in session.available_tools()} == names
     finally:
         session.close()
 
@@ -482,7 +519,10 @@ def test_authenticated_refresh_recovers_active_job_without_replay(web) -> None: 
     assert session.asked == ["remind me"]
     assert session.decision is None
     assert client.post("/api/ask", json={"text": "remind me"}).status_code == 409
-    client.post(f"/api/job/{job}/approve", json={"allow": False})
+    client.post(
+        f"/api/job/{job}/approve",
+        json={"allow": False, "approval_id": pending["approval"]["id"]},
+    )
     assert wait(client, job, {"done"})["answer"] == "not added"
     assert client.get("/api/state").json()["active_job"] is None
     assert session.asked == ["remind me"]

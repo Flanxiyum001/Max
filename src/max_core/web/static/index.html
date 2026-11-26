@@ -18,7 +18,7 @@
 <div id="answer" role="status" aria-live="polite"></div>
 <a id="sandbox-link" class="hidden" target="_blank" rel="noopener noreferrer">Open PR sandbox run</a>
 <button id="github-auth" class="hidden" type="button">Authorize app</button>
-<button id="connections-toggle" class="hidden" type="button" hidden>Apps</button>
+<button id="connections-toggle" class="hidden" type="button">Tools &amp; apps</button>
 <form id="keybox" class="hidden" autocomplete="off">
   <a id="key-link" target="_blank" rel="noopener noreferrer">Create key</a>
   <input id="key-input" type="password" maxlength="300" placeholder="Paste API key" aria-label="API key">
@@ -28,6 +28,10 @@
   <div class="connections-heading"><strong>MAX connections</strong><button id="connections-close" type="button">×</button></div>
   <p>Connect once in your browser. MAX handles MCP setup and asks before every tool action.</p>
   <div id="connections-list"></div>
+  <h3>Available tools</h3>
+  <p>Select a tool to start a chat request. MAX will still validate the call and ask for approval when required.</p>
+  <div id="tool-list"></div>
+  <p>PC controls, local files, shell and desktop Playwright require MAX on your own device. This web app cannot access your PC or the Render host.</p>
 </section>
 <div id="choices" class="hidden">
   <button id="allow" type="button">Allow ⏎</button>
