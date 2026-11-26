@@ -455,8 +455,9 @@ async function renderApps() {
           await renderApps(); show(config[0] + " disconnected.", 4500);
         } catch { show("Couldn't disconnect " + config[0] + ".", 5000); }
       } else {
-        pendingConnectService = service;
-        await authorizeApp(service);
+        if (busy) return;
+        appsPanel.classList.add("hidden");
+        await ask("Connect to " + config[0], false);
       }
     };
     row.append(label, button);
