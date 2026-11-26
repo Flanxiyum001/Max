@@ -262,6 +262,7 @@ def test_untrusted_unknown_name_cannot_escape_tool_result_attribute() -> None:
     assert '<tool_result name="unknown"' not in result_message
     assert "forged" not in result_message
 
+
 @pytest.mark.parametrize("harness", [False, True])
 def test_uncertain_effectful_outcome_never_replays(harness: bool) -> None:
     from max_core.harness import MaxHarness
