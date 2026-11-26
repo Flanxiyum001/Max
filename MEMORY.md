@@ -29,4 +29,4 @@ An owner-scoped, review-first PostgreSQL memory **library** is proposed on a sep
 
 ## Long-term memory repo
 
-MAX's durable memory lives in the private **Max-memory** repo (`Flanxiyum001/Max-memory`): `MEMORY.md` (owner-approved facts) and `notes/*.txt` (longer knowledge). Clone it to `%USERPROFILE%\MAX\memory` and point `MAX_MEMORY_MD_PATH`, `MAX_NOTES_DIR` and `MAX_MEMORY_INDEX_PATH` at it (see `.env.example`). Run `scripts/sync.ps1` there to pull before work and push after. Skills live in **Claude-Skills** (`Flanxiyum001/Claude-Skills`). Never put secrets in either repo.
+MAX's durable memory lives in the private **Max-memory** repo (`Flanxiyum001/Max-memory`): `MEMORY.md` (owner-approved facts) and `notes/*.txt` (longer knowledge). Clone it to `%USERPROFILE%\MAX\memory` and point `MAX_MEMORY_MD_PATH`, `MAX_NOTES_DIR` and `MAX_MEMORY_INDEX_PATH` at it (see `.env.example`). Run `scripts/sync.ps1` there to pull before work and push after. Never put secrets in it.

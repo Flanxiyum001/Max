@@ -28,6 +28,5 @@ Documentation and research only. No runtime implementation, provisioning, creden
 - Include objective, changed files, decisions, risk and rollback, exact validation performed, checks not run, and a scoped acceptance checklist in the PR body.
 - Verify the PR base/head and changed-file list before opening it. Do not claim CI is passing unless GitHub checks confirm it; expose blockers and unimplemented requirements.
 
-## Long-term memory and skills
+## Long-term memory
 - Anything worth remembering across sessions (owner preferences, decisions, project state, lessons) goes in the private `Flanxiyum001/Max-memory` repo: short facts in `MEMORY.md`, longer notes in `notes/*.txt`. Read it before starting work. No secrets.
-- Engineering/UI skills come from `Flanxiyum001/Claude-Skills`; install missing ones there with `npx -y skills`.
