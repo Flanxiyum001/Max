@@ -11,6 +11,7 @@ import dataclasses
 import datetime as _dt
 import logging
 import os
+import sqlite3
 import threading
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -32,6 +33,7 @@ from max_core.magnitude import magnitude_settings
 from max_core.pc_control import AUTO_APPROVED, full_control_enabled
 from max_core.persona import persona_message
 from max_core.screen_vision import files_dir
+from max_core.session_archive import SessionArchive
 from max_core.task_routing import TaskKind, classify, route_table
 from max_core.tool_loop import LoopResult, ToolLoop, ToolStep
 from max_core.tools import Tool, ToolError, ToolParam, ToolRegistry, ToolRisk, builtin_registry
@@ -83,6 +85,7 @@ class SessionOptions:
     pc_control: bool = False  # MAX_PC_CONTROL=full: run PC-control tools without asking
     files_root: Path | None = None  # MAX_FILES_DIR (default ~/MAX): screenshots, documents
     comms_env: Mapping[str, str] | None = None  # MAX_EMAIL_*, MAX_WHATSAPP_*, MAX_EXOTEL_*
+    archive_sessions: bool = False
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> SessionOptions:
@@ -101,6 +104,7 @@ class SessionOptions:
                 if k.startswith(("MAX_EMAIL_", "MAX_WHATSAPP_", "MAX_EXOTEL_", "MAX_CALL_"))
                 or k in ("MAX_OWNER_PHONE", "MAX_PUBLIC_URL", "MAX_OWNER_NAME", "MAX_PIPER_VOICE")
             },
+            archive_sessions=_yes(env, "MAX_ARCHIVE_SESSIONS"),
         )
 
 
@@ -202,6 +206,7 @@ class AssistantSession:
             if github_connector is not None:
                 self._refresh_github_tools()
         self.history: list[ChatMessage] = []
+        self.archive = SessionArchive(options.data_dir) if options.archive_sessions else None
         self._make = request_factory(settings)
         self._loop = asyncio.new_event_loop()
         self._thread = threading.Thread(target=self._loop.run_forever, daemon=True)
@@ -424,6 +429,11 @@ class AssistantSession:
                 self.history.pop()
                 return result
             self.history.append(ChatMessage("assistant", result.answer[:20_000]))
+            if self.archive is not None and result.stopped_reason != "model_failed":
+                try:
+                    self.archive.append(text, result.answer)
+                except (OSError, ValueError, sqlite3.Error):
+                    log.warning("local session archive write failed")
             return result
 
     def _with_pc_control(self, approve: ApproveFn | None) -> ApproveFn | None:
@@ -504,6 +514,15 @@ class AssistantSession:
     def reset(self) -> None:
         with self._lock:
             self.history.clear()
+            if self.archive is not None:
+                self.archive.new_session()
+
+    def search_sessions(self, query: str) -> list[dict[str, str]]:
+        """Owner-facing local search; never registered with the model tool loop."""
+        if self.archive is None:
+            raise ValueError("session_archive_disabled")
+        with self._lock:
+            return self.archive.search(query)
 
     def due_reminders(self) -> list[dict[str, Any]]:
         if "reminders.list" not in {t.name for t in self.registry}:

@@ -42,8 +42,11 @@ if errorlevel 1 (
 )
 
 echo [MAX] Launching MAX Desktop...
-if /i "%MAX_SUPERVISED%"=="yes" if /i not "%MAX_ARG1%"=="--smoke-test" (
-    rem Self-healing: the supervisor restarts MAX after a crash, stops on a crash loop.
+set "MAX_USE_SUPERVISOR="
+if /i "%MAX_SUPERVISED%"=="yes" set "MAX_USE_SUPERVISOR=1"
+if /i "%MAX_ARG1%"=="--smoke-test" set "MAX_USE_SUPERVISOR="
+rem Self-healing: the supervisor restarts MAX after a crash and stops on a crash loop.
+if defined MAX_USE_SUPERVISOR (
     ".venv\Scripts\python.exe" -m max_core.supervisor --log "%LOCALAPPDATA%\MAX\supervisor.log" -- ".venv\Scripts\python.exe" -m max_core.native_desktop %*
 ) else (
     ".venv\Scripts\python.exe" -m max_core.native_desktop %*

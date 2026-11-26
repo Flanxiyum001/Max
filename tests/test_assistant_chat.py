@@ -849,6 +849,52 @@ def test_max_tool_iterations_bound_stops_cleanly(tmp_path: Path) -> None:
     assert len(res.tool_executions) == 2
 
 
+def test_cloud_chat_stops_repeated_failure_without_reexecuting(tmp_path: Path) -> None:
+    model_calls = 0
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        nonlocal model_calls
+        model_calls += 1
+        return httpx.Response(
+            200,
+            json=_openai_ok(
+                "",
+                tool_calls=[
+                    {
+                        "id": f"failure_{model_calls}",
+                        "type": "function",
+                        "function": {"name": "dev_health", "arguments": "{}"},
+                    }
+                ],
+            ),
+        )
+
+    class FailingExecutor:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def tool_definitions(self) -> tuple[ToolDefinition, ...]:
+            return (ToolDefinition("dev.health", "Health"),)
+
+        def execute(
+            self, proposal: ToolProposal, *, approval_id: str | None = None
+        ) -> ToolExecutionSummary:
+            self.calls += 1
+            return ToolExecutionSummary(
+                proposal.call_id, proposal.name, {}, "failed", "network_error"
+            )
+
+    executor = FailingExecutor()
+    svc = AssistantChatService(
+        _make_config(tmp_path),
+        max_tool_iterations=6,
+        transport=httpx.MockTransport(handler),
+    )
+    res = svc.send_message("Check health", tool_executor=executor)
+    assert not res.ok and res.error_code == "repeated_tool_failure"
+    assert executor.calls == 2 and model_calls == 3
+
+
 def test_threadpool_concurrent_sync_calls_and_async_injected_client(tmp_path: Path) -> None:
     lock = threading.Lock()
     counter = 0

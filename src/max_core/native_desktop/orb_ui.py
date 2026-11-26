@@ -717,6 +717,23 @@ class OrbWindow(QWidget):
             return
         if self._voice is not None and self._voice.is_recording:
             return
+        if prompt == "/search" or prompt.startswith("/search "):
+            self.input.clear()
+            session = self.ensure_session()
+            try:
+                if session is None:
+                    raise ValueError("session_unavailable")
+                matches = session.search_sessions(prompt.removeprefix("/search").strip())
+                answer = (
+                    "\n".join(
+                        f"{item['created']} · {item['role']}: {item['excerpt']}" for item in matches
+                    )
+                    or "No matching archived messages."
+                )
+            except ValueError:
+                answer = "Enable MAX_ARCHIVE_SESSIONS=yes and enter /search followed by a phrase."
+            self._show_answer(answer)
+            return
         if (
             self._speech_cursor.current
             and not self._speak_poll.isActive()

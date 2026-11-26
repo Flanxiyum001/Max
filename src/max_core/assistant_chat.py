@@ -45,6 +45,7 @@ from max_core.gateway.privacy_guard import contains_high_confidence_secret
 from max_core.gateway.router import Gateway
 from max_core.local_config import DesktopConfig, ProviderConfig
 from max_core.persona import PersonaError, ReplyMode, persona_message, with_persona
+from max_core.tool_recovery import ToolFailureGuard
 
 ToolStatus = Literal["completed", "awaiting_approval", "denied", "failed"]
 
@@ -1199,6 +1200,8 @@ class AssistantChatService:
         replace_group: tuple[ChatMessage, ...] | None,
         on_tool_activity: Callable[[str, str], None] | None = None,
     ) -> ChatTurnResult:
+        failures = ToolFailureGuard()
+
         def emit(name: str, status: str) -> None:
             if on_tool_activity is not None:
                 try:
@@ -1379,6 +1382,19 @@ class AssistantChatService:
                     name=canonical_name,
                     arguments=dict(wire_call.arguments),
                 )
+                if failures.blocked(canonical_name, canonical_call.arguments):
+                    return ChatTurnResult(
+                        ok=False,
+                        reply=(
+                            "I stopped repeating a failing or denied tool call. "
+                            "Review the recorded error and choose a different approach."
+                        ),
+                        provider=spec.provider_id,
+                        model_id=response.model_id,
+                        error_code="repeated_tool_failure",
+                        tool_executions=tuple(summaries),
+                        estimated_cost_usd=float(total_cost) if total_cost is not None else None,
+                    )
                 emit(canonical_name, "proposed")
                 summary = self._execute_proposal(tool_executor, canonical_call)
                 emit(canonical_name, summary.status)
@@ -1440,10 +1456,24 @@ class AssistantChatService:
                         estimated_cost_usd=float(total_cost) if total_cost is not None else None,
                     )
 
+                feedback = _serialize_tool_output(summary.status, summary.output)
+                if summary.status in {"denied", "failed"}:
+                    hint = failures.failed(
+                        canonical_name,
+                        canonical_call.arguments,
+                        summary.output,
+                        denied=summary.status == "denied",
+                    )
+                    if summary.status == "failed":
+                        feedback = json.dumps(
+                            {"result": json.loads(feedback), "recovery_hint": hint}
+                        )
+                elif summary.status == "completed":
+                    failures.success(canonical_name, canonical_call.arguments)
                 turn_messages.append(
                     ChatMessage(
                         role="tool",
-                        content=_serialize_tool_output(summary.status, summary.output),
+                        content=_bound_message_text(feedback),
                         tool_call_id=wire_call.call_id,
                         is_error=(summary.status in {"denied", "failed"}),
                     )
