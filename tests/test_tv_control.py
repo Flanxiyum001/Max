@@ -60,9 +60,7 @@ def test_registry_and_auto_approval(tmp_path):
     for options in ({"host_tools": False}, {"cloud": True}):
         names = {
             t.name
-            for t in assistant_registry(
-                data_dir=tmp_path, enable_web=False, tv_env=env, **options
-            )
+            for t in assistant_registry(data_dir=tmp_path, enable_web=False, tv_env=env, **options)
         }
         assert not any(name.startswith("tv.") for name in names)
 
