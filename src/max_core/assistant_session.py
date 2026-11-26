@@ -28,6 +28,7 @@ from max_core.local_config import load_dotenv_into_mapping
 from max_core.magnitude import PROVIDER_ID as MAGNITUDE_PROVIDER
 from max_core.magnitude import magnitude_settings
 from max_core.pc_control import AUTO_APPROVED, full_control_enabled
+from max_core.tv_control import tv_auto_approved
 from max_core.persona import persona_message
 from max_core.screen_vision import files_dir
 from max_core.task_routing import TaskKind, classify, route_table
@@ -80,6 +81,7 @@ class SessionOptions:
     host_tools: bool = True
     pc_control: bool = False  # MAX_PC_CONTROL=full: run PC-control tools without asking
     files_root: Path | None = None  # MAX_FILES_DIR (default ~/MAX): screenshots, documents
+    tv_env: Mapping[str, str] | None = None  # MAX_TV_KIND / MAX_TV_HOST / MAX_TV_CONTROL
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> SessionOptions:
@@ -92,6 +94,7 @@ class SessionOptions:
             enable_web=_yes(env, "MAX_ENABLE_WEB", default=True),
             pc_control=full_control_enabled(env),
             files_root=files_dir(env),
+            tv_env={k: v for k, v in env.items() if k.startswith("MAX_TV_")},
         )
 
 
@@ -141,6 +144,7 @@ class AssistantSession:
                 host_tools=options.host_tools,
                 files_root=options.files_root,
                 vision="vision" in settings.spec.capabilities,
+                tv_env=options.tv_env,
             )
             if mcp_core is not None:
                 self._register_mcp_tools(mcp_core)
@@ -365,11 +369,13 @@ class AssistantSession:
 
     def _with_pc_control(self, approve: ApproveFn | None) -> ApproveFn | None:
         """Owner opt-in: local sessions run PC-control tools without a prompt."""
-        if not self.options.pc_control or self.is_cloud or not self.options.host_tools:
+        tv_env = self.options.tv_env or {}
+        pc = self.options.pc_control and not self.is_cloud and self.options.host_tools
+        if not pc and tv_env.get("MAX_TV_CONTROL", "").strip().lower() != "auto":
             return approve
 
         def decide(name: str, arguments: dict[str, Any]) -> bool:
-            if name in AUTO_APPROVED:
+            if (pc and name in AUTO_APPROVED) or tv_auto_approved(name, tv_env):
                 return True
             return approve is not None and approve(name, arguments) is True
 

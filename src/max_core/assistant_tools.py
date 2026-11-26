@@ -450,6 +450,7 @@ def assistant_registry(
     host_tools: bool = True,
     files_root: Path | None = None,
     vision: bool = False,
+    tv_env: Mapping[str, str] | None = None,
 ) -> ToolRegistry:
     """Built-ins + assistant tools.
 
@@ -593,6 +594,12 @@ def assistant_registry(
 
         tools.extend(desktop_tools())
         tools.extend(pc_control_tools())
+    if host_tools and tv_env:
+        from max_core.tv_control import make_tv, tv_tools
+
+        tv = make_tv(tv_env)
+        if tv is not None:
+            tools.extend(tv_tools(tv))
     for tool in tools:
         registry.register(tool)
     return registry
