@@ -17,6 +17,7 @@ from max_core.mcp_policy import (
     ReviewedToolPolicy,
     RiskTier,
     review_gateway_proposals,
+    validated_arguments,
 )
 from max_core.trust import ActorContext
 
@@ -164,3 +165,25 @@ def test_malformed_remote_enum_is_a_sanitized_denial() -> None:
     )
     with pytest.raises(MCPPolicyError, match="unreviewed_arguments"):
         review_gateway_proposals(context(), response(), [(tool, policy(tool))])
+
+
+def test_empty_object_schema_accepts_no_arguments() -> None:
+    tool = observed({"type": "object"})
+    reviewed = replace(policy(tool), allowed_arguments=frozenset())
+    assert validated_arguments(tool, reviewed, {}) == {}
+    intent = review_gateway_proposals(context(), response({}), [(tool, reviewed)])[0]
+    assert intent.state == "blocked_pending_dispatch"
+
+
+@pytest.mark.parametrize("value", [10**400, float("inf"), float("-inf"), float("nan")])
+def test_number_schema_rejects_overflow_and_nonfinite_values(value: object) -> None:
+    tool = observed(
+        {
+            "type": "object",
+            "properties": {"task_id": {"type": "number"}, "quiet": {"type": "boolean"}},
+        }
+    )
+    reviewed = policy(tool)
+    with pytest.raises(MCPPolicyError, match="unreviewed_arguments"):
+        validated_arguments(tool, reviewed, {"task_id": value})
+    assert validated_arguments(tool, reviewed, {"task_id": 2.5}) == {"task_id": 2.5}

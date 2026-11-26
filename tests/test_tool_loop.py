@@ -19,6 +19,7 @@ from max_core.tool_loop import ToolLoop, parse_tool_calls
 from max_core.tools import (
     Tool,
     ToolError,
+    ToolParam,
     ToolRegistry,
     ToolRisk,
     Workspace,
@@ -292,3 +293,17 @@ def test_uncertain_effectful_outcome_never_replays(harness: bool) -> None:
         assert result.error_code == "effectful_outcome_uncertain"
         assert "verify the external state" in result.answer
     assert attempts == approvals == len(gateway.requests) == 1
+
+
+@pytest.mark.parametrize("value", [10**400, float("inf"), float("-inf"), float("nan")])
+def test_float_tool_arguments_reject_overflow_and_nonfinite_values(value: object) -> None:
+    tool = Tool(
+        "test.number",
+        "Number",
+        ToolRisk.READ_ONLY,
+        (ToolParam("value", float, "Value"),),
+        lambda _: "ok",
+    )
+    with pytest.raises(ToolError, match="argument_type"):
+        tool.validate({"value": value})
+    assert tool.validate({"value": 2}) == {"value": 2.0}
