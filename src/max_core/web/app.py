@@ -325,6 +325,17 @@ def create_app(
     sandbox = sandbox_runner if sandbox_runner is not None else GitHubPRSandbox(hub.github)
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    try:
+        from max_core.assistant_session import default_data_dir
+        from max_core.memory_repo import MemoryRepoSync
+
+        memory_sync = MemoryRepoSync.from_env(env, default_data_dir(env))
+        if memory_sync is not None:
+            log.info("memory repo: restored %d files", memory_sync.pull())
+            memory_sync.start()
+            app.router.on_shutdown.append(memory_sync.stop)
+    except Exception as exc:
+        log.warning("memory repo unavailable: %s", type(exc).__name__)
     login_limit = RateLimiter(8, 600)
     stt_limit = RateLimiter(30, 60)
     ask_limit = RateLimiter(30, 60)
@@ -850,6 +861,7 @@ def _default_session(
         enable_shell=False,
         enable_web=options.enable_web,
         host_tools=False,
+        comms_env=options.comms_env,  # email / WhatsApp Cloud API work from the web
     )
     return AssistantSession(TrialSettings.from_env(env), options, github_connector=github_connector)
 
