@@ -29,6 +29,7 @@ from max_core.mcp_stdio import (
     allowlisted_stdio_connection,
     discover_stdio_tools,
 )
+from max_core.playwright_mcp import installed_connection
 
 _NAME = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
 _ENV = re.compile(r"[A-Z][A-Z0-9_]{0,127}\Z")
@@ -108,7 +109,13 @@ class MCPDesktopManager:
                     if not isinstance(args, list) or any(not isinstance(arg, str) for arg in args):
                         raise MCPSettingsError("invalid_mcp_profile")
                     try:
-                        StdioMCPConnection(ident, item.get("command", ""), tuple(args), True)
+                        StdioMCPConnection(
+                            ident,
+                            item.get("command", ""),
+                            tuple(args),
+                            True,
+                            item.get("persistent", False),
+                        )
                     except ValueError:
                         raise MCPSettingsError("invalid_mcp_profile") from None
                 elif kind == "endpoint":
@@ -162,6 +169,7 @@ class MCPDesktopManager:
                         "kind": "stdio" if is_stdio else "endpoint",
                         "endpoint": "" if is_stdio else item["endpoint"],
                         "command": item["command"] if is_stdio else "",
+                        "persistent": item.get("persistent", False) if is_stdio else False,
                         "token_env": item.get("token_env", ""),
                         "authenticated": bool(
                             is_stdio
@@ -198,6 +206,7 @@ class MCPDesktopManager:
         args: Sequence[str] = (),
         *,
         discovery_approved: bool = False,
+        persistent: bool = False,
     ) -> None:
         """Owner explicitly adds a local stdio server pinned to one allowlisted binary."""
         if (
@@ -214,6 +223,7 @@ class MCPDesktopManager:
                 args,
                 allowed_commands=allowed,
                 discovery_approved=discovery_approved,
+                persistent=persistent,
             )
         except StdioBridgeError as error:
             raise MCPSettingsError(error.code) from None
@@ -232,6 +242,32 @@ class MCPDesktopManager:
                     "command": connection.command,
                     "args": list(connection.args),
                     "discovery_approved": connection.discovery_approved,
+                    "persistent": connection.persistent,
+                    "tools": [],
+                }
+            )
+            self._write(data)
+
+    def add_playwright(self) -> None:
+        """Owner-initiated setup; tools stay disabled until discovery and review."""
+        try:
+            connection = installed_connection(self._env)
+        except ValueError as error:
+            raise MCPSettingsError(str(error)) from None
+        with self._lock:
+            data = self._read()
+            if any(row["id"] == "playwright" for row in data["connections"]):
+                raise MCPSettingsError("duplicate_mcp_connection")
+            if len(data["connections"]) >= _MAX_CONNECTIONS:
+                raise MCPSettingsError("too_many_mcp_connections")
+            data["connections"].append(
+                {
+                    "id": "playwright",
+                    "kind": "stdio",
+                    "command": connection.command,
+                    "args": list(connection.args),
+                    "discovery_approved": True,
+                    "persistent": True,
                     "tools": [],
                 }
             )
@@ -272,6 +308,18 @@ class MCPDesktopManager:
             raise MCPSettingsError("invalid_mcp_connection") from None
 
     def _stdio_connection(self, item: dict[str, Any]) -> StdioMCPConnection:
+        if item.get("id") == "playwright":
+            try:
+                connection = installed_connection(self._env)
+            except ValueError:
+                raise MCPSettingsError("playwright_install_invalid") from None
+            if (item.get("command"), item.get("args"), item.get("persistent")) != (
+                connection.command,
+                list(connection.args),
+                True,
+            ):
+                raise MCPSettingsError("playwright_install_invalid")
+            return connection
         allowed = self._stdio_allowlist()
         try:
             return allowlisted_stdio_connection(
@@ -280,6 +328,7 @@ class MCPDesktopManager:
                 item.get("args", []),
                 allowed_commands=allowed,
                 discovery_approved=bool(item.get("discovery_approved", False)),
+                persistent=item.get("persistent", False),
             )
         except StdioBridgeError as error:
             raise MCPSettingsError(error.code) from None

@@ -768,6 +768,17 @@ class NativeDesktopCore:
                 raise NativeDesktopError(error.code) from None
             self._invalidate_mcp()
 
+    def mcp_add_playwright(self) -> None:
+        """Connect a locally installed, pinned Playwright MCP server for owner review."""
+        from max_core.mcp_desktop import MCPSettingsError
+
+        with self.call_guard():
+            try:
+                self._mcp_manager.add_playwright()
+            except MCPSettingsError as error:
+                raise NativeDesktopError(error.code) from None
+            self._invalidate_mcp()
+
     def mcp_discover(self, ident: str) -> int:
         """Explicit network discovery invalidates all prior pinned approvals."""
         from max_core.mcp_desktop import MCPSettingsError
@@ -792,14 +803,20 @@ class NativeDesktopCore:
 
     def _invalidate_mcp(self) -> None:
         with self._bridge_lock:
+            if self._mcp_executor is not None:
+                self._mcp_executor.close()
             self._combined_executor = None
             self._mcp_executor = None
 
-    def send_chat_message(self, user_text: str) -> ChatTurnResult:
+    def send_chat_message(
+        self, user_text: str, *, on_tool_activity: Callable[[str, str], None] | None = None
+    ) -> ChatTurnResult:
         """Send a user chat message through AssistantChatService with local tools."""
         with self.call_guard():
             executor = self._get_tool_executor()
-            return self._get_chat_service().send_message(user_text, tool_executor=executor)
+            return self._get_chat_service().send_message(
+                user_text, tool_executor=executor, on_tool_activity=on_tool_activity
+            )
 
     def resume_chat_approval(self, approval_id: str) -> ChatTurnResult:
         """Resume a paused chat turn for an approval owned by this session."""
@@ -1036,6 +1053,8 @@ class NativeDesktopCore:
                 self._direct_continuations.clear()
             with self._bridge_lock:
                 voice = self._voice_controller
+                if self._mcp_executor is not None:
+                    self._mcp_executor.close()
             if voice is not None:
                 try:
                     voice.revoke_microphone()
