@@ -471,6 +471,7 @@ def test_orb_js_exposes_voice_isolation_dsp_chain(web) -> None:  # type: ignore[
     assert "createDynamicsCompressor" in js
     assert "createMediaStreamDestination" in js
 
+
 def test_authenticated_refresh_recovers_active_job_without_replay(web) -> None:  # type: ignore[no-untyped-def]
     client, session = web
     login(client)
