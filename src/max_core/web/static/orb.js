@@ -158,12 +158,12 @@ function setState(s, backAfter) {
   state = s;
   if (backAfter) setTimeout(() => { if (state === s && !busy) state = "idle"; }, backAfter);
 }
-async function api(path, body) {
+async function api(path, body, signal) {
   const res = await fetch(path, {
     method: body === undefined ? "GET" : "POST",
     headers: body === undefined ? {} : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
-    credentials: "same-origin",
+    credentials: "same-origin", signal,
   });
   if (res.status === 401) { showLogin(); throw new Error("login_required"); }
   if (!res.ok) { let d = "error"; try { d = (await res.json()).detail; } catch {} const error = new Error(d); error.status = res.status; throw error; }
@@ -271,7 +271,8 @@ async function ask(text, spoken) {
   githubAuth.classList.add("hidden");
   sandboxLink.classList.add("hidden");
   pendingConnectService = null;
-  busy = true; setState("thinking"); show(""); setActivity("Thinking");
+  stopSpeaking(); stopWake();
+  busy = true; setState("thinking"); show(spoken ? `“${text}”` : "", 0); setActivity("Thinking");
   try {
     const { job } = await (await api("/api/ask", { text, voice: spoken })).json();
     pendingJob = job;
@@ -291,7 +292,7 @@ async function ask(text, spoken) {
 async function pollJob(job, spoken) {
   try {
     for (;;) {
-      await new Promise((r) => setTimeout(r, 700));
+      await new Promise((r) => setTimeout(r, 300));
       const j = await (await api(`/api/job/${job}`)).json();
       if (j.status === "approval" && j.approval) { askApproval(j.approval); continue; }
       choices.classList.add("hidden");
@@ -328,9 +329,11 @@ async function pollJob(job, spoken) {
           githubAuth.classList.remove("hidden");
           stopWake();
         }
-        setState("speaking"); show(j.answer);
-        if (spoken) { followUp = true; await say(j.answer); } else setState("speaking", 2500);
-        if (!followUp) resumeWake();
+        if (spoken) {
+          await say(j.answer, { follow: !j.connect });
+        } else {
+          show(j.answer); setState("speaking", 2500); resumeWake();
+        }
       } else { setState("error", 2500); show(DETAILS[j.detail] || ERRORS[j.error] || ERRORS.model_unavailable); resumeWake(); }
       return;
     }
@@ -643,45 +646,63 @@ async function audioRunning() {
   }
   return audioCtx.state === "running";
 }
-function say(text) {
-  return new Promise(async (done) => {
-    try {
-      const res = await api("/api/speak", { text: text.slice(0, 2000) });
-      const url = URL.createObjectURL(await res.blob());
-      const wantFollowUp = followUp;
-      stopSpeaking(); followUp = wantFollowUp;
-      // Route through the visualiser only while it is running; a suspended
-      // AudioContext would otherwise swallow the sound without any error.
-      const running = await audioRunning();
-      let el;
-      if (player && (playerSrc || running)) {
-        el = player;
-        if (!playerSrc && running) {
-          try { playerSrc = audioCtx.createMediaElementSource(player); playerSrc.connect(audioCtx.destination); } catch {}
-        }
-        if (playerSrc && !running) el = new Audio();   // routed but muted: play directly instead
-      } else el = new Audio();
-      if (el === player && playerSrc) connectLevel(playerSrc);
-      el.src = url; audio = el; setState("speaking");
-      el.onended = () => {
-        URL.revokeObjectURL(url); el.onended = null; audio = null;
-        if (!busy) setState("idle");
-        done();
-        if (followUp) { followUp = false; setTimeout(() => startListening({ followUp: true }), 250); }
-        else resumeWake();
-      };
-      await el.play();
-    } catch {
-      // Server voices failed: speak with the browser's built-in voice instead.
-      const wantFollowUp = followUp;
-      const after = () => {
-        if (!busy) setState("idle");
-        done();
-        if (wantFollowUp) { followUp = false; setTimeout(() => startListening({ followUp: true }), 400); }
-        else resumeWake();
-      };
-      if (!browserSay(text, after)) { setState("speaking", 2500); after(); }
+// Speak the very same answer shown on screen. Keep the first request short,
+// then prepare one following chunk during playback. No discarded text.
+function speechChunks(text) {
+  const chars = Array.from(text);
+  const chunks = [];
+  let offset = 0;
+  while (offset < chars.length) {
+    const limit = chunks.length ? 900 : 240;
+    let end = Math.min(offset + limit, chars.length);
+    if (end < chars.length) {
+      const floor = offset + Math.floor(limit / 2);
+      let boundary = end;
+      while (boundary > floor && !/\s/u.test(chars[boundary - 1])) boundary--;
+      if (boundary > floor) end = boundary;
     }
+    chunks.push(chars.slice(offset, end).join(""));
+    offset = end;
+  }
+  return chunks;
+}
+let speechRun = null;
+async function fetchSpeech(text, run) {
+  if (run.controller.signal.aborted) return null;
+  try {
+    const res = await api("/api/speak", { text }, run.controller.signal);
+    return await res.blob();
+  } catch { return null; }
+}
+async function playSpeech(blob, run) {
+  if (!blob || speechRun !== run) return false;
+  const running = await audioRunning();
+  if (speechRun !== run) return false;
+  let el = player && (playerSrc || running) ? player : new Audio();
+  if (el === player && !playerSrc && running) {
+    try { playerSrc = audioCtx.createMediaElementSource(player); playerSrc.connect(audioCtx.destination); } catch {}
+  }
+  if (el === player && playerSrc && !running) el = new Audio();
+  if (el === player && playerSrc) connectLevel(playerSrc);
+  const url = URL.createObjectURL(blob);
+  return new Promise((resolve) => {
+    let started = false, finished = false;
+    const finish = (ok) => {
+      if (finished) return;
+      finished = true;
+      el.onended = null; el.onerror = null; el.onplaying = null;
+      el.pause(); URL.revokeObjectURL(url);
+      if (audio === el) audio = null;
+      run.cancel = null;
+      resolve(ok);
+    };
+    run.cancel = () => finish(true);
+    el.src = url; audio = el;
+    el.onplaying = () => { started = true; };
+    el.onended = () => finish(true);
+    // Do not repeat a chunk that may already have been heard.
+    el.onerror = () => finish(started);
+    el.play().catch(() => finish(started));
   });
 }
 function pickVoice() {
@@ -690,21 +711,62 @@ function pickVoice() {
   const prefer = /(natural|neural|online).*(female|emily|aria|jenny|sonia|libby|natasha)|emily|aria|jenny|sonia|libby|samantha|karen|moira|tessa|serena|google uk english female|google us english|zira/i;
   return en.find((v) => prefer.test(v.name)) || en[0] || vs[0] || null;
 }
-function browserSay(text, after) {
-  if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) return false;
-  try {
-    speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text.slice(0, 2000));
-    const v = pickVoice(); if (v) { u.voice = v; u.lang = v.lang; }
-    u.rate = 1.02; u.pitch = 1.05;
-    u.onstart = () => setState("speaking");
-    u.onend = after; u.onerror = after;
-    speechSynthesis.speak(u);
-    return true;
-  } catch { return false; }
+function browserSay(text, run) {
+  return new Promise((resolve) => {
+    if (speechRun !== run || !window.speechSynthesis || !window.SpeechSynthesisUtterance) {
+      resolve(false); return;
+    }
+    try {
+      const u = new SpeechSynthesisUtterance(text);
+      const v = pickVoice(); if (v) { u.voice = v; u.lang = v.lang; }
+      u.rate = 1.02; u.pitch = 1.05;
+      let finished = false;
+      const finish = (ok) => {
+        if (finished) return;
+        finished = true; run.cancel = null; resolve(ok);
+      };
+      run.cancel = () => { finish(false); speechSynthesis.cancel(); };
+      u.onend = () => finish(true);
+      u.onerror = () => finish(false);
+      speechSynthesis.speak(u);
+    } catch { run.cancel = null; resolve(false); }
+  });
 }
 if (window.speechSynthesis) { speechSynthesis.getVoices(); speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices(); }
-function stopSpeaking() { if (window.speechSynthesis) speechSynthesis.cancel(); followUp = false; if (audio) { audio.pause(); audio = null; if (!busy) setState("idle"); } }
+function stopSpeaking() {
+  const run = speechRun; speechRun = null; followUp = false;
+  if (run) { run.controller.abort(); if (run.cancel) run.cancel(); }
+  if (window.speechSynthesis) speechSynthesis.cancel();
+  if (audio) { audio.pause(); audio = null; }
+  if (run && !busy) setState("idle");
+}
+async function say(text, { follow = false } = {}) {
+  stopSpeaking(); stopWake(); stopMicLevel();
+  const run = { controller: new AbortController(), cancel: null };
+  speechRun = run; followUp = follow;
+  show(text, 0); setState("speaking");
+  const chunks = speechChunks(text);
+  let complete = true, serverFailed = false;
+  let pending = chunks.length ? fetchSpeech(chunks[0], run) : null;
+  for (let i = 0; i < chunks.length && speechRun === run; i++) {
+    const blob = pending ? await pending : null;
+    if (speechRun !== run) return;
+    if (!blob) serverFailed = true;
+    // One bounded prefetch, not a burst of parallel TTS requests.
+    pending = !serverFailed && i + 1 < chunks.length ? fetchSpeech(chunks[i + 1], run) : null;
+    if (!(await playSpeech(blob, run)) && speechRun === run) {
+      if (!(await browserSay(chunks[i], run))) { complete = false; break; }
+    }
+  }
+  if (speechRun !== run) return;
+  run.controller.abort(); speechRun = null;
+  followUp = false; setState("idle");
+  if (!complete) setActivity("Voice unavailable — full reply is on screen");
+  if (follow && complete) setTimeout(() => {
+    if (!busy && !speechRun && !listening && !transcribing) startListening({ followUp: true });
+  }, 300);
+  else resumeWake();
+}
 
 // ---------------------------------------------------------------- voice in (Siri-style)
 // • tap / Space: listen once; sends by itself when you stop talking
@@ -717,7 +779,7 @@ let wakeRec = null, wakeWanted = false;
 
 // High-accuracy path: record → server Whisper-class transcription. Ends by itself
 // when you stop talking (voice-activity detection on the mic level).
-let recorder = null;
+let recorder = null, transcribing = false;
 function recOptions() {
   const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"]
     .find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || "";
@@ -737,10 +799,10 @@ function speechGate(onDone, { spoke = false, maxWaitMs = 8000, maxMs = 30000 } =
       if (speechMs >= 150) { spoke = true; quietSince = null; }
     } else {
       if (!spoke) speechMs = Math.max(0, speechMs - 50);
-      if (spoke && v < off) quietSince = quietSince || now;
+      if (spoke) quietSince = v < off ? (quietSince || now) : null;
     }
     if (!spoke && now - started > maxWaitMs) { clearInterval(timer); onDone(false); }
-    else if ((spoke && quietSince && now - quietSince > 1500) || now - started > maxMs) {
+    else if ((spoke && quietSince && now - quietSince > 850) || now - started > maxMs) {
       clearInterval(timer); onDone(true);
     }
   }, 100);
@@ -776,18 +838,19 @@ async function startRecording(opts = {}) {
       setState("idle"); if (!opts.followUp) show("I didn't hear anything.", 2500); else show("");
       resumeWake(); return;
     }
-    chime(false); setState("thinking"); show("⋯", 0);
+    chime(false); setState("thinking"); setActivity("Transcribing"); transcribing = true;
     try {
       const text = await transcribeClip(blob);
-      if (text) { show(`“${text}”`, 0); ask(text, true); }
-      else { setState("idle"); show("I didn't catch that.", 2500); resumeWake(); }
-    } catch { setState("error", 2500); show("I couldn't transcribe that. Try again?", 3000); resumeWake(); }
+      if (text) { transcribing = false; ask(text, true); }
+      else { setState("idle"); setActivity(null); show("I didn't catch that.", 2500); resumeWake(); }
+    } catch { setState("error", 2500); setActivity(null); show("I couldn't transcribe that. Try again?", 3000); resumeWake(); }
+    finally { transcribing = false; }
   };
   recorder.start(250);
 }
 
 function startListening(opts = {}) {
-  if (!authed || busy || listening) return;
+  if (!authed || busy || listening || transcribing) return;
   if (sttReady && window.MediaRecorder && navigator.mediaDevices) { startRecording(opts); return; }
   if (!SR) { setState("error", 2500); show("This browser can't listen. Try Chrome or Edge.", 4000); return; }
   stopSpeaking(); stopWake();
@@ -798,8 +861,12 @@ function startListening(opts = {}) {
   recognition.onresult = (e) => {
     heardAnything = true;
     let interim = "";
-    for (const r of e.results) (r.isFinal ? (finalText = r[0].transcript) : (interim += r[0].transcript));
-    show(`“${finalText || interim}”`, 0);
+    finalText = "";
+    for (const r of e.results) {
+      if (r.isFinal) finalText += r[0].transcript + " ";
+      else interim += r[0].transcript + " ";
+    }
+    show(`“${(finalText + interim).trim()}”`, 0);
   };
   recognition.onerror = (e) => {
     if (e.error === "not-allowed") { setState("error", 2500); show("Microphone permission was denied.", 3500); wakeOn = false; saveWake(); }
@@ -848,18 +915,20 @@ function finishTape() {
   t.rec.onstop = async () => {
     tape = null; listening = false; stopMicLevel();
     const blob = new Blob(t.chunks, { type: (t.mime || "audio/webm").split(";")[0] });
-    chime(false); setState("thinking"); show("⋯", 0);
+    chime(false); setState("thinking"); setActivity("Transcribing"); transcribing = true;
     try {
       const said = await transcribeClip(blob);
       const m = said.match(WAKE);
       const rest = (m ? said.slice(m.index + m[0].length) : said).trim();
-      if (rest.length > 2) { show(`“${rest}”`, 0); ask(rest, true); }
-      else { setState("idle"); startListening(); }   // just "Hey MAX": listen for the command
-    } catch { setState("error", 2500); show("I couldn't transcribe that. Try again?", 3000); resumeWake(); }
+      transcribing = false;
+      if (rest.length > 2) { ask(rest, true); }
+      else { setActivity(null); setState("idle"); startListening(); }   // just "Hey MAX": listen for the command
+    } catch { setActivity(null); setState("error", 2500); show("I couldn't transcribe that. Try again?", 3000); resumeWake(); }
+    finally { transcribing = false; }
   };
 }
 async function startWake() {
-  if (!SR || !wakeOn || !authed || listening || busy || audio || wakeRec) return;
+  if (!SR || !wakeOn || !authed || listening || busy || transcribing || speechRun || wakeRec) return;
   wakeWanted = true;
   if (sttReady && window.MediaRecorder) { await startMicLevel(); startTape(); }
   if (!wakeWanted || wakeRec) return;
@@ -919,7 +988,7 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   if (e.key === " " && !e.repeat) { e.preventDefault(); toggleListening(); return; }
-  if (e.key === "Escape") { if (audio) stopSpeaking(); else show(""); return; }
+  if (e.key === "Escape") { if (speechRun) { stopSpeaking(); resumeWake(); } else show(""); return; }
   if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
     input.classList.remove("hidden"); input.focus();
   }
@@ -928,10 +997,12 @@ input.addEventListener("input", () => { if (!input.value) input.classList.add("h
 
 // ---------------------------------------------------------------- reminders
 setInterval(async () => {
-  if (!authed || busy) return;
+  if (!authed || busy || listening || transcribing || speechRun) return;
   try {
     const { due } = await (await api("/api/reminders/due")).json();
-    if (due.length) { const text = "Reminder: " + due.join(" · "); setState("speaking"); show(text); say(text); }
+    if (due.length && !busy && !listening && !transcribing && !speechRun) {
+      await say("Reminder: " + due.join(" · "));
+    }
   } catch {}
 }, 30000);
 

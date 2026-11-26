@@ -319,6 +319,11 @@ def create_app(
     backup = tts_backup or synthesize_api
     stt = stt_config(env)
     stt_vocab = env.get("MAX_STT_VOCAB", "")
+    stt_use_reply_context = env.get("MAX_STT_REPLY_CONTEXT", "").strip().lower() in {
+        "yes",
+        "true",
+        "1",
+    }
     hear = transcriber or transcribe
     github = github_connector if github_connector is not None else WebGitHubConnector(env)
     hub = mcp_hub if mcp_hub is not None else WebMCPHub(env, github_connector=github)
@@ -820,7 +825,7 @@ def create_app(
         sess = state["session"]
         history = getattr(sess, "history", None) or []
         last = next((m.content for m in reversed(history) if m.role == "assistant"), "")
-        if last and not stt.verbatim:  # avoid injecting previous answers in verbatim mode
+        if last and stt_use_reply_context and not stt.verbatim:
             cfg = dataclasses.replace(stt, prompt=stt_prompt(stt_vocab, last))
         try:
             text = await hear(audio, content_type, cfg)
@@ -842,12 +847,12 @@ def create_app(
                 log.warning("piper voice failed: %s", type(exc).__name__)
         if not audio:
             try:
-                audio = await speak(body.text, voice, rate, pitch)
+                audio = await asyncio.wait_for(speak(body.text, voice, rate, pitch), timeout=8.0)
             except Exception as exc:
                 log.warning("neural voice failed: %s", type(exc).__name__)
         if not audio and backup_cfg is not None:
             try:
-                audio = await backup(body.text, backup_cfg)
+                audio = await asyncio.wait_for(backup(body.text, backup_cfg), timeout=8.0)
             except Exception as exc:
                 log.warning("backup voice failed: %s", type(exc).__name__)
         if not audio:
