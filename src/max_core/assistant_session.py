@@ -37,6 +37,7 @@ from max_core.session_archive import SessionArchive
 from max_core.task_routing import TaskKind, classify, route_table
 from max_core.tool_loop import LoopResult, ToolLoop, ToolStep
 from max_core.tools import Tool, ToolError, ToolParam, ToolRegistry, ToolRisk, builtin_registry
+from max_core.tv_control import tv_auto_approved
 
 if TYPE_CHECKING:
     from max_core.native_desktop.backend import NativeDesktopCore
@@ -86,6 +87,7 @@ class SessionOptions:
     files_root: Path | None = None  # MAX_FILES_DIR (default ~/MAX): screenshots, documents
     comms_env: Mapping[str, str] | None = None  # MAX_EMAIL_*, MAX_WHATSAPP_*, MAX_EXOTEL_*
     archive_sessions: bool = False
+    tv_env: Mapping[str, str] | None = None
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> SessionOptions:
@@ -105,6 +107,7 @@ class SessionOptions:
                 or k in ("MAX_OWNER_PHONE", "MAX_PUBLIC_URL", "MAX_OWNER_NAME", "MAX_PIPER_VOICE")
             },
             archive_sessions=_yes(env, "MAX_ARCHIVE_SESSIONS"),
+            tv_env={k: v for k, v in env.items() if k.startswith("MAX_TV_")},
         )
 
 
@@ -154,6 +157,11 @@ class AssistantSession:
                 host_tools=options.host_tools,
                 files_root=options.files_root,
                 vision="vision" in settings.spec.capabilities,
+                tv_env=(
+                    options.tv_env
+                    if settings.spec.inference_destination == InferenceDestination.VERIFIED_LOCAL
+                    else None
+                ),
             )
             self.evolution: OutcomeLedger | None = None
             try:
@@ -448,11 +456,20 @@ class AssistantSession:
 
     def _with_pc_control(self, approve: ApproveFn | None) -> ApproveFn | None:
         """Owner opt-in: local sessions run PC-control tools without a prompt."""
-        if not self.options.pc_control or self.is_cloud or not self.options.host_tools:
+        if not self.options.host_tools or self.is_cloud:
+            return approve
+        tv_env = (
+            self.options.tv_env or {}
+            if self.settings.spec.inference_destination == InferenceDestination.VERIFIED_LOCAL
+            else {}
+        )
+        if not self.options.pc_control and not tv_auto_approved("tv.press", tv_env):
             return approve
 
         def decide(name: str, arguments: dict[str, Any]) -> bool:
-            if name in AUTO_APPROVED:
+            if (self.options.pc_control and name in AUTO_APPROVED) or tv_auto_approved(
+                name, tv_env
+            ):
                 return True
             return approve is not None and approve(name, arguments) is True
 
