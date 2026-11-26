@@ -93,10 +93,10 @@ function frame(now) {
   const h = still ? 0 : orbTime, env = still ? 0 : orbEnv, onsets = still ? [] : orbOnsets;
   const mic = state === "listening" ? level : 0;
 
-  const w = innerWidth, hh = innerHeight, S = Math.min(w, hh) * 0.62 / 720;
+  const w = innerWidth, hh = innerHeight, S = Math.min(w, hh) * 0.48 / 720;
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, canvas.width, canvas.height);
   const dpr = window.devicePixelRatio || 1;
-  ctx.setTransform(dpr * S, 0, 0, dpr * S, dpr * (w / 2 - 360 * S), dpr * (hh * 0.42 - 360 * S));
+  ctx.setTransform(dpr * S, 0, 0, dpr * S, dpr * (w / 2 - 360 * S), dpr * (hh * 0.29 - 360 * S));
   const col = [0, 1, 2].map((c) => Math.round(ORB_COLORS.reduce((s, rgb, i) => s + rgb[c] * orbW[i], 0)));
   const rgb = col.join(","), sw = orbW[2];
   if (rgb !== orbSpriteKey) { orbSpriteKey = rgb; orbSprite = makeSprite(rgb, 0.2); }
@@ -151,7 +151,12 @@ function setActivity(text) {
 function show(text, ms) {
   clearTimeout(hideTimer);
   if (!text) { answerEl.classList.remove("show"); return; }
-  answerEl.textContent = text; answerEl.classList.add("show");
+  if (answerEl.textContent !== text) {
+    answerEl.textContent = text;
+    answerEl.scrollTop = 0;
+  }
+  answerEl.classList.toggle("long", text.length > 180 || text.includes("\n"));
+  answerEl.classList.add("show");
   if (ms !== 0) hideTimer = setTimeout(() => answerEl.classList.remove("show"),
                                        ms || Math.max(12000, Math.min(60000, text.length * 90)));
 }
@@ -1032,6 +1037,9 @@ document.addEventListener("keydown", (e) => {
     else if (e.key === "Escape") { input.value = ""; input.classList.add("hidden"); input.blur(); }
     return;
   }
+  // Let the focused transcript handle its own keyboard scrolling.
+  if (document.activeElement === answerEl &&
+      [" ", "ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"].includes(e.key)) return;
   if (e.target instanceof HTMLButtonElement && (e.key === " " || e.key === "Enter")) return;
   if (e.key === " " && !e.repeat) { e.preventDefault(); toggleListening(); return; }
   if (e.key === "Escape") { if (speechRun) { stopSpeaking(); resumeWake(); } else show(""); return; }
