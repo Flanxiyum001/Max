@@ -37,6 +37,24 @@
 <div id="hint">type to talk · space or tap the orb to speak</div>
 <button id="wake" type="button">“Hey MAX”: off</button>
 
+<section id="context-panel" class="hidden" aria-label="Context usage">
+  <div class="ctx-head">
+    <strong>Context</strong>
+    <div class="ctx-actions">
+      <button id="ctx-refresh" type="button" title="Refresh context">↻</button>
+      <button id="ctx-close" type="button" title="Close context">×</button>
+    </div>
+  </div>
+  <div class="ctx-summary">
+    <span id="ctx-pct">0% used</span>
+    <span id="ctx-ratio" class="ctx-muted">0 / 128K</span>
+  </div>
+  <div id="ctx-bar" class="ctx-bar" aria-hidden="true"></div>
+  <div id="ctx-rows" class="ctx-rows"></div>
+  <div id="ctx-details" class="ctx-details"></div>
+  <div id="ctx-foot" class="ctx-foot">Last updated just now. Send a message to refresh.</div>
+</section>
+
 <script src="/static/orb.js"></script>
 </body>
 </html>

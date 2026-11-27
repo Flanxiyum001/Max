@@ -238,9 +238,72 @@ async function boot() {
   saveWake();
 }
 
+// ---------------------------------------------------------------- context viewer
+const ctxPanel = $("context-panel"), ctxPct = $("ctx-pct"), ctxRatio = $("ctx-ratio");
+const ctxBar = $("ctx-bar"), ctxRows = $("ctx-rows"), ctxDetails = $("ctx-details"), ctxFoot = $("ctx-foot");
+const CTX_QUERY = /^(?:\/context\b|(?:hey\s+max[\s,]*)?(?:please\s+)?(?:show|check|display|open|what(?:'s| is))\s+(?:me\s+)?(?:the\s+|your\s+|my\s+)?context(?:\s+(?:usage|window|breakdown))?[\s.?!]*)$/i;
+function fmtTok(n) {
+  if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
+  if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "K";
+  return String(n);
+}
+async function showContextPanel(spoken = false) {
+  try {
+    const data = await (await api("/api/context")).json();
+    ctxPct.textContent = `${data.used_percent}% used`;
+    ctxRatio.textContent = `${fmtTok(data.used_tokens)} / ${fmtTok(data.total_tokens)}`;
+    ctxBar.replaceChildren();
+    for (const c of data.categories) {
+      if (c.key === "free_space" || c.tokens <= 0) continue;
+      const seg = document.createElement("div");
+      seg.className = "ctx-seg";
+      seg.style.width = Math.max(1.5, c.percent) + "%";
+      seg.style.background = c.color;
+      ctxBar.append(seg);
+    }
+    ctxRows.replaceChildren();
+    for (const c of data.categories) {
+      const row = document.createElement("div");
+      row.className = "ctx-row";
+      const dot = document.createElement("span"); dot.className = "ctx-dot"; dot.style.background = c.color;
+      const lbl = document.createElement("span"); lbl.className = "ctx-label"; lbl.textContent = c.label;
+      const tok = document.createElement("span"); tok.className = "ctx-tok"; tok.textContent = fmtTok(c.tokens);
+      const pct = document.createElement("span"); pct.className = "ctx-pct-col"; pct.textContent = `${c.percent}%`;
+      row.append(dot, lbl, tok, pct);
+      ctxRows.append(row);
+    }
+    ctxDetails.replaceChildren();
+    for (const [key, label] of [["mcp_tools", "MCP tools"], ["memory_files", "Memory files"]]) {
+      const det = document.createElement("details");
+      const sum = document.createElement("summary");
+      const left = document.createElement("span"); left.textContent = "› " + label;
+      const right = document.createElement("span"); right.className = "ctx-muted"; right.textContent = String(data.counts?.[key] ?? 0);
+      sum.append(left, right);
+      det.append(sum);
+      const items = data.details?.[key] || [];
+      if (items.length) {
+        const ul = document.createElement("ul");
+        for (const item of items) { const li = document.createElement("li"); li.textContent = item; ul.append(li); }
+        det.append(ul);
+      }
+      ctxDetails.append(det);
+    }
+    ctxFoot.textContent = "Last updated just now. Send a message or click ↻ to refresh.";
+    ctxPanel.classList.remove("hidden");
+    const summary = `Context is ${data.used_percent}% used: ${fmtTok(data.used_tokens)} of ${fmtTok(data.total_tokens)} tokens.`;
+    setState("speaking"); show(summary, 5000);
+    if (spoken) await say(summary); else setState("speaking", 2000);
+  } catch {
+    setState("error", 2000); show("Couldn't load context usage.", 3000);
+  }
+}
+$("ctx-close").addEventListener("click", () => ctxPanel.classList.add("hidden"));
+$("ctx-refresh").addEventListener("click", () => showContextPanel(false));
+
 // ---------------------------------------------------------------- conversation
 async function ask(text, spoken) {
   if (busy || !text.trim()) return;
+  if (CTX_QUERY.test(text.trim())) { await showContextPanel(spoken); return; }
   githubAuth.classList.add("hidden");
   sandboxLink.classList.add("hidden");
   pendingConnectService = null;

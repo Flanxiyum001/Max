@@ -430,6 +430,18 @@ def create_app(
             "connections": hub.status(),
         }
 
+    @app.get("/api/context")
+    def get_context(request: Request) -> dict[str, Any]:
+        require(request)
+        from max_core.context_usage import build_context_snapshot
+
+        sess = session()
+        prev = state.get("last_ctx_tokens")
+        prev_int = prev if isinstance(prev, int) else None
+        snap = build_context_snapshot(sess, previous_used_tokens=prev_int)
+        state["last_ctx_tokens"] = snap["used_tokens"]
+        return snap
+
     @app.get("/.well-known/oauth-client-metadata/max.json")
     def mcp_client_metadata() -> dict[str, Any]:
         try:
