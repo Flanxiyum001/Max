@@ -141,3 +141,12 @@ orchestration live coding, real model access, or production readiness. A separat
 implementation agent and independent reviewing agent are used for this change.
 The owner's later explicit merge authorization supersedes historical contributor
 instructions where it applies; it never removes validation or live release gates.
+
+## M35 — adopt DeepSeek Harness ideas, not its runtime (2026-11-27)
+
+The owner asked to use `deepseek-ai/deepseek-harness` and implement the same
+for MAX. Its runtime is TypeScript/Node on Cordis, and MAX is Python with its
+own trust gates, so I adapted the design instead of vendoring it: a session log
+as the single source of model context, reversible plugin effects, a turn/step
+event model and keyless replay tests. Plugin hooks may deny but never approve
+tools. Details: [M35_HARNESS_CORE.md](M35_HARNESS_CORE.md).

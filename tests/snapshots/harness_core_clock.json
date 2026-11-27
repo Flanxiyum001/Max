@@ -1,0 +1,7 @@
+{
+ "version": 1,
+ "replies": [
+  "<tool_call>{\"name\": \"math.calculate\", \"arguments\": {\"expression\": \"6*7\"}}</tool_call>",
+  "It is 42."
+ ]
+}
