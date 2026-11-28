@@ -133,8 +133,21 @@ class CodingWorkspace:
         except UnicodeDecodeError:
             raise ToolError("not_text") from None
 
+        has_crlf = "\r\n" in content
+        norm_content = content.replace("\r\n", "\n")
+        norm_target = target.replace("\r\n", "\n")
+        norm_replacement = replacement.replace("\r\n", "\n")
+
         count = content.count(target)
         if count == 0:
+            norm_count = norm_content.count(norm_target)
+            if norm_count == 1:
+                norm_updated = norm_content.replace(norm_target, norm_replacement, 1)
+                updated = norm_updated.replace("\n", "\r\n") if has_crlf else norm_updated
+                path.write_text(updated, encoding="utf-8")
+                return f"edited {args['path']}"
+            elif norm_count > 1:
+                raise ToolError("target_not_unique")
             raise ToolError("target_not_found")
         if count > 1:
             raise ToolError("target_not_unique")
@@ -161,9 +174,10 @@ class CodingWorkspace:
             cmd.append("check")
         if raw_target:
             for part in raw_target.split():
-                if not _SAFE_ARG_RE.fullmatch(part) or ".." in part or part.startswith("/"):
+                norm_part = part.replace("\\", "/")
+                if not _SAFE_ARG_RE.fullmatch(norm_part) or ".." in norm_part or norm_part.startswith("/"):
                     raise ToolError("invalid_runner_arg")
-                cmd.append(part)
+                cmd.append(norm_part)
         if runner == "pytest" and "-q" not in cmd:
             cmd.append("-q")
         try:

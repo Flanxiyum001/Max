@@ -458,6 +458,9 @@ class WebGitHubConnector:
                                         ):
                                             raise ToolError("github_mcp_schema_changed")
                                         found = True
+                                        break
+                                if found:
+                                    break
                                 cursor = page.nextCursor
                                 if cursor is None:
                                     break
