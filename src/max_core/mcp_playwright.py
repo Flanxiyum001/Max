@@ -154,7 +154,9 @@ def playwright_tool_risk(tool_name: str, *, read_only_hint: bool = False) -> Ris
     """Fail-closed risk classification for ``@playwright/mcp`` tools."""
     if tool_name in {"browser_evaluate", "browser_file_upload"}:
         return RiskTier.R3
-    if tool_name in _READ_ONLY_TOOLS and (read_only_hint or not tool_name.startswith("browser_evaluate")):
+    if tool_name in _READ_ONLY_TOOLS and (
+        read_only_hint or not tool_name.startswith("browser_evaluate")
+    ):
         return RiskTier.R0
     return RiskTier.R2
 
@@ -194,7 +196,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         except Exception as exc:
             print(json.dumps({"ok": False, "error": getattr(exc, "code", str(exc))}))
             return 1
-        print(json.dumps({"ok": True, "connection_id": conn.connection_id, "command": conn.command}))
+        print(
+            json.dumps({"ok": True, "connection_id": conn.connection_id, "command": conn.command})
+        )
         return 0
 
     try:
