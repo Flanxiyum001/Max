@@ -41,7 +41,9 @@ def test_build_context_snapshot_categorizes_tools_messages_and_memory() -> None:
 
 
 def test_web_api_context_requires_auth_and_returns_breakdown() -> None:
-    app = create_app({"MAX_WEB_PASSCODE": "correct horse battery", "MAX_WEB_INSECURE_COOKIE": "yes"})
+    app = create_app(
+        {"MAX_WEB_PASSCODE": "correct horse battery", "MAX_WEB_INSECURE_COOKIE": "yes"}
+    )
     client = TestClient(app)
     assert client.get("/api/context").status_code == 401
     assert client.post("/api/login", json={"passcode": "correct horse battery"}).status_code == 200
