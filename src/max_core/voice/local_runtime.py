@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Mapping
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -43,6 +44,24 @@ def voice_dir() -> Path:
     return default_data_dir(os.environ) / "local-voice-v1"
 
 
+# MAX counts prompt size in bytes (1 byte = 1 token, deliberately conservative).
+# On Windows the desktop-control tools push the first prompt past 8K, so local
+# models need a 16K window. Ollama must be started with the same window
+# (OLLAMA_CONTEXT_LENGTH); its OpenAI-compatible endpoint ignores per-request sizes.
+LOCAL_CONTEXT_TOKENS = 16_384
+
+
+def ollama_context_hint(env: Mapping[str, str]) -> str | None:
+    """Warn when this shell has no matching Ollama window; Ollama may run elsewhere."""
+    raw = env.get("OLLAMA_CONTEXT_LENGTH", "")
+    if raw.isdigit() and int(raw) >= LOCAL_CONTEXT_TOKENS:
+        return None
+    return (
+        f"[MAX] Set OLLAMA_CONTEXT_LENGTH={LOCAL_CONTEXT_TOKENS} for Ollama and restart it, "
+        "or long requests will be cut off."
+    )
+
+
 def installed_models() -> set[str]:
     with httpx.Client(timeout=5, trust_env=False, follow_redirects=False) as client:
         response = client.get(ORIGIN + "/api/tags")
@@ -63,7 +82,7 @@ def local_settings(models: set[str], *, gaming: bool = False) -> dict[str, str]:
         "MAX_TRIAL_CLOUD_ALLOWED": "no",
         "MAX_TRIAL_API_KEY": "",
         "MAX_TRIAL_MODEL": CHAT,
-        "MAX_TRIAL_CONTEXT_TOKENS": "4096",
+        "MAX_TRIAL_CONTEXT_TOKENS": str(LOCAL_CONTEXT_TOKENS),
         "MAX_TRIAL_PERSONA": "yes",
         "MAX_TRIAL_MAX_COST_USD": "0",
         "MAX_TRIAL_INPUT_USD_PER_MILLION": "0",
@@ -363,6 +382,9 @@ def main() -> int:
             )
             models = installed_models()
         settings = local_settings(models, gaming="--gaming" in sys.argv)
+        hint = ollama_context_hint(os.environ)
+        if hint:
+            print(hint)
         os.environ["MAX_LOCAL_GAMING"] = settings["MAX_LOCAL_GAMING"]
         prepare()
         os.environ.update(settings)
