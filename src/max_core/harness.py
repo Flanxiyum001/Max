@@ -735,8 +735,30 @@ class MaxHarness:
                     )
                     self._emit(report, HarnessPhase.RECOVER, "loop.blocked")
                     return report
+                before = len(report.steps)
                 payload = await self._execute_tool(name, arguments, report, deadline_at)
                 failure = json.loads(payload).get("error")
+                if (
+                    failure is not None
+                    and tool_obj is not None
+                    and tool_obj.risk == ToolRisk.EFFECTFUL
+                    and len(report.steps) > before + 1
+                    and report.steps[-1].status == "failed"
+                ):
+                    report.stopped_reason = "tool_budget"
+                    report.error_code = "effectful_outcome_uncertain"
+                    report.answer = (
+                        "An approved action reported an error. Its outcome may be uncertain. "
+                        "I stopped without retrying it; verify the external state before retrying."
+                    )
+                    self._emit(
+                        report,
+                        HarnessPhase.RECOVER,
+                        "tool.outcome_uncertain",
+                        tool_name=name,
+                        detail_code=safe_error_code(failure),
+                    )
+                    return report
                 if name.startswith("web.") and failure is None:
                     self._emit(report, HarnessPhase.RESEARCH, "web.researched", tool_name=name)
                 if failure is not None:

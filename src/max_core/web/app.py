@@ -319,12 +319,28 @@ def create_app(
     backup = tts_backup or synthesize_api
     stt = stt_config(env)
     stt_vocab = env.get("MAX_STT_VOCAB", "")
+    stt_use_reply_context = env.get("MAX_STT_REPLY_CONTEXT", "").strip().lower() in {
+        "yes",
+        "true",
+        "1",
+    }
     hear = transcriber or transcribe
     github = github_connector if github_connector is not None else WebGitHubConnector(env)
     hub = mcp_hub if mcp_hub is not None else WebMCPHub(env, github_connector=github)
     sandbox = sandbox_runner if sandbox_runner is not None else GitHubPRSandbox(hub.github)
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    try:
+        from max_core.assistant_session import default_data_dir
+        from max_core.memory_repo import MemoryRepoSync
+
+        memory_sync = MemoryRepoSync.from_env(env, default_data_dir(env))
+        if memory_sync is not None:
+            log.info("memory repo: restored %d files", memory_sync.pull())
+            memory_sync.start()
+            app.router.on_shutdown.append(memory_sync.stop)
+    except Exception as exc:
+        log.warning("memory repo unavailable: %s", type(exc).__name__)
     login_limit = RateLimiter(8, 600)
     stt_limit = RateLimiter(30, 60)
     ask_limit = RateLimiter(30, 60)
@@ -420,12 +436,32 @@ def create_app(
         if not authed(request):
             return {"authed": False}
         sess = session()
+        tools = (
+            tuple(sess.available_tools())
+            if sess is not None and hasattr(sess, "available_tools")
+            else tuple(sess.registry)
+            if sess is not None
+            else ()
+        )
         return {
             "authed": True,
             "model_ready": sess is not None,
             "error": state["error"],
-            "tools": sorted(t.name for t in sess.registry) if sess is not None else [],
+            "tools": sorted(t.name for t in tools),
+            "tool_catalogue": [
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "approval_required": tool.risk.value == "effectful",
+                }
+                for tool in sorted(tools, key=lambda item: item.name)
+            ],
+            "host_tools_available": False,
             "stt_ready": stt is not None,
+            "active_job": next(
+                (j.id for j in list(jobs.values()) if j.status in {"running", "approval"}),
+                None,
+            ),
             "github": github.status(),
             "connections": hub.status(),
         }
@@ -625,8 +661,9 @@ def create_app(
                 job.answer = f"{label} disconnected. Its MCP tools are no longer available."
             elif service == "github" and not github.configured:
                 job.answer = (
-                    "I can prepare GitHub for you, but this deployment needs a one-time "
-                    "GitHub OAuth App registration. I won't ask you to paste a token in chat."
+                    "Tap Set up GitHub to register MAX's OAuth application once. "
+                    "After its settings are saved on the server, tap Authorize GitHub. "
+                    "Never paste your client secret in chat."
                 )
                 job.connect = {"service": service, "action": "needs_configuration"}
             elif service in API_KEY_SERVICES and not hub.status()["services"][service]["connected"]:
@@ -678,22 +715,21 @@ def create_app(
         def approve(tool: str, arguments: dict[str, Any]) -> bool:
             # Remote operation approvals must show EXACT arguments. Never silently
             # truncate the values the owner is asked to authorize.
-            if tool.startswith("mcp."):
-                try:
-                    encoded = json.dumps(arguments, sort_keys=True, ensure_ascii=True)
-                except (TypeError, ValueError):
-                    return False
-                if len(encoded) > 8192:
-                    return False
-                safe_arguments = dict(arguments)
-            else:
-                safe_arguments = {k: str(v)[:300] for k, v in arguments.items()}
+            try:
+                encoded = json.dumps(arguments, sort_keys=True, ensure_ascii=True, allow_nan=False)
+            except (TypeError, ValueError, OverflowError, RecursionError):
+                return False
+            if len(encoded) > (8192 if tool.startswith("mcp.") else 32_768):
+                return False
+            safe_arguments = json.loads(encoded)
             with job._approval_lock:
                 job._event.clear()
                 job._allowed = False
-                job.approval = {"tool": tool, "arguments": safe_arguments}
-                if tool.startswith("mcp.github."):
-                    job.approval["id"] = secrets.token_hex(16)
+                job.approval = {
+                    "tool": tool,
+                    "arguments": safe_arguments,
+                    "id": secrets.token_hex(16),
+                }
                 job.status = "approval"
             answered = job._event.wait(120)
             with job._approval_lock:
@@ -713,6 +749,7 @@ def create_app(
                     job.error, job.status = "model_unavailable", "failed"
                     job.detail = getattr(result, "error_code", None)
                 else:
+                    job.detail = getattr(result, "error_code", None)
                     job.answer, job.status = result.answer.strip() or "…", "done"
             except Exception as exc:
                 log.warning("turn failed: %s", type(exc).__name__)
@@ -801,7 +838,7 @@ def create_app(
         sess = state["session"]
         history = getattr(sess, "history", None) or []
         last = next((m.content for m in reversed(history) if m.role == "assistant"), "")
-        if last and not stt.verbatim:  # avoid injecting previous answers in verbatim mode
+        if last and stt_use_reply_context and not stt.verbatim:
             cfg = dataclasses.replace(stt, prompt=stt_prompt(stt_vocab, last))
         try:
             text = await hear(audio, content_type, cfg)
@@ -823,12 +860,12 @@ def create_app(
                 log.warning("piper voice failed: %s", type(exc).__name__)
         if not audio:
             try:
-                audio = await speak(body.text, voice, rate, pitch)
+                audio = await asyncio.wait_for(speak(body.text, voice, rate, pitch), timeout=8.0)
             except Exception as exc:
                 log.warning("neural voice failed: %s", type(exc).__name__)
         if not audio and backup_cfg is not None:
             try:
-                audio = await backup(body.text, backup_cfg)
+                audio = await asyncio.wait_for(backup(body.text, backup_cfg), timeout=8.0)
             except Exception as exc:
                 log.warning("backup voice failed: %s", type(exc).__name__)
         if not audio:
@@ -862,6 +899,7 @@ def _default_session(
         enable_shell=False,
         enable_web=options.enable_web,
         host_tools=False,
+        comms_env=options.comms_env,  # email / WhatsApp Cloud API work from the web
     )
     return AssistantSession(TrialSettings.from_env(env), options, github_connector=github_connector)
 

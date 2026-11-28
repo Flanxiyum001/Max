@@ -76,7 +76,10 @@ def test_no_oauth_app_configuration_never_fabricates_working_connection() -> Non
     )
     authed(client)
     job = client.post("/api/ask", json={"text": "connect to GitHub"}).json()["job"]
-    assert client.get(f"/api/job/{job}").json()["connect"]["action"] == "needs_configuration"
+    result = client.get(f"/api/job/{job}").json()
+    assert result["connect"] == {"service": "github", "action": "needs_configuration"}
+    assert "Tap Set up GitHub" in result["answer"]
+    assert "Never paste your client secret in chat" in result["answer"]
     assert client.post("/api/connect/github/start").status_code == 503
     assert client.get("/api/state").json()["github"]["configured"] is False
 
@@ -180,3 +183,15 @@ def test_bad_callback_and_public_route_do_not_expose_connection() -> None:
     )
     authed(client)
     assert client.get("/api/state").json()["github"]["connected"] is False
+
+
+def test_github_connection_browser_controls() -> None:
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for browser connection checks")
+    script = Path(__file__).with_name("web_connection_regression.cjs")
+    subprocess.run([node, str(script)], check=True, timeout=15)

@@ -112,10 +112,45 @@ def test_effectful_tool_waits_for_owner(web, allow: bool) -> None:  # type: igno
     pending = wait(client, job, {"approval"})
     assert pending["approval"]["tool"] == "reminders.add"
     assert client.post("/api/ask", json={"text": "other"}).status_code == 409  # one at a time
-    client.post(f"/api/job/{job}/approve", json={"allow": allow})
+    approval_id = pending["approval"]["id"]
+    assert client.post(f"/api/job/{job}/approve", json={"allow": allow}).status_code == 409
+    assert (
+        client.post(
+            f"/api/job/{job}/approve", json={"allow": allow, "approval_id": "stale"}
+        ).status_code
+        == 409
+    )
+    assert (
+        client.post(
+            f"/api/job/{job}/approve", json={"allow": allow, "approval_id": approval_id}
+        ).status_code
+        == 200
+    )
     assert wait(client, job, {"done"})["answer"] == ("added" if allow else "not added")
     assert session.decision is allow
     assert client.post(f"/api/job/{job}/approve", json={"allow": True}).status_code == 409
+
+
+def test_approval_displays_full_arguments() -> None:
+    class LongSession(FakeSession):
+        def ask(self, text, *, approve=None, on_step=None):  # type: ignore[no-untyped-def]
+            allowed = approve("notes.write", {"name": "note", "content": "x" * 1_000})
+            return LoopResult(answer="saved" if allowed else "denied")
+
+    app = create_app(
+        {"MAX_WEB_PASSCODE": PASS, "MAX_WEB_INSECURE_COOKIE": "yes"},
+        session_factory=LongSession,
+    )
+    client = TestClient(app)
+    login(client)
+    job = client.post("/api/ask", json={"text": "save"}).json()["job"]
+    approval = wait(client, job, {"approval"})["approval"]
+    assert approval["arguments"]["content"] == "x" * 1_000
+    client.post(
+        f"/api/job/{job}/approve",
+        json={"allow": False, "approval_id": approval["id"]},
+    )
+    assert wait(client, job, {"done"})["answer"] == "denied"
 
 
 def test_reminders_and_speech(web) -> None:  # type: ignore[no-untyped-def]
@@ -162,6 +197,8 @@ def test_hosted_session_has_no_host_tools(tmp_path: Path) -> None:
         names = {t.name for t in session.registry}
         assert not names & {"shell.run", "apps.open", "system.status", "workspace.read"}
         assert {"memory.remember", "reminders.add", "web.search", "weather.current"} <= names
+        assert {"notes.write", "notes.read", "notes.list"} <= names
+        assert {tool.name for tool in session.available_tools()} == names
     finally:
         session.close()
 
@@ -423,7 +460,8 @@ def test_clean_transcript_keeps_real_speech() -> None:
     )
 
 
-def test_transcribe_sends_last_reply_as_context() -> None:
+@pytest.mark.parametrize("use_context", [False, True])
+def test_transcribe_sends_last_reply_as_context_only_when_enabled(use_context: bool) -> None:
     from max_core.gateway import ChatMessage
 
     seen: list[str] = []
@@ -436,13 +474,18 @@ def test_transcribe_sends_last_reply_as_context() -> None:
         history = [ChatMessage("user", "hi"), ChatMessage("assistant", "Want me to email Asha?")]
 
     sess = Sess()
-    env = {**BACKUP_ENV, "MAX_STT_VOCAB": "Asha"}
+    env = {
+        **BACKUP_ENV,
+        "MAX_STT_VOCAB": "Asha",
+        "MAX_STT_REPLY_CONTEXT": "yes" if use_context else "no",
+    }
     client = TestClient(create_app(env, session_factory=lambda: sess, transcriber=fake_stt))
     login(client)
     client.get("/api/state")  # creates the session
     res = client.post("/api/transcribe", content=b"x" * 500, headers={"content-type": "audio/webm"})
     assert res.json() == {"text": "yes please"}
-    assert "Want me to email Asha?" in seen[0] and "Words that may come up: Asha." in seen[0]
+    assert ("Want me to email Asha?" in seen[0]) is use_context
+    assert "Words that may come up: Asha." in seen[0]
 
 
 @pytest.mark.parametrize(
@@ -470,3 +513,51 @@ def test_orb_js_exposes_voice_isolation_dsp_chain(web) -> None:  # type: ignore[
     assert "buildVoiceChain" in js
     assert "createDynamicsCompressor" in js
     assert "createMediaStreamDestination" in js
+
+
+def test_authenticated_refresh_recovers_active_job_without_replay(web) -> None:  # type: ignore[no-untyped-def]
+    client, session = web
+    login(client)
+    job = client.post("/api/ask", json={"text": "remind me"}).json()["job"]
+    pending = wait(client, job, {"approval"})
+    assert client.get("/api/state").json()["active_job"] == job
+    assert client.get(f"/api/job/{job}").json()["approval"] == pending["approval"]
+    assert session.asked == ["remind me"]
+    assert session.decision is None
+    assert client.post("/api/ask", json={"text": "remind me"}).status_code == 409
+    client.post(
+        f"/api/job/{job}/approve",
+        json={"allow": False, "approval_id": pending["approval"]["id"]},
+    )
+    assert wait(client, job, {"done"})["answer"] == "not added"
+    assert client.get("/api/state").json()["active_job"] is None
+    assert session.asked == ["remind me"]
+    client.post("/api/logout")
+    assert client.get("/api/state").json() == {"authed": False}
+    assert client.get(f"/api/job/{job}").status_code == 401
+
+
+def test_web_speech_browser_regressions() -> None:
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for browser speech regression checks")
+    script = Path(__file__).with_name("web_speech_regression.cjs")
+    subprocess.run([node, str(script)], check=True, timeout=15)
+
+
+def test_orb_transcript_has_separate_scrollable_keyboard_accessible_lane(web) -> None:  # type: ignore[no-untyped-def]
+    client, _ = web
+    html = client.get("/").text
+    css = client.get("/static/orb.css").text
+    js = client.get("/static/orb.js").text
+    assert 'aria-label="MAX response" tabindex="0"' in html
+    assert "scrollbar-color: transparent transparent" in css
+    assert "scrollbar-width: thin" in css
+    assert "overflow-y: auto" in css
+    assert "top: 53%" in css and "top: 48%" in css
+    assert "hh * 0.29" in js
+    assert "answerEl.scrollTop = 0" in js
+    assert "document.activeElement === answerEl" in js

@@ -120,7 +120,7 @@ def _checked_scalar_arguments(
         or not set(schema.get("required", [])) <= arguments.keys()
     ):
         raise MCPPolicyError("unreviewed_arguments")
-    properties = schema["properties"]
+    properties = schema.get("properties", {})
     for key, value in arguments.items():
         descriptor = properties.get(key)
         if not isinstance(descriptor, dict):
@@ -132,8 +132,8 @@ def _checked_scalar_arguments(
             or (
                 type_name == "number"
                 and type(value) in (int, float)
-                and math.isfinite(value)
                 and abs(value) <= 1_000_000_000
+                and math.isfinite(value)
             )
             or (type_name == "boolean" and type(value) is bool)
             or (type_name == "null" and value is None)

@@ -3,11 +3,13 @@
 const $ = (id) => document.getElementById(id);
 const canvas = $("orb"), ctx = canvas.getContext("2d");
 const answerEl = $("answer"), input = $("input"), hint = $("hint");
+const replayBtn = $("replay-voice"), transcriptBtn = $("toggle-transcript");
 const loginForm = $("login"), passcode = $("passcode"), choices = $("choices");
-const githubAuth = $("github-auth");
+const githubAuth = $("github-auth"), githubSetup = $("github-setup");
+const githubSetupStatus = $("github-setup-status"), githubCallback = $("github-callback");
 const sandboxLink = $("sandbox-link");
 const appsToggle = $("connections-toggle"), appsPanel = $("connections-panel");
-const appsList = $("connections-list");
+const appsList = $("connections-list"), toolList = $("tool-list");
 const MCP_APPS = Object.freeze({
   github: ["GitHub", ["github.com"]],
   cloudflare: ["Cloudflare", ["cloudflare.com"]],
@@ -36,7 +38,7 @@ keybox.addEventListener("submit", async (e) => {
   }
   keyService = null;
 });
-let pendingConnectService = null;
+let pendingConnectService = null, pendingConnectAction = null;
 
 let state = "idle";            // idle | thinking | speaking | listening | error
 let energy = 0, t = 0;
@@ -92,10 +94,10 @@ function frame(now) {
   const h = still ? 0 : orbTime, env = still ? 0 : orbEnv, onsets = still ? [] : orbOnsets;
   const mic = state === "listening" ? level : 0;
 
-  const w = innerWidth, hh = innerHeight, S = Math.min(w, hh) * 0.62 / 720;
+  const w = innerWidth, hh = innerHeight, S = Math.min(w, hh) * 0.48 / 720;
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, canvas.width, canvas.height);
   const dpr = window.devicePixelRatio || 1;
-  ctx.setTransform(dpr * S, 0, 0, dpr * S, dpr * (w / 2 - 360 * S), dpr * (hh * 0.42 - 360 * S));
+  ctx.setTransform(dpr * S, 0, 0, dpr * S, dpr * (w / 2 - 360 * S), dpr * (hh * 0.29 - 360 * S));
   const col = [0, 1, 2].map((c) => Math.round(ORB_COLORS.reduce((s, rgb, i) => s + rgb[c] * orbW[i], 0)));
   const rgb = col.join(","), sw = orbW[2];
   if (rgb !== orbSpriteKey) { orbSpriteKey = rgb; orbSprite = makeSprite(rgb, 0.2); }
@@ -149,8 +151,14 @@ function setActivity(text) {
 }
 function show(text, ms) {
   clearTimeout(hideTimer);
+  answerEl.classList.remove("caption");
   if (!text) { answerEl.classList.remove("show"); return; }
-  answerEl.textContent = text; answerEl.classList.add("show");
+  if (answerEl.textContent !== text) {
+    answerEl.textContent = text;
+    answerEl.scrollTop = 0;
+  }
+  answerEl.classList.toggle("long", text.length > 180 || text.includes("\n"));
+  answerEl.classList.add("show");
   if (ms !== 0) hideTimer = setTimeout(() => answerEl.classList.remove("show"),
                                        ms || Math.max(12000, Math.min(60000, text.length * 90)));
 }
@@ -158,15 +166,15 @@ function setState(s, backAfter) {
   state = s;
   if (backAfter) setTimeout(() => { if (state === s && !busy) state = "idle"; }, backAfter);
 }
-async function api(path, body) {
+async function api(path, body, signal) {
   const res = await fetch(path, {
     method: body === undefined ? "GET" : "POST",
     headers: body === undefined ? {} : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
-    credentials: "same-origin",
+    credentials: "same-origin", signal,
   });
   if (res.status === 401) { showLogin(); throw new Error("login_required"); }
-  if (!res.ok) { let d = "error"; try { d = (await res.json()).detail; } catch {} throw new Error(d); }
+  if (!res.ok) { let d = "error"; try { d = (await res.json()).detail; } catch {} const error = new Error(d); error.status = res.status; throw error; }
   return res;
 }
 const ERRORS = {
@@ -190,8 +198,8 @@ const DETAILS = {
 
 // ---------------------------------------------------------------- login
 function showLogin() {
-  authed = false; loginForm.classList.remove("hidden"); input.classList.add("hidden");
-  githubAuth.classList.add("hidden");
+  authed = false; stopSpeaking(); resetVoiceTranscript(); replayBtn.classList.add("hidden"); loginForm.classList.remove("hidden"); input.classList.add("hidden");
+  clearConnectionAction();
   sandboxLink.classList.add("hidden");
   appsToggle.classList.add("hidden"); appsPanel.classList.add("hidden");
   hint.textContent = "enter passcode"; passcode.focus();
@@ -210,7 +218,7 @@ async function boot() {
   const s = await (await fetch("/api/state", { credentials: "same-origin" })).json();
   if (!s.authed) return showLogin();
   authed = true; sttReady = !!s.stt_ready;
-  // Apps panel removed: connect apps by asking MAX ("MAX, connect to Cloudflare").
+  appsToggle.classList.remove("hidden");
   hint.textContent = "type to talk · space or tap the orb to speak";
   if (!s.model_ready) { setState("error", 3000); show(ERRORS.model_not_configured); }
   else show("Hello. I'm here.", 4000);
@@ -236,8 +244,32 @@ async function boot() {
   if (mcp === "denied") show("App authorization cancelled.", 6000);
   if (outcome || mcp) history.replaceState({}, "", "/");
   saveWake();
+  const active = /^[a-f0-9]{32}$/.test(s.active_job || "") ? s.active_job : null;
+  const job = active || rememberedJob();
+  if (job && !busy) {
+    stopWake();
+    rememberJob(job);
+    busy = true; pendingJob = job; setState("thinking"); setActivity("Reconnecting to MAX");
+    await pollJob(job, false);
+  }
 }
 
+// ---------------------------------------------------------------- conversation
+// Keep only the opaque job identifier in this tab; never store prompts, answers,
+// approvals or credentials. A reload reconnects to the existing server job.
+const JOB_STORAGE_KEY = "max.activeJob";
+function rememberedJob() {
+  try {
+    const job = sessionStorage.getItem(JOB_STORAGE_KEY);
+    return /^[a-f0-9]{32}$/.test(job || "") ? job : null;
+  } catch { return null; }
+}
+function rememberJob(job) {
+  try {
+    if (job) sessionStorage.setItem(JOB_STORAGE_KEY, job);
+    else sessionStorage.removeItem(JOB_STORAGE_KEY);
+  } catch {} // Private browsing/storage policies must not break chat.
+}
 // ---------------------------------------------------------------- context viewer
 const ctxPanel = $("context-panel"), ctxPct = $("ctx-pct"), ctxRatio = $("ctx-ratio");
 const ctxBar = $("ctx-bar"), ctxRows = $("ctx-rows"), ctxDetails = $("ctx-details"), ctxFoot = $("ctx-foot");
@@ -298,21 +330,39 @@ async function showContextPanel(spoken = false) {
   }
 }
 $("ctx-close").addEventListener("click", () => ctxPanel.classList.add("hidden"));
-$("ctx-refresh").addEventListener("click", () => showContextPanel(false));
+$("ctx-refresh").addEventListener("click", () => { if (!busy && !transcribing && !listening) showContextPanel(false); });
 
-// ---------------------------------------------------------------- conversation
 async function ask(text, spoken) {
-  if (busy || !text.trim()) return;
+  if (busy || transcribing || listening || !text.trim()) return;
+  if (rememberedJob()) {
+    show("A previous job may still be running. Reload this tab to reconnect before sending another request.");
+    return;
+  }
   if (CTX_QUERY.test(text.trim())) { await showContextPanel(spoken); return; }
-  githubAuth.classList.add("hidden");
+  clearConnectionAction();
   sandboxLink.classList.add("hidden");
-  pendingConnectService = null;
-  busy = true; setState("thinking"); show(""); setActivity("Thinking");
+  stopSpeaking(); stopWake(); stopMicLevel(); resetVoiceTranscript(); replayBtn.classList.add("hidden");
+  busy = true; setState("thinking"); show(spoken ? `“${text}”` : "", 0); setActivity("Thinking");
   try {
     const { job } = await (await api("/api/ask", { text, voice: spoken })).json();
     pendingJob = job;
+    rememberJob(job);
+    await pollJob(job, spoken);
+  } catch (err) {
+    busy = false; pendingJob = null; setActivity(null); choices.classList.add("hidden");
+    if (err.message !== "login_required") {
+      setState("error", 2500);
+      show(err.status === 409 || !err.status
+        ? "A job may already be running. Reload to reconnect before repeating the request."
+        : ERRORS[err.message] || ERRORS.model_unavailable);
+    }
+  }
+}
+
+async function pollJob(job, spoken) {
+  try {
     for (;;) {
-      await new Promise((r) => setTimeout(r, 700));
+      await new Promise((r) => setTimeout(r, 300));
       const j = await (await api(`/api/job/${job}`)).json();
       if (j.status === "approval" && j.approval) { askApproval(j.approval); continue; }
       choices.classList.add("hidden");
@@ -321,7 +371,7 @@ async function ask(text, spoken) {
         setActivity(j.activity || "Thinking");
         continue;
       }
-      busy = false; pendingJob = null; setActivity(null);
+      busy = false; pendingJob = null; rememberJob(null); setActivity(null);
       if (j.status === "done") {
         if (j.sandbox?.run_url) {
           try {
@@ -343,21 +393,28 @@ async function ask(text, spoken) {
             }
           } catch {}
         }
-        if (j.connect?.action === "authorize" && MCP_APPS[j.connect.service]) {
-          pendingConnectService = j.connect.service;
-          githubAuth.textContent = "Authorize " + MCP_APPS[pendingConnectService][0];
-          githubAuth.classList.remove("hidden");
-          stopWake();
+        presentConnectionAction(j.connect);
+        if (spoken) {
+          await say(j.answer, { follow: !j.connect });
+        } else {
+          lastVoiceText = j.answer; replayBtn.classList.remove("hidden");
+          show(j.answer, 0); setState("speaking", 2500);
+          if (!pendingConnectAction) resumeWake();
         }
-        setState("speaking"); show(j.answer);
-        if (spoken) { followUp = true; await say(j.answer); } else setState("speaking", 2500);
-        if (!followUp) resumeWake();
       } else { setState("error", 2500); show(DETAILS[j.detail] || ERRORS[j.error] || ERRORS.model_unavailable); resumeWake(); }
       return;
     }
   } catch (err) {
     busy = false; pendingJob = null; setActivity(null); choices.classList.add("hidden");
-    if (err.message !== "login_required") { setState("error", 2500); show(ERRORS[err.message] || ERRORS.model_unavailable); }
+    approvalShown = false; activeApprovalId = null;
+    if (err.status === 404) {
+      rememberJob(null);
+      setState("error", 2500);
+      show("This background job is no longer available. MAX may have restarted. Check any external action before retrying.");
+    } else if (err.message !== "login_required") {
+      setState("error", 2500);
+      show("Connection lost. Reload this tab to reconnect to the existing job. Do not repeat the request yet.");
+    }
   }
 }
 
@@ -394,6 +451,50 @@ function appAuthorizationURL(service, url) {
   return destination.href;
 }
 
+function clearConnectionAction() {
+  pendingConnectService = null; pendingConnectAction = null;
+  githubAuth.classList.add("hidden"); githubAuth.disabled = false;
+  githubSetup.classList.add("hidden");
+}
+
+function presentConnectionAction(connection) {
+  const action = connection?.action, service = connection?.service;
+  if (!MCP_APPS[service]) return false;
+  if (action !== "authorize" && !(service === "github" && action === "needs_configuration")) return false;
+  pendingConnectService = service; pendingConnectAction = action;
+  githubAuth.disabled = false;
+  githubAuth.textContent = action === "authorize" ? "Authorize " + MCP_APPS[service][0] : "Set up GitHub";
+  githubAuth.classList.remove("hidden");
+  githubSetup.classList.toggle("hidden", action !== "needs_configuration");
+  if (action === "needs_configuration") {
+    githubCallback.textContent = location.origin + "/api/connect/github/callback";
+    githubSetupStatus.textContent = "One-time OAuth app registration required.";
+  }
+  stopWake();
+  return true;
+}
+
+async function refreshGithubSetup() {
+  if (pendingConnectService !== "github" || pendingConnectAction !== "needs_configuration") return;
+  const button = $("github-check-setup");
+  button.disabled = true;
+  githubSetupStatus.textContent = "Checking server configuration…";
+  try {
+    const snapshot = await (await api("/api/state")).json();
+    if (pendingConnectService !== "github" || pendingConnectAction !== "needs_configuration") return;
+    if (snapshot.github?.connected) {
+      clearConnectionAction(); show("GitHub is already connected.", 0); resumeWake();
+    } else if (snapshot.github?.configured) {
+      presentConnectionAction({service: "github", action: "authorize"});
+      show("GitHub setup is ready. Tap Authorize GitHub to continue.", 0);
+    } else {
+      githubSetupStatus.textContent = "Not configured yet. Save all three environment variables and redeploy MAX, then check again.";
+    }
+  } catch {
+    githubSetupStatus.textContent = "Couldn't check configuration. Try again.";
+  } finally { button.disabled = false; }
+}
+
 async function authorizeApp(service) {
   if (!MCP_APPS[service]) return;
   githubAuth.disabled = true;
@@ -402,9 +503,12 @@ async function authorizeApp(service) {
     window.location.assign(appAuthorizationURL(service, url));
   } catch (err) {
     githubAuth.disabled = false;
-    const message = err.message === "github_oauth_not_configured"
-      ? "GitHub requires a one-time OAuth App registration for MAX."
-      : err.message === "mcp_public_url_missing"
+    if (service === "github" && err.message === "github_oauth_not_configured") {
+      presentConnectionAction({service, action: "needs_configuration"});
+      show("GitHub needs one-time setup. Follow the setup panel, then check again.", 0);
+      return;
+    }
+    const message = err.message === "mcp_public_url_missing"
       ? "MAX needs a stable HTTPS URL for OAuth."
       : err.message === "mcp_oauth_registration_not_supported"
       ? "This provider requires its own OAuth App registration. MAX can't register automatically."
@@ -414,14 +518,41 @@ async function authorizeApp(service) {
 }
 
 githubAuth.addEventListener("click", () => {
-  if (pendingConnectService) authorizeApp(pendingConnectService);
+  if (pendingConnectAction === "needs_configuration") {
+    githubSetup.classList.toggle("hidden");
+  } else if (pendingConnectAction === "authorize" && pendingConnectService) {
+    stopSpeaking(); authorizeApp(pendingConnectService);
+  }
 });
+$("github-check-setup").addEventListener("click", refreshGithubSetup);
+$("github-close-setup").addEventListener("click", () => githubSetup.classList.add("hidden"));
 
 async function renderApps() {
   if (!authed) return;
-  let info;
-  try { info = (await (await api("/api/state")).json()).connections; }
+  let snapshot;
+  try { snapshot = await (await api("/api/state")).json(); }
   catch { return; }
+  if (!snapshot.authed) return showLogin();
+  const info = snapshot.connections;
+  toolList.replaceChildren();
+  for (const tool of snapshot.tool_catalogue || []) {
+    const row = document.createElement("div");
+    row.className = "connection-row";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = tool.name;
+    button.onclick = () => {
+      appsPanel.classList.add("hidden");
+      input.classList.remove("hidden");
+      input.value = "Use " + tool.name + " to ";
+      input.focus();
+    };
+    const detail = document.createElement("small");
+    detail.textContent = (tool.approval_required ? "Approval required · " : "Read only · ") + tool.description;
+    row.append(button, detail);
+    toolList.append(row);
+  }
+  if (!toolList.childElementCount) toolList.textContent = "No model tools available.";
   appsList.replaceChildren();
   for (const [service, config] of Object.entries(MCP_APPS)) {
     const current = info?.services?.[service] || {};
@@ -438,7 +569,8 @@ async function renderApps() {
     label.append(title, description);
     const button = document.createElement("button");
     button.type = "button";
-    button.textContent = current.connected ? "Disconnect" : "Connect";
+    button.textContent = current.connected ? "Disconnect" :
+      service === "github" && !current.configured ? "Set up" : "Connect";
     button.onclick = async () => {
       if (current.connected) {
         if (!confirm("Disconnect " + config[0] + " from MAX?")) return;
@@ -447,8 +579,9 @@ async function renderApps() {
           await renderApps(); show(config[0] + " disconnected.", 4500);
         } catch { show("Couldn't disconnect " + config[0] + ".", 5000); }
       } else {
-        pendingConnectService = service;
-        await authorizeApp(service);
+        if (busy) return;
+        appsPanel.classList.add("hidden");
+        await ask("Connect to " + config[0], false);
       }
     };
     row.append(label, button);
@@ -601,10 +734,9 @@ function chime(up) {
 }
 
 // ---------------------------------------------------------------- voice out
-let followUp = false;
 // Browsers keep page audio locked until the first tap/keypress. Unlock once, on
 // that gesture, and reuse ONE player element so later replies may play by themselves.
-let player = null, playerSrc = null;
+let player = null;
 function silentWav() {
   const b = new Uint8Array(44 + 800), v = new DataView(b.buffer);
   const w = (o, t) => [...t].forEach((c, i) => b[o + i] = c.charCodeAt(0));
@@ -618,7 +750,9 @@ function unlockAudio() {
   try { ensureAudio(); } catch {}
   if (!player) {
     player = new Audio(); player.preload = "auto";
-    player.src = silentWav(); player.play().catch(() => {});
+    const url = silentWav();
+    player.src = url;
+    player.play().catch(() => {}).finally(() => URL.revokeObjectURL(url));
   }
   if (window.speechSynthesis && !unlockAudio.tts) {   // also prime the browser voice
     unlockAudio.tts = true;
@@ -627,75 +761,203 @@ function unlockAudio() {
 }
 ["pointerdown", "keydown", "touchend"].forEach((ev) =>
   document.addEventListener(ev, unlockAudio, { capture: true, passive: true }));
-async function audioRunning() {
-  if (!audioCtx) return false;
-  if (audioCtx.state !== "running") {
-    try { await Promise.race([audioCtx.resume(), new Promise((r) => setTimeout(r, 400))]); } catch {}
-  }
-  return audioCtx.state === "running";
-}
-function say(text) {
-  return new Promise(async (done) => {
-    try {
-      const res = await api("/api/speak", { text: text.slice(0, 2000) });
-      const url = URL.createObjectURL(await res.blob());
-      const wantFollowUp = followUp;
-      stopSpeaking(); followUp = wantFollowUp;
-      // Route through the visualiser only while it is running; a suspended
-      // AudioContext would otherwise swallow the sound without any error.
-      const running = await audioRunning();
-      let el;
-      if (player && (playerSrc || running)) {
-        el = player;
-        if (!playerSrc && running) {
-          try { playerSrc = audioCtx.createMediaElementSource(player); playerSrc.connect(audioCtx.destination); } catch {}
-        }
-        if (playerSrc && !running) el = new Audio();   // routed but muted: play directly instead
-      } else el = new Audio();
-      if (el === player && playerSrc) connectLevel(playerSrc);
-      el.src = url; audio = el; setState("speaking");
-      el.onended = () => {
-        URL.revokeObjectURL(url); el.onended = null; audio = null;
-        if (!busy) setState("idle");
-        done();
-        if (followUp) { followUp = false; setTimeout(() => startListening({ followUp: true }), 250); }
-        else resumeWake();
-      };
-      await el.play();
-    } catch {
-      // Server voices failed: speak with the browser's built-in voice instead.
-      const wantFollowUp = followUp;
-      const after = () => {
-        if (!busy) setState("idle");
-        done();
-        if (wantFollowUp) { followUp = false; setTimeout(() => startListening({ followUp: true }), 400); }
-        else resumeWake();
-      };
-      if (!browserSay(text, after)) { setState("speaking", 2500); after(); }
+// Speak short, exact phrases and reveal them only when their audio starts.
+// Keep a single bounded prefetch. No discarded or independently generated text.
+function speechChunks(text) {
+  const chars = Array.from(text);
+  const chunks = [];
+  let offset = 0;
+  while (offset < chars.length) {
+    const limit = 140;
+    let end = Math.min(offset + limit, chars.length);
+    // Prefer a real phrase boundary, including for the final short segment.
+    // Ignore decimal points and abbreviations not followed by whitespace.
+    const floor = offset + Math.min(30, Math.floor(limit / 2));
+    let boundary = end;
+    while (boundary > floor && !(
+      /[.!?;\n]/u.test(chars[boundary - 1]) &&
+      (chars[boundary - 1] === "\n" || boundary === chars.length || /\s/u.test(chars[boundary]))
+    )) boundary--;
+    if (boundary > floor) end = boundary;
+    else if (end < chars.length) {
+      boundary = end;
+      while (boundary > floor && !/\s/u.test(chars[boundary - 1])) boundary--;
+      if (boundary > floor) end = boundary;
     }
+    // Carry boundary whitespace with its phrase, without exceeding the cap.
+    while (end < chars.length && end - offset < limit && /\s/u.test(chars[end])) end++;
+    chunks.push(chars.slice(offset, end).join(""));
+    offset = end;
+  }
+  return chunks;
+}
+let speechRun = null, lastVoiceText = "", lastCaption = "", transcriptExpanded = false;
+function resetVoiceTranscript() {
+  lastVoiceText = ""; lastCaption = ""; transcriptExpanded = false;
+  if (typeof transcriptBtn !== "undefined") {
+    transcriptBtn.classList.add("hidden");
+    transcriptBtn.textContent = "Full reply";
+    transcriptBtn.setAttribute("aria-pressed", "false");
+  }
+}
+function renderCaption() {
+  show(lastCaption, 0);
+  if (typeof answerEl !== "undefined") answerEl.classList.add("caption");
+}
+function revealSpokenPhrase(text, run) {
+  if (speechRun !== run) return;
+  lastCaption = text;
+  if (!transcriptExpanded) renderCaption();
+}
+function toggleTranscript() {
+  if (!lastVoiceText) return;
+  transcriptExpanded = !transcriptExpanded;
+  if (typeof transcriptBtn !== "undefined") {
+    transcriptBtn.textContent = transcriptExpanded ? "Live captions" : "Full reply";
+    transcriptBtn.setAttribute("aria-pressed", String(transcriptExpanded));
+  }
+  if (transcriptExpanded) show(lastVoiceText, 0);
+  else renderCaption();
+}
+const VOICE_TIMEOUTS = { fastFetch: 2200, fetch: 18000, start: 2500, stall: 8000 };
+async function fetchSpeech(text, run, timeout = VOICE_TIMEOUTS.fetch) {
+  if (run.controller.signal.aborted) return null;
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  run.controller.signal.addEventListener("abort", abort, { once: true });
+  const timer = setTimeout(abort, timeout);
+  try {
+    const res = await api("/api/speak", { text }, controller.signal);
+    const blob = await res.blob();
+    return blob.size ? blob : null;
+  } catch { return null; }
+  finally {
+    clearTimeout(timer);
+    run.controller.signal.removeEventListener("abort", abort);
+  }
+}
+async function playSpeech(blob, run, text) {
+  if (!blob || speechRun !== run) return false;
+  // Reuse the gesture-unlocked player and send audio directly to the speakers.
+  // A suspended Web Audio context must never mute the reply.
+  const el = player || new Audio();
+  const url = URL.createObjectURL(blob);
+  return new Promise((resolve) => {
+    let started = false, finished = false, timer;
+    const finish = (ok) => {
+      if (finished) return;
+      finished = true; clearTimeout(timer);
+      el.onended = null; el.onerror = null; el.onplaying = null; el.ontimeupdate = null;
+      el.pause(); URL.revokeObjectURL(url);
+      if (audio === el) audio = null;
+      run.cancel = null;
+      resolve(ok);
+    };
+    run.cancel = () => finish(true);
+    const watchdog = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => finish(started ? "partial" : false),
+        started ? VOICE_TIMEOUTS.stall : VOICE_TIMEOUTS.start);
+    };
+    el.src = url; audio = el; el.muted = false; el.volume = 1;
+    el.onplaying = () => {
+      if (finished || speechRun !== run) return;
+      started = true; revealSpokenPhrase(text, run); setActivity(null); watchdog();
+    };
+    el.ontimeupdate = () => { if (started) watchdog(); };
+    el.onended = () => finish(started ? true : false);
+    // Do not repeat a chunk that may already have been heard.
+    el.onerror = () => finish(started ? "partial" : false);
+    watchdog();
+    try { el.play().catch(() => finish(started ? "partial" : false)); }
+    catch { finish(started ? "partial" : false); }
   });
 }
-function pickVoice() {
-  const vs = window.speechSynthesis ? speechSynthesis.getVoices() : [];
+function pickVoice(localOnly = false) {
+  const vs = window.speechSynthesis ? speechSynthesis.getVoices().filter(v => !localOnly || v.localService) : [];
   const en = vs.filter((v) => /^en/i.test(v.lang));
   const prefer = /(natural|neural|online).*(female|emily|aria|jenny|sonia|libby|natasha)|emily|aria|jenny|sonia|libby|samantha|karen|moira|tessa|serena|google uk english female|google us english|zira/i;
-  return en.find((v) => prefer.test(v.name)) || en[0] || vs[0] || null;
+  return en.find((v) => prefer.test(v.name)) || en[0] || (localOnly ? null : vs[0]) || null;
 }
-function browserSay(text, after) {
-  if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) return false;
-  try {
-    speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text.slice(0, 2000));
-    const v = pickVoice(); if (v) { u.voice = v; u.lang = v.lang; }
-    u.rate = 1.02; u.pitch = 1.05;
-    u.onstart = () => setState("speaking");
-    u.onend = after; u.onerror = after;
-    speechSynthesis.speak(u);
-    return true;
-  } catch { return false; }
+function browserSay(text, run, voice = null) {
+  return new Promise((resolve) => {
+    if (speechRun !== run || !window.speechSynthesis || !window.SpeechSynthesisUtterance) {
+      resolve(false); return;
+    }
+    try {
+      const u = new SpeechSynthesisUtterance(text);
+      const v = voice || pickVoice(); if (v) { u.voice = v; u.lang = v.lang; }
+      u.rate = 1.02; u.pitch = 1.05;
+      let finished = false, started = false, timer;
+      const finish = (ok) => {
+        if (finished) return;
+        finished = true; clearTimeout(timer); run.cancel = null; resolve(ok);
+      };
+      const timeout = () => { finish(started ? "partial" : false); speechSynthesis.cancel(); };
+      run.cancel = () => { finish(false); speechSynthesis.cancel(); };
+      u.onstart = () => {
+        if (finished || speechRun !== run) return;
+        started = true; revealSpokenPhrase(text, run); setActivity(null); clearTimeout(timer);
+        timer = setTimeout(timeout, Math.max(12000, text.length * 180));
+      };
+      u.onend = () => finish(started);
+      u.onerror = () => finish(started ? "partial" : false);
+      timer = setTimeout(timeout, VOICE_TIMEOUTS.start);
+      speechSynthesis.speak(u);
+    } catch { if (run.cancel) run.cancel(); else resolve(false); }
+  });
 }
 if (window.speechSynthesis) { speechSynthesis.getVoices(); speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices(); }
-function stopSpeaking() { if (window.speechSynthesis) speechSynthesis.cancel(); followUp = false; if (audio) { audio.pause(); audio = null; if (!busy) setState("idle"); } }
+function stopSpeaking() {
+  const run = speechRun; speechRun = null;
+  if (run) { run.controller.abort(); if (run.cancel) run.cancel(); }
+  if (window.speechSynthesis) speechSynthesis.cancel();
+  if (audio) { audio.pause(); audio = null; }
+  if (run && !busy) setState("idle");
+}
+async function say(text, { follow = false } = {}) {
+  stopSpeaking(); stopWake(); stopMicLevel();
+  const run = { controller: new AbortController(), cancel: null };
+  speechRun = run;
+  resetVoiceTranscript(); lastVoiceText = text;
+  if (typeof replayBtn !== "undefined") replayBtn.classList.remove("hidden");
+  if (typeof transcriptBtn !== "undefined") transcriptBtn.classList.remove("hidden");
+  renderCaption(); setState("speaking"); setActivity("Preparing voice");
+  const chunks = speechChunks(text);
+  const localVoice = pickVoice(true);
+  let complete = true, serverFailed = false;
+  let pending = chunks.length ? fetchSpeech(chunks[0], run,
+    localVoice ? VOICE_TIMEOUTS.fastFetch : VOICE_TIMEOUTS.fetch) : null;
+  for (let i = 0; i < chunks.length && speechRun === run; i++) {
+    const blob = pending ? await pending : null;
+    if (speechRun !== run) return;
+    if (!blob) serverFailed = true;
+    // One bounded prefetch, not a burst of parallel TTS requests.
+    pending = !serverFailed && i + 1 < chunks.length ? fetchSpeech(chunks[i + 1], run) : null;
+    const outcome = await playSpeech(blob, run, chunks[i]);
+    if (speechRun !== run) return;
+    if (outcome === "partial") { complete = false; break; }
+    if (!outcome) {
+      serverFailed = true; pending = null;
+      const fallback = await browserSay(chunks[i], run, localVoice);
+      if (speechRun !== run) return;
+      if (fallback === "partial" || !fallback) { complete = false; break; }
+    }
+  }
+  if (speechRun !== run) return;
+  run.controller.abort(); speechRun = null;
+  setState("idle");
+  setActivity(complete ? null : "Voice interrupted — use Replay voice or Full reply");
+  if (follow && complete) setTimeout(() => {
+    if (!busy && !speechRun && !listening && !transcribing) startListening({ followUp: true });
+  }, 120);
+  else resumeWake();
+}
+
+transcriptBtn.addEventListener("click", toggleTranscript);
+replayBtn.addEventListener("click", () => {
+  if (authed && !busy && !listening && !transcribing && lastVoiceText) say(lastVoiceText);
+});
 
 // ---------------------------------------------------------------- voice in (Siri-style)
 // • tap / Space: listen once; sends by itself when you stop talking
@@ -708,7 +970,7 @@ let wakeRec = null, wakeWanted = false;
 
 // High-accuracy path: record → server Whisper-class transcription. Ends by itself
 // when you stop talking (voice-activity detection on the mic level).
-let recorder = null;
+let recorder = null, transcribing = false;
 function recOptions() {
   const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"]
     .find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || "";
@@ -718,23 +980,28 @@ function recOptions() {
 // doesn't hold the gate open, and requires sustained speech before locking on.
 function speechGate(onDone, { spoke = false, maxWaitMs = 8000, maxMs = 30000 } = {}) {
   const started = Date.now(); let quietSince = null, speechMs = spoke ? 200 : 0;
+  let resumed = false;
   const timer = setInterval(() => {
     const now = Date.now();
-    const v = voiceLevel || level;
+    const v = voiceAnalyser ? voiceLevel : level;
     if (!spoke) noiseFloor += (Math.min(v, 0.18) - noiseFloor) * 0.05;
     const on = Math.max(0.085, noiseFloor * 2.8), off = Math.max(0.045, noiseFloor * 1.7);
     if (v > on) {
-      speechMs += 100;
-      if (speechMs >= 150) { spoke = true; quietSince = null; }
+      speechMs += 50;
+      if (speechMs >= 100) {
+        if (quietSince !== null && now - quietSince >= 150) resumed = true;
+        spoke = true; quietSince = null;
+      }
     } else {
-      if (!spoke) speechMs = Math.max(0, speechMs - 50);
-      if (spoke && v < off) quietSince = quietSince || now;
+      if (!spoke) speechMs = Math.max(0, speechMs - 25);
+      if (spoke) quietSince = v < off ? (quietSince ?? now) : null;
     }
-    if (!spoke && now - started > maxWaitMs) { clearInterval(timer); onDone(false); }
-    else if ((spoke && quietSince && now - quietSince > 1500) || now - started > maxMs) {
-      clearInterval(timer); onDone(true);
+    const silenceMs = resumed || noiseFloor > 0.055 ? 550 : 350;
+    if (!spoke && now - started >= maxWaitMs) { clearInterval(timer); onDone(false); }
+    else if ((spoke && quietSince !== null && now - quietSince >= silenceMs) || now - started >= maxMs) {
+      clearInterval(timer); onDone(spoke);
     }
-  }, 100);
+  }, 50);
   return () => clearInterval(timer);
 }
 async function transcribeClip(blob) {
@@ -747,12 +1014,14 @@ async function transcribeClip(blob) {
 async function startRecording(opts = {}) {
   stopSpeaking(); stopWake();
   listening = true; setState("listening"); chime(true);
-  show(opts.followUp ? "…" : "Listening…", 0);
+  if (opts.followUp) setActivity("Listening for a follow-up"); else show("Listening…", 0);
   await startMicLevel();
   if (!micStream) { listening = false; setState("error", 2500); show("Microphone permission was denied.", 3500); return; }
   const { mime, opts: ropts } = recOptions();
   const chunks = [];
-  recorder = new MediaRecorder(cleanStream || micStream, ropts);
+  // Record the browser's echo-cancelled microphone without the hard VAD gain gate.
+  // The gate can suppress the beginning/end of quiet words.
+  recorder = new MediaRecorder(micStream, ropts);
   recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
   let cancelled = false;
   const stopGate = speechGate((heard) => {
@@ -764,21 +1033,22 @@ async function startRecording(opts = {}) {
     const blob = new Blob(chunks, { type: (mime || "audio/webm").split(";")[0] });
     stopMicLevel();
     if (cancelled || blob.size < 1500) {
-      setState("idle"); if (!opts.followUp) show("I didn't hear anything.", 2500); else show("");
+      setState("idle"); if (!opts.followUp) show("I didn't hear anything.", 2500); else setActivity(null);
       resumeWake(); return;
     }
-    chime(false); setState("thinking"); show("⋯", 0);
+    chime(false); setState("thinking"); setActivity("Transcribing"); transcribing = true;
     try {
       const text = await transcribeClip(blob);
-      if (text) { show(`“${text}”`, 0); ask(text, true); }
-      else { setState("idle"); show("I didn't catch that.", 2500); resumeWake(); }
-    } catch { setState("error", 2500); show("I couldn't transcribe that. Try again?", 3000); resumeWake(); }
+      if (text) { transcribing = false; ask(text, true); }
+      else { setState("idle"); setActivity(null); show("I didn't catch that.", 2500); resumeWake(); }
+    } catch { setState("error", 2500); setActivity(null); show("I couldn't transcribe that. Try again?", 3000); resumeWake(); }
+    finally { transcribing = false; }
   };
   recorder.start(250);
 }
 
 function startListening(opts = {}) {
-  if (!authed || busy || listening) return;
+  if (!authed || busy || listening || transcribing) return;
   if (sttReady && window.MediaRecorder && navigator.mediaDevices) { startRecording(opts); return; }
   if (!SR) { setState("error", 2500); show("This browser can't listen. Try Chrome or Edge.", 4000); return; }
   stopSpeaking(); stopWake();
@@ -789,8 +1059,12 @@ function startListening(opts = {}) {
   recognition.onresult = (e) => {
     heardAnything = true;
     let interim = "";
-    for (const r of e.results) (r.isFinal ? (finalText = r[0].transcript) : (interim += r[0].transcript));
-    show(`“${finalText || interim}”`, 0);
+    finalText = "";
+    for (const r of e.results) {
+      if (r.isFinal) finalText += r[0].transcript + " ";
+      else interim += r[0].transcript + " ";
+    }
+    show(`“${(finalText + interim).trim()}”`, 0);
   };
   recognition.onerror = (e) => {
     if (e.error === "not-allowed") { setState("error", 2500); show("Microphone permission was denied.", 3500); wakeOn = false; saveWake(); }
@@ -799,10 +1073,10 @@ function startListening(opts = {}) {
     clearTimeout(silenceTimer); listening = false; stopMicLevel();
     const text = finalText.trim();
     if (text) { chime(false); ask(text, true); }
-    else { if (state === "listening") setState("idle"); if (!opts.followUp) show("I didn't hear anything.", 2500); else show(""); resumeWake(); }
+    else { if (state === "listening") setState("idle"); if (!opts.followUp) show("I didn't hear anything.", 2500); else setActivity(null); resumeWake(); }
   };
   listening = true; setState("listening"); chime(true);
-  show(opts.followUp ? "…" : "Listening…", 0);
+  if (opts.followUp) setActivity("Listening for a follow-up"); else show("Listening…", 0);
   startMicLevel();
   try { recognition.start(); } catch { listening = false; setState("idle"); }
 }
@@ -823,7 +1097,7 @@ let tape = null;
 function startTape() {
   if (!sttReady || !window.MediaRecorder || !micStream || tape) return;
   const { mime, opts } = recOptions();
-  const t = { chunks: [], mime, started: Date.now(), wake: false, rec: new MediaRecorder(cleanStream || micStream, opts) };
+  const t = { chunks: [], mime, started: Date.now(), wake: false, rec: new MediaRecorder(micStream, opts) };
   t.rec.ondataavailable = (e) => { if (e.data.size) t.chunks.push(e.data); };
   t.rec.start(250); tape = t;
 }
@@ -839,21 +1113,28 @@ function finishTape() {
   t.rec.onstop = async () => {
     tape = null; listening = false; stopMicLevel();
     const blob = new Blob(t.chunks, { type: (t.mime || "audio/webm").split(";")[0] });
-    chime(false); setState("thinking"); show("⋯", 0);
+    chime(false); setState("thinking"); setActivity("Transcribing"); transcribing = true;
     try {
       const said = await transcribeClip(blob);
       const m = said.match(WAKE);
-      const rest = (m ? said.slice(m.index + m[0].length) : said).trim();
-      if (rest.length > 2) { show(`“${rest}”`, 0); ask(rest, true); }
-      else { setState("idle"); startListening(); }   // just "Hey MAX": listen for the command
-    } catch { setState("error", 2500); show("I couldn't transcribe that. Try again?", 3000); resumeWake(); }
+      // A wake-detector hit alone must not submit preceding room conversation.
+      const rest = m ? said.slice(m.index + m[0].length).trim() : "";
+      transcribing = false;
+      if (rest.length > 2) { ask(rest, true); }
+      else { setActivity(null); setState("idle"); startListening(); }   // just "Hey MAX": listen for the command
+    } catch { setActivity(null); setState("error", 2500); show("I couldn't transcribe that. Try again?", 3000); resumeWake(); }
+    finally { transcribing = false; }
   };
 }
 async function startWake() {
-  if (!SR || !wakeOn || !authed || listening || busy || audio || wakeRec) return;
+  if (!SR || !wakeOn || !authed || listening || busy || transcribing || speechRun || wakeRec || pendingConnectAction) return;
   wakeWanted = true;
   if (sttReady && window.MediaRecorder) { await startMicLevel(); startTape(); }
-  if (!wakeWanted || wakeRec) return;
+  if (!wakeWanted || speechRun || busy || listening || transcribing || pendingConnectAction) {
+    if (!listening) { dropTape(); stopMicLevel(); }
+    return;
+  }
+  if (wakeRec) return;
   wakeRec = new SR(); wakeRec.lang = navigator.language || "en-US";
   wakeRec.continuous = true; wakeRec.interimResults = true;
   wakeRec.onresult = (e) => {
@@ -909,8 +1190,12 @@ document.addEventListener("keydown", (e) => {
     else if (e.key === "Escape") { input.value = ""; input.classList.add("hidden"); input.blur(); }
     return;
   }
+  // Let the focused transcript handle its own keyboard scrolling.
+  if (document.activeElement === answerEl &&
+      [" ", "ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"].includes(e.key)) return;
+  if (e.target instanceof HTMLButtonElement && (e.key === " " || e.key === "Enter")) return;
   if (e.key === " " && !e.repeat) { e.preventDefault(); toggleListening(); return; }
-  if (e.key === "Escape") { if (audio) stopSpeaking(); else show(""); return; }
+  if (e.key === "Escape") { if (speechRun) { stopSpeaking(); resumeWake(); } else show(""); return; }
   if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
     input.classList.remove("hidden"); input.focus();
   }
@@ -918,11 +1203,15 @@ document.addEventListener("keydown", (e) => {
 input.addEventListener("input", () => { if (!input.value) input.classList.add("hidden"); });
 
 // ---------------------------------------------------------------- reminders
+const pendingReminders = [];
 setInterval(async () => {
-  if (!authed || busy) return;
+  if (!authed || busy || listening || transcribing || speechRun) return;
   try {
     const { due } = await (await api("/api/reminders/due")).json();
-    if (due.length) { const text = "Reminder: " + due.join(" · "); setState("speaking"); show(text); say(text); }
+    pendingReminders.push(...due);
+    if (pendingReminders.length && !busy && !listening && !transcribing && !speechRun) {
+      await say("Reminder: " + pendingReminders.splice(0).join(" · "));
+    }
   } catch {}
 }, 30000);
 

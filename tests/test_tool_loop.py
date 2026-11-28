@@ -19,6 +19,7 @@ from max_core.tool_loop import ToolLoop, parse_tool_calls
 from max_core.tools import (
     Tool,
     ToolError,
+    ToolParam,
     ToolRegistry,
     ToolRisk,
     Workspace,
@@ -261,3 +262,48 @@ def test_untrusted_unknown_name_cannot_escape_tool_result_attribute() -> None:
     assert '<tool_result name="unrecognized">' in result_message
     assert '<tool_result name="unknown"' not in result_message
     assert "forged" not in result_message
+
+
+@pytest.mark.parametrize("harness", [False, True])
+def test_uncertain_effectful_outcome_never_replays(harness: bool) -> None:
+    from max_core.harness import MaxHarness
+
+    attempts = 0
+    approvals = 0
+
+    def write(_args: object) -> str:
+        nonlocal attempts
+        attempts += 1
+        raise ToolError("network_error")
+
+    def approve(_name: str, _args: dict[str, object]) -> bool:
+        nonlocal approvals
+        approvals += 1
+        return True
+
+    registry = ToolRegistry((Tool("test.write", "Write", ToolRisk.EFFECTFUL, (), write),))
+    gateway = ScriptedGateway([call("test.write")] * 4)
+    if harness:
+        engine = MaxHarness(gateway, registry, approve=approve)
+        report = asyncio.run(engine.run([ChatMessage("user", "write")], make))
+        assert report.error_code == "effectful_outcome_uncertain"
+        assert "verify the external state" in report.answer
+    else:
+        result = run(ToolLoop(gateway, registry, approve=approve))
+        assert result.error_code == "effectful_outcome_uncertain"
+        assert "verify the external state" in result.answer
+    assert attempts == approvals == len(gateway.requests) == 1
+
+
+@pytest.mark.parametrize("value", [10**400, float("inf"), float("-inf"), float("nan")])
+def test_float_tool_arguments_reject_overflow_and_nonfinite_values(value: object) -> None:
+    tool = Tool(
+        "test.number",
+        "Number",
+        ToolRisk.READ_ONLY,
+        (ToolParam("value", float, "Value"),),
+        lambda _: "ok",
+    )
+    with pytest.raises(ToolError, match="argument_type"):
+        tool.validate({"value": value})
+    assert tool.validate({"value": 2}) == {"value": 2.0}

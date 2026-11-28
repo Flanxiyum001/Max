@@ -100,8 +100,13 @@ class Tool:
                 continue
             value = arguments[param.name]
             if param.kind is float and type(value) is int:
-                value = float(value)
+                try:
+                    value = float(value)
+                except OverflowError:
+                    raise ToolError("argument_type") from None
             if type(value) is not param.kind:
+                raise ToolError("argument_type")
+            if isinstance(value, float) and not math.isfinite(value):
                 raise ToolError("argument_type")
             if isinstance(value, str) and len(value) > param.max_length:
                 raise ToolError("argument_too_long")

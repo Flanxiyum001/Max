@@ -72,8 +72,7 @@ def build_context_snapshot(
 
     history = list(getattr(session, "history", []) or [])
     message_tokens = sum(
-        estimate_tokens(f"{getattr(m, 'role', '')}: {getattr(m, 'content', '')}")
-        for m in history
+        estimate_tokens(f"{getattr(m, 'role', '')}: {getattr(m, 'content', '')}") for m in history
     )
 
     # System prompt (persona + tool/harness framing)
@@ -82,7 +81,9 @@ def build_context_snapshot(
         system_prompt_tokens += 260  # tool protocol + engineering workflow prompt
 
     # Skills / workflow instructions
-    skills_tokens = 320 if any(n.startswith("plan.") or n.startswith("code.") for n in system_tool_names) else 0
+    skills_tokens = (
+        320 if any(n.startswith("plan.") or n.startswith("code.") for n in system_tool_names) else 0
+    )
 
     # MCP server instructions
     mcp_instructions_tokens = 180 if mcp_tool_names else 0
@@ -115,25 +116,83 @@ def build_context_snapshot(
     free_space = max(0, total_tokens - used_tokens - autocompact_buffer)
     used_percent = round(min(100.0, (used_tokens / total_tokens) * 100.0), 1)
     since_last = (
-        max(0, used_tokens - previous_used_tokens)
-        if previous_used_tokens is not None
-        else 0
+        max(0, used_tokens - previous_used_tokens) if previous_used_tokens is not None else 0
     )
 
     def _pct(val: int) -> float:
         return round((val / total_tokens) * 100.0, 1)
 
     categories = [
-        {"key": "mcp_tools", "label": "MCP tools", "tokens": mcp_tool_tokens, "percent": _pct(mcp_tool_tokens), "color": "#3b82f6"},
-        {"key": "messages", "label": "Messages", "tokens": message_tokens, "percent": _pct(message_tokens), "color": "#f97316"},
-        {"key": "skills", "label": "Skills", "tokens": skills_tokens, "percent": _pct(skills_tokens), "color": "#10b981"},
-        {"key": "system_tools", "label": "System tools", "tokens": system_tool_tokens, "percent": _pct(system_tool_tokens), "color": "#9ca3af"},
-        {"key": "system_prompt", "label": "System prompt", "tokens": system_prompt_tokens, "percent": _pct(system_prompt_tokens), "color": "#9ca3af"},
-        {"key": "mcp_instructions", "label": "MCP server instructions", "tokens": mcp_instructions_tokens, "percent": _pct(mcp_instructions_tokens), "color": "#9ca3af"},
-        {"key": "memory_files", "label": "Memory files", "tokens": memory_tokens, "percent": _pct(memory_tokens), "color": "#9ca3af"},
-        {"key": "since_last_update", "label": "Since last update", "tokens": since_last, "percent": _pct(since_last), "color": "#9ca3af"},
-        {"key": "autocompact_buffer", "label": "Autocompact buffer", "tokens": autocompact_buffer, "percent": _pct(autocompact_buffer), "color": "#6b7280"},
-        {"key": "free_space", "label": "Free space", "tokens": free_space, "percent": _pct(free_space), "color": "#374151"},
+        {
+            "key": "mcp_tools",
+            "label": "MCP tools",
+            "tokens": mcp_tool_tokens,
+            "percent": _pct(mcp_tool_tokens),
+            "color": "#3b82f6",
+        },
+        {
+            "key": "messages",
+            "label": "Messages",
+            "tokens": message_tokens,
+            "percent": _pct(message_tokens),
+            "color": "#f97316",
+        },
+        {
+            "key": "skills",
+            "label": "Skills",
+            "tokens": skills_tokens,
+            "percent": _pct(skills_tokens),
+            "color": "#10b981",
+        },
+        {
+            "key": "system_tools",
+            "label": "System tools",
+            "tokens": system_tool_tokens,
+            "percent": _pct(system_tool_tokens),
+            "color": "#9ca3af",
+        },
+        {
+            "key": "system_prompt",
+            "label": "System prompt",
+            "tokens": system_prompt_tokens,
+            "percent": _pct(system_prompt_tokens),
+            "color": "#9ca3af",
+        },
+        {
+            "key": "mcp_instructions",
+            "label": "MCP server instructions",
+            "tokens": mcp_instructions_tokens,
+            "percent": _pct(mcp_instructions_tokens),
+            "color": "#9ca3af",
+        },
+        {
+            "key": "memory_files",
+            "label": "Memory files",
+            "tokens": memory_tokens,
+            "percent": _pct(memory_tokens),
+            "color": "#9ca3af",
+        },
+        {
+            "key": "since_last_update",
+            "label": "Since last update",
+            "tokens": since_last,
+            "percent": _pct(since_last),
+            "color": "#9ca3af",
+        },
+        {
+            "key": "autocompact_buffer",
+            "label": "Autocompact buffer",
+            "tokens": autocompact_buffer,
+            "percent": _pct(autocompact_buffer),
+            "color": "#6b7280",
+        },
+        {
+            "key": "free_space",
+            "label": "Free space",
+            "tokens": free_space,
+            "percent": _pct(free_space),
+            "color": "#374151",
+        },
     ]
 
     return {

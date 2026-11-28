@@ -9,6 +9,7 @@ import pytest
 from max_core import pc_control
 from max_core.assistant_session import AssistantSession, SessionOptions
 from max_core.assistant_tools import assistant_registry
+from max_core.gateway import InferenceDestination
 from max_core.tools import ToolError
 
 
@@ -35,9 +36,30 @@ def test_session_options_read_pc_control() -> None:
     assert not SessionOptions.from_env({}).pc_control
 
 
-def _session(*, pc_control: bool, cloud: bool, host_tools: bool = True) -> AssistantSession:
+def _session(
+    *,
+    pc_control: bool,
+    cloud: bool,
+    host_tools: bool = True,
+    tv_env: dict[str, str] | None = None,
+    destination: InferenceDestination = InferenceDestination.VERIFIED_LOCAL,
+) -> AssistantSession:
     session = AssistantSession.__new__(AssistantSession)
-    session.options = SimpleNamespace(pc_control=pc_control, host_tools=host_tools)  # type: ignore[assignment]
+    session.options = SessionOptions(
+        data_dir=Path("."),
+        workspace=None,
+        cloud_personal_tools=False,
+        enable_shell=False,
+        enable_web=False,
+        host_tools=host_tools,
+        pc_control=pc_control,
+        tv_env=tv_env,
+    )
+    session.settings = SimpleNamespace(  # type: ignore[assignment]
+        spec=SimpleNamespace(
+            inference_destination=InferenceDestination.CLOUD if cloud else destination
+        )
+    )
     session.is_cloud = cloud
     return session
 
@@ -70,6 +92,32 @@ def test_prompt_kept_when_off_cloud_or_hosted(
 
     session = _session(pc_control=pc_control, cloud=cloud, host_tools=host_tools)
     assert session._with_pc_control(owner) is owner
+
+
+@pytest.mark.parametrize(
+    ("cloud", "host_tools", "destination", "allowed"),
+    [
+        (False, True, InferenceDestination.VERIFIED_LOCAL, True),
+        (False, True, InferenceDestination.UNKNOWN, False),
+        (True, True, InferenceDestination.CLOUD, False),
+        (False, False, InferenceDestination.VERIFIED_LOCAL, False),
+    ],
+)
+def test_tv_auto_approval_respects_session_boundary(
+    cloud: bool, host_tools: bool, destination: InferenceDestination, allowed: bool
+) -> None:
+    session = _session(
+        pc_control=False,
+        cloud=cloud,
+        host_tools=host_tools,
+        destination=destination,
+        tv_env={"MAX_TV_CONTROL": "auto"},
+    )
+    decide = session._with_pc_control(lambda _name, _args: False)
+    assert decide is not None
+    assert decide("tv.press", {"key": "home"}) is allowed
+    assert decide("tv.unreviewed", {}) is False
+    assert decide("shell.run", {"command": "dir"}) is False
 
 
 def test_pc_tools_only_offered_on_local_windows(tmp_path: Path) -> None:
