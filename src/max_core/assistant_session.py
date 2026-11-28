@@ -9,8 +9,10 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import datetime as _dt
+import json
 import logging
 import os
+import re
 import sqlite3
 import threading
 from collections.abc import Callable, Mapping, Sequence
@@ -209,10 +211,8 @@ class AssistantSession:
                     on_outcome=ledger.record if ledger is not None else None,
                 )
                 self.jobs.start()
-            if mcp_core is not None:
-                self._register_mcp_tools(mcp_core)
-            if github_connector is not None:
-                self._refresh_github_tools()
+            if mcp_core is not None or github_connector is not None:
+                self._refresh_all_mcp_tools()
         self.history: list[ChatMessage] = []
         self.archive = SessionArchive(options.data_dir) if options.archive_sessions else None
         self._make = request_factory(settings)
@@ -238,6 +238,23 @@ class AssistantSession:
             mcp_core=mcp_core,
         )
 
+    @staticmethod
+    def _normalize_mcp_name(raw_name: str) -> str:
+        def _seg(value: str, fallback: str) -> str:
+            cleaned = re.sub(r"[^a-z0-9_]", "_", value.lower()).strip("_")
+            if not cleaned or not cleaned[0].isalpha():
+                cleaned = f"{fallback}_{cleaned}" if cleaned else fallback
+            return cleaned[:31]
+
+        parts = [p for p in raw_name.split(".") if p]
+        if len(parts) >= 3 and parts[0].lower() == "mcp":
+            server_seg = _seg(parts[1], "server")
+            tool_seg = _seg("_".join(parts[2:]), "tool")
+            return f"mcp.{server_seg}.{tool_seg}"
+        if len(parts) == 2:
+            return f"mcp.{_seg(parts[0], 'server')}.{_seg(parts[1], 'tool')}"
+        return f"mcp.local.{_seg(raw_name, 'tool')}"
+
     def _register_mcp_tools(self, core: NativeDesktopCore) -> None:
         """Expose only reviewed MCP primitives in the default orb's tool loop.
 
@@ -251,49 +268,127 @@ class AssistantSession:
         executor = core._mcp_executor
         if not isinstance(executor, MCPToolExecutor):
             return
-        types = {
+        primitive_types: dict[str, type] = {
             "string": str,
             "integer": int,
             "number": float,
             "boolean": bool,
         }
         for definition in executor.tool_definitions():
-            name = definition.name
-            # Legacy orb registry permits three lower-case dotted segments.
+            raw_name = definition.name
+            reg_name = self._normalize_mcp_name(raw_name)
             schema = definition.parameters
-            if (
-                not isinstance(schema, dict)
-                or not isinstance(schema.get("properties"), dict)
-                or name.lower() != name
-                or len(name.split(".")) != 3
-            ):
+            if not isinstance(schema, dict):
                 continue
-            properties = schema["properties"]
+            properties = schema.get("properties")
+            if properties is None:
+                properties = {}
+            if not isinstance(properties, dict):
+                continue
             required = schema.get("required", [])
             if not isinstance(required, list):
                 continue
             parameters: list[ToolParam] = []
+            json_fields: dict[str, str] = {}
             compatible = True
             for key, descriptor in properties.items():
-                if not isinstance(descriptor, dict) or descriptor.get("type") not in types:
+                if not isinstance(descriptor, dict):
                     compatible = False
                     break
-                parameters.append(
-                    ToolParam(
-                        name=key,
-                        kind=types[descriptor["type"]],
-                        description=f"Reviewed MCP argument {key}",
-                        required=key in required,
-                        max_length=1024,
+                raw_type = descriptor.get("type", "string")
+                if raw_type in primitive_types:
+                    parameters.append(
+                        ToolParam(
+                            name=key,
+                            kind=primitive_types[raw_type],
+                            description=f"Reviewed MCP argument {key}",
+                            required=key in required,
+                            max_length=4096,
+                        )
                     )
-                )
+                elif raw_type in {"array", "object"}:
+                    json_fields[key] = raw_type
+                    parameters.append(
+                        ToolParam(
+                            name=key,
+                            kind=str,
+                            description=f"JSON-encoded {raw_type} MCP argument {key}",
+                            required=key in required,
+                            max_length=16_384,
+                        )
+                    )
+                else:
+                    parameters.append(
+                        ToolParam(
+                            name=key,
+                            kind=str,
+                            description=f"Reviewed MCP argument {key}",
+                            required=key in required,
+                            max_length=4096,
+                        )
+                    )
             if not compatible:
                 continue
+
+            validator: Callable[[object], dict[str, Any]] | None = None
+            if json_fields:
+                param_tuple = tuple(parameters)
+                fields_copy = dict(json_fields)
+
+                def _validate_complex(
+                    arguments: object,
+                    *,
+                    _params: tuple[ToolParam, ...] = param_tuple,
+                    _json_fields: dict[str, str] = fields_copy,
+                ) -> dict[str, Any]:
+                    if not isinstance(arguments, dict):
+                        raise ToolError("arguments_not_object")
+                    known = {p.name: p for p in _params}
+                    if any(k not in known for k in arguments):
+                        raise ToolError("unknown_argument")
+                    clean: dict[str, Any] = {}
+                    for param in _params:
+                        if param.name not in arguments:
+                            if param.required:
+                                raise ToolError("missing_argument")
+                            continue
+                        val = arguments[param.name]
+                        if param.name in _json_fields:
+                            expected = _json_fields[param.name]
+                            if isinstance(val, str):
+                                try:
+                                    val = json.loads(val)
+                                except json.JSONDecodeError:
+                                    raise ToolError("invalid_argument_type") from None
+                            if expected == "array" and not isinstance(val, list):
+                                raise ToolError("invalid_argument_type")
+                            if expected == "object" and not isinstance(val, dict):
+                                raise ToolError("invalid_argument_type")
+                            clean[param.name] = val
+                        elif param.kind is bool:
+                            if not isinstance(val, bool):
+                                raise ToolError("invalid_argument_type")
+                            clean[param.name] = val
+                        elif param.kind is int:
+                            if isinstance(val, bool) or not isinstance(val, int):
+                                raise ToolError("invalid_argument_type")
+                            clean[param.name] = val
+                        elif param.kind is float:
+                            if isinstance(val, bool) or not isinstance(val, (int, float)):
+                                raise ToolError("invalid_argument_type")
+                            clean[param.name] = float(val)
+                        else:
+                            if not isinstance(val, str) or len(val) > param.max_length:
+                                raise ToolError("invalid_argument_type")
+                            clean[param.name] = val
+                    return clean
+
+                validator = _validate_complex
 
             def handler(
                 arguments: Mapping[str, Any],
                 *,
-                selected_name: str = name,
+                selected_name: str = raw_name,
                 selected_core: NativeDesktopCore = core,
             ) -> str:
                 return self._execute_approved_mcp(selected_core, selected_name, dict(arguments))
@@ -301,12 +396,14 @@ class AssistantSession:
             try:
                 self.registry.register(
                     Tool(
-                        name=name,
+                        name=reg_name,
                         description=definition.description
                         + " (remote; each invocation requires owner approval)",
                         risk=ToolRisk.EFFECTFUL,
                         params=tuple(parameters),
                         handler=handler,
+                        argument_validator=validator,
+                        input_schema=schema,
                     )
                 )
             except ValueError:
@@ -340,24 +437,24 @@ class AssistantSession:
             return str(completed.output.get("result", ""))
         return str(completed.output)
 
-    def _refresh_mcp_tools(self) -> None:
-        if self._mcp_core is None:
+    def _refresh_all_mcp_tools(self) -> None:
+        if self._mcp_core is None and self._github_connector is None:
             return
-        # Rebuild only the MCP slice at the start of each turn. Enabling and
-        # disabling tools is reflected without restarting the orb process.
-        self.registry = ToolRegistry(
-            tuple(tool for tool in self.registry if not tool.name.startswith("mcp."))
-        )
-        self._register_mcp_tools(self._mcp_core)
+        # Rebuild only the MCP slice at the start of each turn (or after mcp.connect).
+        # Both desktop/stdio MCP tools and WebMCPHub tools coexist without clobbering.
+        self.registry.remove_prefix("mcp.")
+        if self._mcp_core is not None:
+            self._register_mcp_tools(self._mcp_core)
+        if self._github_connector is not None:
+            for tool in self._github_connector.tools_for_session():
+                if self.registry.get(tool.name) is None:
+                    self.registry.register(tool)
+
+    def _refresh_mcp_tools(self) -> None:
+        self._refresh_all_mcp_tools()
 
     def _refresh_github_tools(self) -> None:
-        if self._github_connector is None:
-            return
-        self.registry = ToolRegistry(
-            tuple(tool for tool in self.registry if not tool.name.startswith("mcp."))
-        )
-        for tool in self._github_connector.tools_for_session():
-            self.registry.register(tool)
+        self._refresh_all_mcp_tools()
 
     def available_tools(self) -> tuple[Tool, ...]:
         """Read-only live catalogue; do not mutate the registry of an active turn."""
@@ -418,17 +515,27 @@ class AssistantSession:
         kind = classify(text)
         approve = self._with_pc_control(approve)
         with self._lock:
-            self._refresh_mcp_tools()
-            self._refresh_github_tools()
+            self._refresh_all_mcp_tools()
             self.history.append(ChatMessage("user", text))
             messages = self._system() + self.history[-MAX_HISTORY:]
             base = self.settings.spec.model_id
             candidates = [self.routes.get(kind, base)]
             if candidates[0] != base:
                 candidates.append(base)  # e.g. unknown auto profile -> plain base model
+            user_on_step = on_step
+
+            def _mcp_aware_on_step(step: ToolStep) -> None:
+                if step.status == "executed" and step.tool_name in {
+                    "mcp.connect",
+                    "mcp.disconnect",
+                }:
+                    self._refresh_all_mcp_tools()
+                if user_on_step is not None:
+                    user_on_step(step)
+
             try:
                 for model in candidates:
-                    result = self._run(model, messages, approve, on_step)
+                    result = self._run(model, messages, approve, _mcp_aware_on_step)
                     result.model = model
                     if result.stopped_reason != "model_failed":
                         break

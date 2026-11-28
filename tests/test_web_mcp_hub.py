@@ -142,13 +142,14 @@ def test_server_side_oauth_callback_discovers_and_revokes(
     assert hub.finish(state, "code", "https://railway.com") == "railway"
     assert hub.status()["services"]["railway"]["connected"]
     tools = hub.tools_for_session()
-    assert len(tools) == 1
-    assert tools[0].name == "mcp.railway.search"
-    assert tools[0].risk == ToolRisk.EFFECTFUL
+    railway_tools = [t for t in tools if t.name.startswith("mcp.railway.")]
+    assert len(railway_tools) == 1
+    assert railway_tools[0].name == "mcp.railway.search"
+    assert railway_tools[0].risk == ToolRisk.EFFECTFUL
     hub.disconnect("railway")
-    assert hub.tools_for_session() == ()
+    assert [t for t in hub.tools_for_session() if t.name.startswith("mcp.railway.")] == []
     with pytest.raises(ToolError, match="mcp_connection_revoked"):
-        tools[0].handler({"query": "secret"})
+        railway_tools[0].handler({"query": "secret"})
 
 
 def test_web_api_client_metadata_and_voice_command(
