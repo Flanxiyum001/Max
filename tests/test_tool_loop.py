@@ -116,7 +116,7 @@ def test_unknown_malformed_and_bad_arguments() -> None:
     )
     result = run(ToolLoop(gw, builtin_registry()))
     codes = [s.error_code for s in result.steps]
-    assert codes == ["unknown_tool", "unknown_tool", "unknown_argument"]
+    assert codes == ["unknown_tool", "malformed_tool_call", "unknown_argument"]
 
 
 def test_step_limit_stops_loop() -> None:
@@ -180,11 +180,22 @@ def test_workspace_confinement(tmp_path: Path) -> None:
     (tmp_path / "secrets.txt").write_text("x")
     outside = tmp_path.parent / "outside.txt"
     outside.write_text("no")
-    (tmp_path / "link").symlink_to(outside)
+    has_symlink = False
+    try:
+        (tmp_path / "link").symlink_to(outside)
+        has_symlink = True
+    except OSError:
+        pass
     ws = Workspace(tmp_path)
     assert ws.read({"path": "a.txt"}) == "hello"
-    assert ws.list({}) == "a.txt\nlink"
-    for bad in ["../outside.txt", "link", ".env", "secrets.txt", str(outside)]:
+    if has_symlink:
+        assert ws.list({}) == "a.txt\nlink"
+    else:
+        assert ws.list({}) == "a.txt"
+    bad_paths = ["../outside.txt", ".env", "secrets.txt", str(outside)]
+    if has_symlink:
+        bad_paths.append("link")
+    for bad in bad_paths:
         with pytest.raises(ToolError):
             ws.read({"path": bad})
 
@@ -307,3 +318,107 @@ def test_float_tool_arguments_reject_overflow_and_nonfinite_values(value: object
     with pytest.raises(ToolError, match="argument_type"):
         tool.validate({"value": value})
     assert tool.validate({"value": 2}) == {"value": 2.0}
+
+
+def test_parse_tool_calls_markdown_code_blocks_and_escaped_json() -> None:
+    content = (
+        "<tool_call>\n"
+        "```json\n"
+        '{"name": "clock.now", "arguments": {}}\n'
+        "```\n"
+        "</tool_call>\n"
+        "<tool_call>"
+        '{\\"name\\": \\"math.calculate\\", \\"arguments\\": {\\"expression\\": \\"2+2\\"}}'
+        "</tool_call>"
+    )
+    resp = GatewayResponse("r", "p", "m", content, (), None, None, None)
+    calls = parse_tool_calls(resp)
+    assert calls == [
+        ("clock.now", {}),
+        ("math.calculate", {"expression": "2+2"}),
+    ]
+
+
+def test_parse_tool_calls_multi_tool_list() -> None:
+    content = (
+        "<tool_call>\n"
+        "[\n"
+        '  {"name": "clock.now", "arguments": {}},\n'
+        '  {"name": "math.calculate", "arguments": {"expression": "10*5"}}\n'
+        "]\n"
+        "</tool_call>"
+    )
+    resp = GatewayResponse("r", "p", "m", content, (), None, None, None)
+    calls = parse_tool_calls(resp)
+    assert calls == [
+        ("clock.now", {}),
+        ("math.calculate", {"expression": "10*5"}),
+    ]
+
+
+def test_parse_tool_calls_provider_proposal_string_arguments() -> None:
+    from max_core.gateway.contracts import ToolProposal
+
+    proposal = ToolProposal("call_1", "math.calculate", '{"expression": "40+2"}')  # type: ignore[arg-type]
+    resp = GatewayResponse("r", "p", "m", "", (proposal,), None, None, None)
+    calls = parse_tool_calls(resp)
+    assert calls == [("math.calculate", {"expression": "40+2"})]
+
+
+def test_argument_coercion_int_float_bool() -> None:
+    tool = Tool(
+        "test.coercion",
+        "Coercion test",
+        ToolRisk.READ_ONLY,
+        (
+            ToolParam("count", int, "Count"),
+            ToolParam("ratio", float, "Ratio"),
+            ToolParam("enabled", bool, "Enabled"),
+            ToolParam("label", str, "Label"),
+        ),
+        lambda _: "ok",
+    )
+    # String ints, string floats, string/int booleans
+    clean = tool.validate(
+        {
+            "count": "42",
+            "ratio": "3.14",
+            "enabled": "true",
+            "label": "demo",
+        }
+    )
+    assert clean == {
+        "count": 42,
+        "ratio": 3.14,
+        "enabled": True,
+        "label": "demo",
+    }
+
+    # Lenient boolean falses and float ints
+    clean2 = tool.validate(
+        {
+            "count": 10.0,
+            "ratio": 5,
+            "enabled": "0",
+            "label": "demo",
+        }
+    )
+    assert clean2 == {
+        "count": 10,
+        "ratio": 5.0,
+        "enabled": False,
+        "label": "demo",
+    }
+
+    # Arguments passed as JSON string
+    clean3 = tool.validate(
+        json.dumps(
+            {
+                "count": 1,
+                "ratio": 2.5,
+                "enabled": True,
+                "label": "json_str",
+            }
+        )
+    )
+    assert clean3["label"] == "json_str"
