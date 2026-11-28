@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from importlib import import_module
 from typing import Any
 
@@ -68,7 +69,7 @@ GITHUB_UI_TOOLS = ("ui_get",)
 GITHUB_TOOLS = frozenset(GITHUB_INTERACTIVE + GITHUB_READ_ONLY + GITHUB_WRITE + GITHUB_UI_TOOLS)
 # get_me is an identity lookup even though it was supplied in the interactive group.
 GITHUB_READS = frozenset((*GITHUB_READ_ONLY, *GITHUB_UI_TOOLS, "get_me"))
-MAX_GITHUB_ARGUMENT_BYTES = 8192
+MAX_GITHUB_ARGUMENT_BYTES = 32_768
 
 # Host-written operational guidance, independent of remote descriptions.
 GITHUB_TOOL_GUIDANCE = {
@@ -279,14 +280,50 @@ def reviewed_github_schema(encoded: str, digest: str) -> dict[str, Any]:
 def validate_github_arguments(encoded: str, digest: str, arguments: object) -> dict[str, Any]:
     """Validate the exact JSON value that will be displayed and dispatched."""
     schema = reviewed_github_schema(encoded, digest)
+    if isinstance(arguments, str):
+        try:
+            parsed = json.loads(arguments)
+            if isinstance(parsed, dict):
+                arguments = parsed
+        except Exception:
+            pass
     if not isinstance(arguments, dict):
         raise GitHubSchemaError("github_invalid_arguments")
     try:
-        _bounded(arguments)
-        canonical = json.dumps(arguments, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        props = schema.get("properties", {})
+        coerced: dict[str, Any] = dict(arguments)
+        for k, v in list(coerced.items()):
+            pdef = props.get(k)
+            if isinstance(pdef, dict):
+                ptype = pdef.get("type")
+                if ptype == "integer":
+                    if isinstance(v, str) and re.fullmatch(r"[-+]?\d+", v.strip()):
+                        try:
+                            coerced[k] = int(v.strip())
+                        except (ValueError, OverflowError):
+                            pass
+                    elif isinstance(v, float) and v.is_integer():
+                        coerced[k] = int(v)
+                elif ptype == "boolean":
+                    if isinstance(v, str):
+                        lowered = v.strip().lower()
+                        if lowered in ("true", "1", "yes", "t"):
+                            coerced[k] = True
+                        elif lowered in ("false", "0", "no", "f"):
+                            coerced[k] = False
+                    elif isinstance(v, int) and v in (0, 1):
+                        coerced[k] = bool(v)
+                elif ptype == "number":
+                    if isinstance(v, str):
+                        try:
+                            coerced[k] = float(v.strip())
+                        except ValueError:
+                            pass
+        _bounded(coerced)
+        canonical = json.dumps(coerced, sort_keys=True, separators=(",", ":"), allow_nan=False)
         # The web approval surface uses ensure_ascii=True and includes spaces.
         if (
-            len(json.dumps(arguments, sort_keys=True, ensure_ascii=True))
+            len(json.dumps(coerced, sort_keys=True, ensure_ascii=True))
             > MAX_GITHUB_ARGUMENT_BYTES
         ):
             raise ValueError

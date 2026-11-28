@@ -10,18 +10,23 @@ import hashlib
 import json
 import re
 
-_SAFE_CODE = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
+_SAFE_CODE = re.compile(r"[a-z][a-z0-9_.-]{0,63}\Z")
 _ADVICE = {
     "unknown_tool": "Check the advertised tool names and select an available tool.",
     "undeclared_tool": "Use only an advertised tool; requesting an undeclared tool will not work.",
+    "malformed_tool_call": "Tool call JSON syntax error. Ensure braces, quotes, and commas are valid JSON with 'name' and 'arguments' object.",
     "missing_argument": "Inspect the tool schema and provide each required argument.",
     "unknown_argument": "Remove arguments not present in the tool schema.",
     "argument_type": "Match each argument to the type in the tool schema.",
     "arguments_not_object": "Supply a JSON object for tool arguments.",
+    "argument_too_long": "Reduce argument length to fit parameter limits.",
     "owner_denied": "The owner refused this action. Do not attempt it again without a new request.",
     "tool_timeout": "The tool timed out. Check availability; avoid repeating the same request.",
     "network_error": "Check network or service availability before using a different approach.",
     "tool_failed": "The handler failed. Inspect safe local evidence or public documentation before changing approach.",
+    "github_invalid_arguments": "Inspect GitHub tool parameter schema and verify field types and required properties.",
+    "target_not_found": "The target block was not found. Re-read the file with code.read to verify line numbers and exact text.",
+    "plan_and_self_prompt_required": "Call plan.update and prompt.set before executing effectful tools.",
 }
 
 

@@ -26,7 +26,7 @@ from max_core.gateway.contracts import ChatMessage, GatewayRequest, GatewayRespo
 from max_core.tool_recovery import ToolFailureGuard, safe_error_code
 from max_core.tools import MAX_RESULT_CHARS, ToolError, ToolRegistry, ToolRisk
 
-_CALL = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.DOTALL)
+_CALL = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL)
 _MAX_MESSAGE = 30_000
 
 ApprovalCallback = Callable[[str, dict[str, Any]], bool]
@@ -67,23 +67,90 @@ def tool_system_prompt(registry: ToolRegistry) -> str:
     )
 
 
+def _clean_json_text(text: str) -> str:
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+        cleaned = cleaned.strip()
+    return cleaned
+
+
+def _extract_json_payload(raw: str) -> object:
+    text = _clean_json_text(raw)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    if r'\"' in text:
+        try:
+            return json.loads(text.replace(r'\"', '"'))
+        except json.JSONDecodeError:
+            pass
+    if text.startswith('"') and text.endswith('"'):
+        try:
+            inner = json.loads(text)
+            if isinstance(inner, str):
+                return json.loads(inner)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    raise json.JSONDecodeError("malformed", text, 0)
+
+
 def parse_tool_calls(response: GatewayResponse) -> list[tuple[str, object]]:
-    calls: list[tuple[str, object]] = [(p.name, p.arguments) for p in response.tool_proposals]
+    calls: list[tuple[str, object]] = []
+    for p in response.tool_proposals:
+        args = p.arguments
+        if isinstance(args, str):
+            try:
+                parsed_args = json.loads(args)
+                if isinstance(parsed_args, dict):
+                    args = parsed_args
+            except (json.JSONDecodeError, TypeError):
+                pass
+        calls.append((p.name, args))
     for raw in _CALL.findall(response.content):
         try:
-            data = json.loads(raw)
+            data = _extract_json_payload(raw)
         except json.JSONDecodeError:
             calls.append(("<malformed>", None))
             continue
-        if isinstance(data, dict) and isinstance(data.get("name"), str):
-            calls.append((data["name"], data.get("arguments", {})))
+        if isinstance(data, dict):
+            if isinstance(data.get("name"), str):
+                args = data.get("arguments", {})
+                if isinstance(args, str):
+                    try:
+                        parsed_args = json.loads(args)
+                        if isinstance(parsed_args, dict):
+                            args = parsed_args
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                calls.append((data["name"], args))
+            else:
+                calls.append(("<malformed>", None))
+        elif isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict) and isinstance(item.get("name"), str):
+                    args = item.get("arguments", {})
+                    if isinstance(args, str):
+                        try:
+                            parsed_args = json.loads(args)
+                            if isinstance(parsed_args, dict):
+                                args = parsed_args
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                    calls.append((item["name"], args))
+                else:
+                    calls.append(("<malformed>", None))
         else:
             calls.append(("<malformed>", None))
     return calls
 
 
 def _visible_text(content: str) -> str:
-    return _CALL.sub("", content).strip()
+    cleaned = _CALL.sub("", content)
+    cleaned = re.sub(r"```(?:xml|json)?\s*```", "", cleaned)
+    return cleaned.strip()
 
 
 def _build_system_messages(
@@ -153,6 +220,9 @@ class ToolLoop:
     async def _execute(
         self, name: str, arguments: object, result: LoopResult, deadline_at: float
     ) -> str:
+        if name == "<malformed>":
+            self._record(result, ToolStep("<malformed>", "failed", "malformed_tool_call"))
+            return json.dumps({"error": "malformed_tool_call"})
         tool = self._registry.get(name)
         if tool is None:
             self._record(result, ToolStep(name[:100], "failed", "unknown_tool"))

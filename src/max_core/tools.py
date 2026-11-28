@@ -22,7 +22,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-_NAME = re.compile(r"[a-z][a-z0-9_]{0,30}(\.[a-z][a-z0-9_]{0,30}){0,2}")
+_NAME = re.compile(r"[a-z][a-z0-9_]{0,63}(\.[a-z][a-z0-9_]{0,63}){0,3}")
 MAX_RESULT_CHARS = 8_000
 
 
@@ -75,7 +75,7 @@ class Tool:
 
     def __post_init__(self) -> None:
         if not _NAME.fullmatch(self.name) and not re.fullmatch(
-            r"mcp\.github\.[a-z][a-z0-9_]{0,63}", self.name
+            r"mcp\.[a-z0-9_.-]{1,100}", self.name
         ):
             raise ValueError("invalid_tool_name")
         if not isinstance(self.risk, ToolRisk):
@@ -84,10 +84,19 @@ class Tool:
             raise ValueError("duplicate_tool_param")
 
     def validate(self, arguments: object) -> dict[str, Any]:
-        """Strict argument check: no unknown keys, exact primitive types, bounded text."""
+        """Strict argument check with robust coercion: no unknown keys, bounded text."""
         if self.argument_validator is not None:
             return self.argument_validator(arguments)
-        if not isinstance(arguments, dict):
+        if isinstance(arguments, str):
+            try:
+                parsed = json.loads(arguments)
+                if isinstance(parsed, dict):
+                    arguments = parsed
+                else:
+                    raise ToolError("arguments_not_object")
+            except Exception:
+                raise ToolError("arguments_not_object") from None
+        elif not isinstance(arguments, dict):
             raise ToolError("arguments_not_object")
         known = {p.name: p for p in self.params}
         if any(key not in known for key in arguments):
@@ -99,17 +108,75 @@ class Tool:
                     raise ToolError("missing_argument")
                 continue
             value = arguments[param.name]
-            if param.kind is float and type(value) is int:
-                try:
-                    value = float(value)
-                except OverflowError:
-                    raise ToolError("argument_type") from None
-            if type(value) is not param.kind:
-                raise ToolError("argument_type")
-            if isinstance(value, float) and not math.isfinite(value):
-                raise ToolError("argument_type")
-            if isinstance(value, str) and len(value) > param.max_length:
-                raise ToolError("argument_too_long")
+            if param.kind is int:
+                if type(value) is bool:
+                    raise ToolError("argument_type")
+                elif type(value) is int:
+                    pass
+                elif isinstance(value, float):
+                    if math.isfinite(value) and value.is_integer():
+                        value = int(value)
+                    else:
+                        raise ToolError("argument_type")
+                elif isinstance(value, str):
+                    s = value.strip()
+                    if re.fullmatch(r"[-+]?\d+", s):
+                        try:
+                            value = int(s)
+                        except (ValueError, OverflowError):
+                            raise ToolError("argument_type") from None
+                    else:
+                        raise ToolError("argument_type")
+                else:
+                    raise ToolError("argument_type")
+            elif param.kind is float:
+                if type(value) is bool:
+                    raise ToolError("argument_type")
+                elif type(value) is int:
+                    try:
+                        value = float(value)
+                    except OverflowError:
+                        raise ToolError("argument_type") from None
+                elif isinstance(value, float):
+                    if not math.isfinite(value):
+                        raise ToolError("argument_type")
+                elif isinstance(value, str):
+                    s = value.strip()
+                    try:
+                        parsed = float(s)
+                        if not math.isfinite(parsed):
+                            raise ToolError("argument_type")
+                        value = parsed
+                    except ValueError:
+                        raise ToolError("argument_type") from None
+                else:
+                    raise ToolError("argument_type")
+            elif param.kind is bool:
+                if type(value) is bool:
+                    pass
+                elif type(value) is int:
+                    if value in (0, 1):
+                        value = bool(value)
+                    else:
+                        raise ToolError("argument_type")
+                elif isinstance(value, str):
+                    lowered = value.strip().lower()
+                    if lowered in ("true", "1", "yes", "t"):
+                        value = True
+                    elif lowered in ("false", "0", "no", "f"):
+                        value = False
+                    else:
+                        raise ToolError("argument_type")
+                else:
+                    raise ToolError("argument_type")
+            elif param.kind is str:
+                if type(value) is not str:
+                    raise ToolError("argument_type")
+                if len(value) > param.max_length:
+                    raise ToolError("argument_too_long")
+            else:
+                if type(value) is not param.kind:
+                    raise ToolError("argument_type")
             clean[param.name] = value
         return clean
 

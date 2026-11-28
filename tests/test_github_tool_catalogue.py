@@ -102,10 +102,31 @@ def test_structured_file_arguments_are_validated_before_approval() -> None:
         {"files": [{"path": "test.txt"}]},
         {"files": [{"path": 3, "content": "example"}]},
         {"files": [], "unexpected": True},
-        {"files": [{"path": "test.txt", "content": "x" * 9000}]},
+        {"files": [{"path": "test.txt", "content": "x" * 33_000}]},
     ):
         with pytest.raises(ToolError, match="github_invalid_arguments"):
             tool.validate(invalid)
+
+
+def test_github_arguments_coercion() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "pull_number": {"type": "integer"},
+            "draft": {"type": "boolean"},
+            "owner": {"type": "string"},
+        },
+        "required": ["pull_number"],
+    }
+    entry = _reviewable(observed("update_pull_request", schema))
+    assert entry is not None
+    connector = WebGitHubConnector({})
+    connector._tools = (entry,)
+    tool = connector.tools_for_session()[0]
+    # String pull_number and string boolean coerced
+    args = {"pull_number": "123", "draft": "true", "owner": "octocat"}
+    clean = tool.validate(args)
+    assert clean == {"pull_number": 123, "draft": True, "owner": "octocat"}
 
 
 def test_schema_references_and_digest_mismatch_fail_closed() -> None:
@@ -135,7 +156,8 @@ def test_operation_checks_require_nonempty_content_or_reaction() -> None:
     validate_github_operation("run_secret_scanning", {"files": ["example source"]})
     validate_github_operation("run_secret_scanning", {"files": "example source"})
     validate_github_operation("add_issue_comment", {"reaction": "+1"})
-    for invalid in ({"files": ""}, {"files": []}, {"files": [" "]}):
+    invalid_cases: tuple[dict[str, Any], ...] = ({"files": ""}, {"files": []}, {"files": [" "]})
+    for invalid in invalid_cases:
         with pytest.raises(GitHubSchemaError, match="github_scan_content_required"):
             validate_github_operation("run_secret_scanning", invalid)
     for name in ("add_issue_comment", "add_reply_to_pull_request_comment"):
