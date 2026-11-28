@@ -746,7 +746,8 @@ class WebMCPHub:
         for service, conn in snapshot:
             services[service] = {
                 "connected": True,
-                "endpoint": custom.get(service) or (CATALOG[service].endpoint if service in CATALOG else ""),
+                "endpoint": custom.get(service)
+                or (CATALOG[service].endpoint if service in CATALOG else ""),
                 "tools": [f"mcp.{service}.{entry.observation.name}" for entry in conn.tools],
             }
         return json.dumps({"services": services}, sort_keys=True)
@@ -790,7 +791,9 @@ class WebMCPHub:
                 ),
                 risk=ToolRisk.EFFECTFUL,
                 params=(
-                    ToolParam("alias", str, "Short lowercase server alias, e.g. 'linear'", max_length=30),
+                    ToolParam(
+                        "alias", str, "Short lowercase server alias, e.g. 'linear'", max_length=30
+                    ),
                     ToolParam("url", str, "HTTPS MCP endpoint URL", max_length=500),
                     ToolParam(
                         "bearer_token",
@@ -807,7 +810,9 @@ class WebMCPHub:
                 description="Disconnect a connected MCP server by alias (owner approval required).",
                 risk=ToolRisk.EFFECTFUL,
                 params=(
-                    ToolParam("alias", str, "Connected MCP server alias to disconnect", max_length=30),
+                    ToolParam(
+                        "alias", str, "Connected MCP server alias to disconnect", max_length=30
+                    ),
                 ),
                 handler=self._disconnect_tool,
             ),

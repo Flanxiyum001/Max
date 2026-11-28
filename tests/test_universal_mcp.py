@@ -178,9 +178,7 @@ def test_mcp_connect_and_dynamic_tool_call_in_same_turn(
     async def _fake_complete(self: Any, request: Any) -> GatewayResponse:
         nonlocal call_count
         call_count += 1
-        prompts_seen.append(
-            "\n".join(m.content for m in request.messages if m.role == "system")
-        )
+        prompts_seen.append("\n".join(m.content for m in request.messages if m.role == "system"))
         if call_count == 1:
             return GatewayResponse(
                 request_id=request.request_id,

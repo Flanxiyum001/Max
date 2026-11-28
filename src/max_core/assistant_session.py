@@ -525,7 +525,10 @@ class AssistantSession:
             user_on_step = on_step
 
             def _mcp_aware_on_step(step: ToolStep) -> None:
-                if step.status == "executed" and step.tool_name in {"mcp.connect", "mcp.disconnect"}:
+                if step.status == "executed" and step.tool_name in {
+                    "mcp.connect",
+                    "mcp.disconnect",
+                }:
                     self._refresh_all_mcp_tools()
                 if user_on_step is not None:
                     user_on_step(step)
