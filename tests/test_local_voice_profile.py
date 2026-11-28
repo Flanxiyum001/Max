@@ -49,3 +49,17 @@ def test_speech_only_reuses_existing_original(monkeypatch, tmp_path):
     for name in ("MAX_QWEN_MODEL_DIR", "MAX_QWEN_REFERENCE_WAV", "MAX_QWEN_REFERENCE_TEXT_FILE"):
         monkeypatch.delenv(name, raising=False)
     assert local.selected_voice_assets() == (checkpoint, reference, local.REFERENCE)
+
+
+def test_local_profile_uses_16k_context():
+    assert local_settings({CHAT})["MAX_TRIAL_CONTEXT_TOKENS"] == "16384"
+
+
+def test_ollama_context_hint_only_when_window_is_too_small():
+    from max_core.voice.local_runtime import ollama_context_hint
+
+    assert ollama_context_hint({}) is not None
+    assert ollama_context_hint({"OLLAMA_CONTEXT_LENGTH": "8192"}) is not None
+    assert ollama_context_hint({"OLLAMA_CONTEXT_LENGTH": "nope"}) is not None
+    assert ollama_context_hint({"OLLAMA_CONTEXT_LENGTH": "16384"}) is None
+    assert ollama_context_hint({"OLLAMA_CONTEXT_LENGTH": "32768"}) is None

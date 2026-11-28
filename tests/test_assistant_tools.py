@@ -35,14 +35,14 @@ LOCAL_ENV = {
     "MAX_TRIAL_ENDPOINT_LOCAL": "yes",
     "MAX_TRIAL_ENDPOINT": "http://127.0.0.1:11434/v1/chat/completions",
     "MAX_TRIAL_MODEL": "qwen2.5:7b",
-    "MAX_TRIAL_CONTEXT_TOKENS": "8192",
+    "MAX_TRIAL_CONTEXT_TOKENS": "16384",
 }
 CLOUD_ENV = {
     "MAX_TRIAL_DESTINATION": "cloud",
     "MAX_TRIAL_CLOUD_ALLOWED": "yes",
     "MAX_TRIAL_ENDPOINT": "https://api.example.test/v1/chat/completions",
     "MAX_TRIAL_MODEL": "free-model",
-    "MAX_TRIAL_CONTEXT_TOKENS": "8192",
+    "MAX_TRIAL_CONTEXT_TOKENS": "16384",
     "MAX_TRIAL_API_KEY": "test-key-not-real",
     "MAX_TRIAL_MAX_COST_USD": "0",
     "MAX_TRIAL_INPUT_USD_PER_MILLION": "0",
