@@ -140,6 +140,11 @@ class ToolRegistry:
             raise ValueError("duplicate_tool")
         self._tools[tool.name] = tool
 
+    def remove_prefix(self, prefix: str) -> None:
+        """Remove all tools whose name starts with ``prefix`` in-place."""
+        for key in [name for name in self._tools if name.startswith(prefix)]:
+            del self._tools[key]
+
     def get(self, name: str) -> Tool | None:
         return self._tools.get(name)
 

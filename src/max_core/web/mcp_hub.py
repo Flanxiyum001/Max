@@ -33,7 +33,7 @@ from max_core.mcp_discovery import MCPConnection, ObservedTool, discover_tools
 from max_core.mcp_execute import _extract_tool_output, _run_in_fresh_thread
 from max_core.mcp_policy import validated_arguments
 from max_core.mcp_transport import EndpointTransport
-from max_core.tools import Tool, ToolError, ToolRisk
+from max_core.tools import Tool, ToolError, ToolParam, ToolRisk
 from max_core.web.github_connect import (
     GitHubConnectionError,
     WebGitHubConnector,
@@ -187,6 +187,7 @@ class WebMCPHub:
         self._lock = threading.RLock()
         self._pending: dict[str, _Pending] = {}
         self._connections: dict[str, _Connection] = {}
+        self._custom_endpoints: dict[str, str] = {}
         self._generations: dict[str, int] = {}
         self._load_connections()
 
@@ -643,30 +644,184 @@ class WebMCPHub:
             except (ValueError, KeyError, TypeError, IndexError):
                 continue
 
+    def connect_custom(
+        self, alias: str, endpoint: str, *, bearer_token: str | None = None
+    ) -> dict[str, Any]:
+        """Connect any HTTPS MCP server by URL and discover its reviewed tools."""
+        clean_alias = alias.strip().lower()
+        if (
+            not re.fullmatch(r"[a-z][a-z0-9_]{0,29}", clean_alias)
+            or clean_alias == "github"
+            or clean_alias in CATALOG
+        ):
+            raise ToolError("invalid_mcp_alias")
+        clean_url = endpoint.strip()
+        if not clean_url.startswith("https://"):
+            raise ToolError("invalid_mcp_endpoint")
+        token = (bearer_token or "").strip()
+        try:
+            connection = MCPConnection(
+                connection_id=clean_alias,
+                endpoint=clean_url,
+                discovery_approved=True,
+                bearer_token=token or None,
+            )
+            outcome: list[tuple[bool, tuple[ObservedTool, ...] | BaseException]] = []
+
+            def _discover() -> None:
+                try:
+                    outcome.append((True, asyncio.run(discover_tools(connection))))
+                except BaseException as exc:  # noqa: BLE001 - re-raised on caller thread
+                    outcome.append((False, exc))
+
+            worker = threading.Thread(target=_discover, name="max-mcp-discover", daemon=True)
+            worker.start()
+            worker.join(timeout=35)
+            if not outcome:
+                raise ToolError("mcp_discovery_timeout")
+            ok, payload = outcome[0]
+            if not ok:
+                assert isinstance(payload, BaseException)
+                raise payload
+            assert not isinstance(payload, BaseException)
+            observed = payload
+        except ToolError:
+            raise
+        except Exception:
+            raise ToolError("mcp_discovery_failed") from None
+        tools = []
+        for entry in observed:
+            reviewed = _reviewable(entry, service=clean_alias)
+            if reviewed is not None:
+                tools.append(reviewed)
+        if not tools:
+            raise ToolError("no_supported_mcp_tools")
+        with self._lock:
+            generation = self._generations.get(clean_alias, 0) + 1
+            self._generations[clean_alias] = generation
+            self._custom_endpoints[clean_alias] = clean_url
+            self._connections[clean_alias] = _Connection(
+                token,
+                None,
+                None,
+                clean_url,
+                "",
+                "",
+                tuple(tools),
+                generation,
+            )
+        return {
+            "connected": clean_alias,
+            "endpoint": clean_url,
+            "tools": [t.observation.name for t in tools],
+        }
+
     def disconnect(self, service: str) -> None:
         if service == "github":
             self._github.disconnect()
             return
-        if service not in CATALOG:
-            raise MCPHubError("unknown_mcp_service")
         with self._lock:
+            is_custom = service in self._custom_endpoints or service in self._connections
+            if service not in CATALOG and not is_custom:
+                raise MCPHubError("unknown_mcp_service")
             self._connections.pop(service, None)
+            self._custom_endpoints.pop(service, None)
             self._generations[service] = self._generations.get(service, 0) + 1
             self._pending = {
                 key: value for key, value in self._pending.items() if value.service != service
             }
-            self._vault.delete(service)
+            if service in CATALOG:
+                self._vault.delete(service)
+
+    def _list_connected(self, _: Mapping[str, Any]) -> str:
+        with self._lock:
+            snapshot = tuple(self._connections.items())
+            custom = dict(self._custom_endpoints)
+        services: dict[str, Any] = {
+            "github": {
+                "connected": self._github.status().get("connected", False),
+                "tools": [t.name for t in self._github.tools_for_session()],
+            }
+        }
+        for service, conn in snapshot:
+            services[service] = {
+                "connected": True,
+                "endpoint": custom.get(service) or (CATALOG[service].endpoint if service in CATALOG else ""),
+                "tools": [f"mcp.{service}.{entry.observation.name}" for entry in conn.tools],
+            }
+        return json.dumps({"services": services}, sort_keys=True)
+
+    def _connect_tool(self, arguments: Mapping[str, Any]) -> str:
+        alias = str(arguments["alias"])
+        url = str(arguments["url"])
+        token = arguments.get("bearer_token")
+        result = self.connect_custom(
+            alias,
+            url,
+            bearer_token=str(token) if token is not None else None,
+        )
+        return json.dumps(result, sort_keys=True)
+
+    def _disconnect_tool(self, arguments: Mapping[str, Any]) -> str:
+        alias = str(arguments["alias"]).strip().lower()
+        try:
+            self.disconnect(alias)
+        except MCPHubError as exc:
+            raise ToolError(exc.code) from None
+        return json.dumps({"disconnected": alias}, sort_keys=True)
 
     def tools_for_session(self) -> tuple[Tool, ...]:
         # GitHub has a finite host-owned catalogue. Keep the existing separate
         # budget for other providers rather than letting them crowd out GitHub.
         github_tools = self._github.tools_for_session()
+        management_tools = (
+            Tool(
+                name="mcp.list",
+                description="List all connected MCP servers and their available remote tools.",
+                risk=ToolRisk.READ_ONLY,
+                params=(),
+                handler=self._list_connected,
+            ),
+            Tool(
+                name="mcp.connect",
+                description=(
+                    "Connect any remote HTTPS MCP server by URL and discover its tools "
+                    "(owner approval required)."
+                ),
+                risk=ToolRisk.EFFECTFUL,
+                params=(
+                    ToolParam("alias", str, "Short lowercase server alias, e.g. 'linear'", max_length=30),
+                    ToolParam("url", str, "HTTPS MCP endpoint URL", max_length=500),
+                    ToolParam(
+                        "bearer_token",
+                        str,
+                        "Optional bearer token if required by the MCP server",
+                        required=False,
+                        max_length=2000,
+                    ),
+                ),
+                handler=self._connect_tool,
+            ),
+            Tool(
+                name="mcp.disconnect",
+                description="Disconnect a connected MCP server by alias (owner approval required).",
+                risk=ToolRisk.EFFECTFUL,
+                params=(
+                    ToolParam("alias", str, "Connected MCP server alias to disconnect", max_length=30),
+                ),
+                handler=self._disconnect_tool,
+            ),
+        )
         all_tools: list[Tool] = []
         with self._lock:
             snapshot = tuple(self._connections.items())
         for service, connection in snapshot:
+            label = CATALOG[service].name if service in CATALOG else service
             for entry in connection.tools:
-                name = "mcp." + service + "." + entry.observation.name
+                raw_tool = re.sub(r"[^a-z0-9_]", "_", entry.observation.name.lower()).strip("_")
+                if not raw_tool or not raw_tool[0].isalpha():
+                    raw_tool = f"tool_{raw_tool}" if raw_tool else "tool"
+                name = "mcp." + service + "." + raw_tool[:31]
 
                 def handler(
                     arguments: Mapping[str, Any],
@@ -680,16 +835,18 @@ class WebMCPHub:
                 all_tools.append(
                     Tool(
                         name=name,
-                        description=f"{CATALOG[service].name} MCP {entry.observation.name} "
+                        description=f"{label} MCP {entry.observation.name} "
                         "(remote; owner approval required for EVERY operation)",
                         risk=ToolRisk.EFFECTFUL,
                         params=entry.params,
                         handler=handler,
                     )
                 )
-        return (*github_tools, *all_tools[:_MAX_TOOLS])
+        return (*management_tools, *github_tools, *all_tools[:_MAX_TOOLS])
 
     def _refresh(self, service: str, record: _Connection) -> _Connection:
+        if not record.token_endpoint or service not in CATALOG:
+            return record
         if record.expires_at is None or record.expires_at > time.time() + 60:
             return record
         if not record.refresh_token:
@@ -751,12 +908,16 @@ class WebMCPHub:
         args: dict[str, Any],
         generation: int,
     ) -> str:
-        endpoint = CATALOG[service].endpoint
+        with self._lock:
+            endpoint = self._custom_endpoints.get(service) or CATALOG[service].endpoint
+        headers = {"Accept-Encoding": "identity"}
+        if token:
+            headers["Authorization"] = "Bearer " + token
         try:
             with anyio.fail_after(30):
                 async with httpx.AsyncClient(
                     transport=EndpointTransport(endpoint, httpx.AsyncHTTPTransport(retries=0)),
-                    headers={"Authorization": "Bearer " + token, "Accept-Encoding": "identity"},
+                    headers=headers,
                     timeout=10,
                     trust_env=False,
                     follow_redirects=False,

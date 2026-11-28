@@ -86,6 +86,29 @@ def _visible_text(content: str) -> str:
     return _CALL.sub("", content).strip()
 
 
+def _build_system_messages(
+    base_system: list[ChatMessage], registry: ToolRegistry
+) -> list[ChatMessage]:
+    system = list(base_system)
+    prompt = tool_system_prompt(registry)
+    if prompt:
+        # Split large catalogues at tool boundaries, not by truncating schemas.
+        if len(prompt) <= 32_000:
+            system.append(ChatMessage("system", prompt))
+        else:
+            intro = prompt.split("Available tools:\n", 1)[0]
+            group = intro + "Available tools:\n"
+            for tool in registry:
+                description = json.dumps(tool.describe(), ensure_ascii=True) + "\n"
+                if len(group) + len(description) > 30_000:
+                    system.append(ChatMessage("system", group))
+                    group = "Available tools (continued):\n"
+                group += description
+            if group:
+                system.append(ChatMessage("system", group))
+    return system
+
+
 class ToolLoop:
     def __init__(
         self,
@@ -200,25 +223,9 @@ class ToolLoop:
         deadline_at: float,
     ) -> LoopResult:
         result = LoopResult(answer="")
-        prompt = tool_system_prompt(self._registry)
         base = list(history)
-        system = [m for m in base if m.role == "system"]
+        base_system = [m for m in base if m.role == "system"]
         turns = [m for m in base if m.role != "system"]
-        if prompt:
-            # Split large catalogues at tool boundaries, not by truncating schemas.
-            if len(prompt) <= 32_000:
-                system.append(ChatMessage("system", prompt))
-            else:
-                intro = prompt.split("Available tools:\n", 1)[0]
-                group = intro + "Available tools:\n"
-                for tool in self._registry:
-                    description = json.dumps(tool.describe(), ensure_ascii=True) + "\n"
-                    if len(group) + len(description) > 30_000:
-                        system.append(ChatMessage("system", group))
-                        group = "Available tools (continued):\n"
-                    group += description
-                if group:
-                    system.append(ChatMessage("system", group))
         scratch: list[ChatMessage] = []
         failures = ToolFailureGuard()
         for _ in range(self._max_steps):
@@ -226,6 +233,7 @@ class ToolLoop:
                 result.stopped_reason = "step_limit"
                 result.answer = "Turn time budget expired; review prior tool steps before retrying."
                 return result
+            system = _build_system_messages(base_system, self._registry)
             window = (turns + scratch)[-(46 - len(system)) :]
             while window and window[0].role != "user":
                 window = window[1:]
