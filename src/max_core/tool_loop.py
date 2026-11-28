@@ -82,9 +82,9 @@ def _extract_json_payload(raw: str) -> object:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
-    if r'\"' in text:
+    if r"\"" in text:
         try:
-            return json.loads(text.replace(r'\"', '"'))
+            return json.loads(text.replace(r"\"", '"'))
         except json.JSONDecodeError:
             pass
     if text.startswith('"') and text.endswith('"'):

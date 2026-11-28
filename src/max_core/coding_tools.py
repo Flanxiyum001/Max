@@ -175,7 +175,11 @@ class CodingWorkspace:
         if raw_target:
             for part in raw_target.split():
                 norm_part = part.replace("\\", "/")
-                if not _SAFE_ARG_RE.fullmatch(norm_part) or ".." in norm_part or norm_part.startswith("/"):
+                if (
+                    not _SAFE_ARG_RE.fullmatch(norm_part)
+                    or ".." in norm_part
+                    or norm_part.startswith("/")
+                ):
                     raise ToolError("invalid_runner_arg")
                 cmd.append(norm_part)
         if runner == "pytest" and "-q" not in cmd:

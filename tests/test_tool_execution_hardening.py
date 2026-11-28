@@ -47,7 +47,9 @@ class ScriptedGateway:
 
 def make_request(messages: tuple[ChatMessage, ...]) -> GatewayRequest:
     size = sum(len(m.content.encode()) + 32 for m in messages)
-    return GatewayRequest("req-hardening", messages, Privacy.CONFIDENTIAL, size, 256, local_only=True)
+    return GatewayRequest(
+        "req-hardening", messages, Privacy.CONFIDENTIAL, size, 256, local_only=True
+    )
 
 
 def call_tag(tool: str, **arguments: Any) -> str:
@@ -69,9 +71,7 @@ class TestToolCallingParsing:
         assert parse_tool_calls(resp) == []
 
     def test_single_tool_call_basic(self) -> None:
-        resp = GatewayResponse(
-            "r", "p", "m", call_tag("clock.now"), (), None, None, None
-        )
+        resp = GatewayResponse("r", "p", "m", call_tag("clock.now"), (), None, None, None)
         calls = parse_tool_calls(resp)
         assert calls == [("clock.now", {})]
 
@@ -148,8 +148,8 @@ class TestToolCallingParsing:
             "<tool_call>{not valid json at all}</tool_call>",
             "<tool_call></tool_call>",
             "<tool_call>   </tool_call>",
-            "<tool_call>{\"missing_name\": true}</tool_call>",
-            "<tool_call>{\"name\": 12345}</tool_call>",
+            '<tool_call>{"missing_name": true}</tool_call>',
+            '<tool_call>{"name": 12345}</tool_call>',
         ]
         for sample in malformed_samples:
             resp = GatewayResponse("r", "p", "m", sample, (), None, None, None)
@@ -159,9 +159,7 @@ class TestToolCallingParsing:
     def test_hybrid_provider_proposals_and_text_calls(self) -> None:
         proposal = ToolProposal("call-p1", "native.tool", {"arg": "val"})
         content = call_tag("clock.now")
-        resp = GatewayResponse(
-            "r", "p", "m", content, (proposal,), None, None, None
-        )
+        resp = GatewayResponse("r", "p", "m", content, (proposal,), None, None, None)
         calls = parse_tool_calls(resp)
         assert len(calls) == 2
         assert calls[0] == ("native.tool", {"arg": "val"})
@@ -370,7 +368,9 @@ class TestArgumentValidationAndCoercion:
     def test_workspace_note_writing_invariants(self, tmp_path: Path) -> None:
         ws = Workspace(tmp_path)
         # Valid write
-        assert "saved max-notes/my-note.md" in ws.write_note({"name": "my-note", "content": "hello"})
+        assert "saved max-notes/my-note.md" in ws.write_note(
+            {"name": "my-note", "content": "hello"}
+        )
         assert (tmp_path / "max-notes" / "my-note.md").read_text() == "hello"
 
         # Overwrite rejected
@@ -403,6 +403,7 @@ class TestToolExecutionFailureModes:
     def test_read_only_tool_timeout(self) -> None:
         def hanging_tool(_args: Any) -> str:
             import time
+
             time.sleep(1.0)
             return "delayed"
 

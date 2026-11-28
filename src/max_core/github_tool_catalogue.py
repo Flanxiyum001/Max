@@ -322,10 +322,7 @@ def validate_github_arguments(encoded: str, digest: str, arguments: object) -> d
         _bounded(coerced)
         canonical = json.dumps(coerced, sort_keys=True, separators=(",", ":"), allow_nan=False)
         # The web approval surface uses ensure_ascii=True and includes spaces.
-        if (
-            len(json.dumps(coerced, sort_keys=True, ensure_ascii=True))
-            > MAX_GITHUB_ARGUMENT_BYTES
-        ):
+        if len(json.dumps(coerced, sort_keys=True, ensure_ascii=True)) > MAX_GITHUB_ARGUMENT_BYTES:
             raise ValueError
         clean = json.loads(canonical)
         _validator(schema).validate(clean)
